@@ -1,0 +1,83 @@
+-- 创建枚举类型
+CREATE TYPE alarm_status AS ENUM ('pending', 'processed', 'ignored');
+CREATE TYPE analysis_target AS ENUM ('person', 'vehicle', 'fire', 'helmet');
+
+-- 设备信息表（包含连接凭证）
+CREATE TABLE device (
+    device_id VARCHAR(64) PRIMARY KEY,
+    device_name VARCHAR(255) NOT NULL,
+    device_type VARCHAR(50) CHECK (
+        device_type IN ('camera', 'edge_server', 'storage_node')
+    ),
+    ip_address INET NOT NULL,
+    port SMALLINT NOT NULL CHECK (port BETWEEN 1 AND 65535),  -- 新增端口号
+    username VARCHAR(64) NOT NULL,  -- 设备登录用户名
+    password VARCHAR(256) NOT NULL, -- 设备登录密码（建议加密存储）
+    status BOOLEAN DEFAULT TRUE,     -- 保留设备在线状态
+    last_heartbeat TIMESTAMP        -- 保留心跳时间字段
+);
+
+-- 视频元数据表（存储所有视频文件信息）
+CREATE TABLE video (
+    video_id VARCHAR(64) PRIMARY KEY,
+    device_id VARCHAR(64) REFERENCES device(device_id),
+    start_time TIMESTAMP NOT NULL,
+    end_time TIMESTAMP,
+    storage_path TEXT NOT NULL,
+    resolution VARCHAR(16) CHECK (resolution ~ '^\d+x\d+$'),
+    frame_rate SMALLINT,
+    analysis_status BOOLEAN DEFAULT FALSE
+);
+
+-- 分析结果表（存储AI识别结果）
+CREATE TABLE analysis_result (
+    result_id SERIAL PRIMARY KEY,
+    video_id VARCHAR(64) REFERENCES video(video_id),
+    target_type analysis_target NOT NULL,
+    confidence FLOAT NOT NULL CHECK (
+        confidence >= 0 AND confidence <= 1
+    ),
+    start_frame BIGINT,
+    end_frame BIGINT,
+    metadata JSONB -- 存储坐标信息如 {"x1":0.2, "y1":0.3, "x2":0.8, "y2":0.9}
+);
+
+-- 报警事件表（所有系统生成的报警记录）
+CREATE TABLE alarm (
+    alarm_id VARCHAR(64) PRIMARY KEY,
+    event_type VARCHAR(50) NOT NULL,
+    trigger_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    device_id VARCHAR(64) REFERENCES device(device_id),
+    video_id VARCHAR(64) REFERENCES video(video_id),
+    status alarm_status DEFAULT 'pending',
+    snapshot_path TEXT -- 图片存储路径替代原BLOB字段
+);
+
+-- 用户权限表（系统用户管理）
+CREATE TABLE users (
+    user_id VARCHAR(64) PRIMARY KEY,
+    username VARCHAR(64) UNIQUE NOT NULL,
+    password_hash CHAR(64) NOT NULL, -- SHA256加密存储
+    role VARCHAR(20) CHECK (
+        role IN ('admin', 'operator', 'auditor')
+    ),
+    allowed_devices TEXT[] -- 允许访问的设备ID数组
+);
+
+-- 系统操作日志表
+CREATE TABLE syslog (
+    log_id BIGSERIAL PRIMARY KEY,
+    user_id VARCHAR(64) REFERENCES users(user_id),
+    action_type VARCHAR(50) NOT NULL,
+    target_id VARCHAR(64), -- 关联设备/视频/报警ID
+    detail TEXT,
+    log_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 索引优化
+-- 添加设备连接信息索引
+CREATE INDEX idx_device_connection ON device (ip_address, port);
+CREATE INDEX idx_video_device ON video(device_id);
+CREATE INDEX idx_alarm_time ON alarm(trigger_time);
+CREATE INDEX idx_result_video ON analysis_result(video_id);
+CREATE INDEX idx_user_role ON users(role);
