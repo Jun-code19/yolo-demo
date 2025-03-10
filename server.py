@@ -18,12 +18,14 @@ from pathlib import Path
 from contextlib import nullcontext
 import struct
 from typing import Dict
+from api.routes import router as api_router
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
+app.include_router(api_router, prefix="/api/v1")
 
 # 配置CORS
 app.add_middleware(
@@ -576,4 +578,4 @@ async def root():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("server:app", host="0.0.0.0", port=8765, reload=True) 
+    uvicorn.run("server:app", host="0.0.0.0", port=8765, reload=True)

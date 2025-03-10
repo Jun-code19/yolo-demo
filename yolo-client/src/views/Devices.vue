@@ -151,6 +151,7 @@ import { ref, reactive, onMounted } from 'vue'
 import { Plus, VideoCamera } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import axios from 'axios'
+import deviceApi from '@/api/device'
 
 // API 基础URL
 const API_BASE_URL = 'http://localhost:8000/api/v1'
@@ -202,9 +203,7 @@ const loadData = async () => {
   loading.value = true
   try {
     const skip = (currentPage.value - 1) * pageSize.value
-    const response = await axios.get(`${API_BASE_URL}/devices/`, {
-      params: { skip, limit: pageSize.value }
-    })
+    const response = await deviceApi.getDevices({ skip, limit: pageSize.value })
     devices.value = response.data
     total.value = response.data.length // 实际应用中应从后端获取总数
   } catch (error) {
@@ -257,7 +256,7 @@ const handleEdit = (row) => {
     ip_address: row.ip_address,
     port: row.port,
     username: row.username,
-    password: '******' // 实际应用中不应显示原密码
+    password: '' // 不显示密码，如果不修改则留空
   })
 }
 
@@ -272,11 +271,11 @@ const handleSubmit = async () => {
     try {
       if (dialogType.value === 'add') {
         // 创建设备
-        await axios.post(`${API_BASE_URL}/devices/`, deviceForm)
+        await deviceApi.createDevice(deviceForm)
         ElMessage.success('设备添加成功')
       } else {
-        // 更新设备状态（目前API只支持更新状态）
-        await axios.put(`${API_BASE_URL}/devices/${deviceForm.device_id}/status?device_name=${deviceForm.device_name}&status=true`)
+        // 更新设备信息
+        await deviceApi.updateDevice(deviceForm.device_id, deviceForm)
         ElMessage.success('设备更新成功')
       }
       dialogVisible.value = false
@@ -302,7 +301,7 @@ const handleDelete = (row) => {
     }
   ).then(async () => {
     try {
-      await axios.delete(`${API_BASE_URL}/devices/${row.device_id}`)
+      await deviceApi.deleteDevice(row.device_id)
       ElMessage.success('删除成功')
       loadData()
     } catch (error) {

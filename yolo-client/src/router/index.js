@@ -2,14 +2,6 @@ import { createRouter, createWebHistory } from 'vue-router'
 
 const routes = [
   {
-    path: '/login',
-    name: 'Login',
-    component: () => import('../views/Login.vue'),
-    meta: {
-      requiresAuth: false
-    }
-  },
-  {
     path: '/',
     name: 'Home',
     component: () => import('../views/Home.vue'),
@@ -37,6 +29,14 @@ const routes = [
     path: '/devices',
     name: 'Devices',
     component: () => import('../views/Devices.vue'),
+    meta: {
+      requiresAuth: true
+    }
+  },
+  {
+    path: '/syslogs',
+    name: 'SystemLogs',
+    component: () => import('../views/SystemLogs.vue'),
     meta: {
       requiresAuth: true
     }
@@ -77,12 +77,11 @@ router.beforeEach((to, from, next) => {
   const isAuthenticated = localStorage.getItem('token')
   
   if (to.meta.requiresAuth && !isAuthenticated) {
-    // 需要认证但未登录，重定向到登录页
-    next({ path: '/login' })
-  } else if (to.path === '/login' && isAuthenticated) {
-    // 已登录但访问登录页，重定向到首页
-    next({ path: '/' })
+    // 需要认证但未登录，直接在当前页显示登录界面
+    console.log('需要认证但未登录，显示登录界面')
+    next({ path: '/', replace: true })
   } else {
+    // 正常导航
     next()
   }
 })
