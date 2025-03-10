@@ -18,14 +18,6 @@ const routes = [
     }
   },
   {
-    path: '/dashboard',
-    name: 'Dashboard',
-    component: () => import('../views/Dashboard.vue'),
-    meta: {
-      requiresAuth: true
-    }
-  },
-  {
     path: '/system',
     name: 'System',
     component: () => import('../views/System.vue'),
@@ -77,6 +69,14 @@ const routes = [
     path: '/profile',
     name: 'UserProfile',
     component: () => import('../views/UserProfile.vue'),
+    meta: {
+      requiresAuth: true
+    }
+  },
+  {
+    path: '/models',
+    name: 'Models',
+    component: () => import('../views/Models.vue'),
     meta: {
       requiresAuth: true
     }

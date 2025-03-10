@@ -1,5 +1,5 @@
 <script setup>
-import { ref, reactive, onMounted, computed } from 'vue'
+import { ref, reactive, onMounted, computed, onBeforeUnmount } from 'vue'
 import { HomeFilled, DataLine, VideoCamera, Fold, Expand, Picture, VideoPlay, Monitor, Setting, UserFilled } from '@element-plus/icons-vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
@@ -9,6 +9,7 @@ const router = useRouter()
 const route = useRoute()
 const username = ref('')
 const isCollapse = ref(false)
+let tokenCheckInterval = null
 
 // 是否显示登录页
 const showLogin = computed(() => {
@@ -22,7 +23,38 @@ onMounted(async () => {
     const user = JSON.parse(userInfo)
     username.value = user.username
   }
+  
+  // 开始定期检查token有效性
+  if (localStorage.getItem('token')) {
+    // 立即验证一次token
+    checkTokenValidity()
+    
+    // 设置定期检查，每5分钟检查一次
+    tokenCheckInterval = setInterval(checkTokenValidity, 5 * 60 * 1000)
+  }
 })
+
+onBeforeUnmount(() => {
+  // 组件卸载前清除定时器
+  if (tokenCheckInterval) {
+    clearInterval(tokenCheckInterval)
+  }
+})
+
+// 检查token有效性
+const checkTokenValidity = async () => {
+  try {
+    await deviceApi.validateToken()
+    console.log('Token is valid')
+  } catch (error) {
+    console.error('Token validation failed:', error)
+    if (error.response && error.response.status === 401) {
+      // token无效，自动退出
+      handleLogout()
+      ElMessage.error('登录已过期，请重新登录')
+    }
+  }
+}
 
 const handleLogout = () => {
   // 清除所有认证相关的存储
@@ -97,9 +129,9 @@ const handleDropdownCommand = (command) => {
           <template #title>设备管理</template>
         </el-menu-item>
         
-        <el-menu-item index="/dashboard">
+        <el-menu-item index="/models">
           <el-icon><DataLine /></el-icon>
-          <template #title>数据统计</template>
+          <template #title>模型管理</template>
         </el-menu-item>
 
         <el-menu-item index="/system">

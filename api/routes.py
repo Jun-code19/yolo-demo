@@ -1,13 +1,19 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
-from models.database import get_db, Device, Video, AnalysisResult, Alarm, User, SysLog
+from models.database import get_db, Device, Video, AnalysisResult, Alarm, User, SysLog, DetectionModel
 from pydantic import BaseModel, IPvAnyAddress
 from fastapi.security import OAuth2PasswordRequestForm
 from api.auth import authenticate_user, create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES, get_current_user, check_admin_permission, get_password_hash, verify_password
 from api.logger import log_action
 from passlib.context import CryptContext
+
+import os
+import shutil
+import uuid
+import json
+from pathlib import Path
 
 router = APIRouter()
 
@@ -358,12 +364,18 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
 
 @router.get("/me", response_model=dict)
 async def read_users_me(current_user: User = Depends(get_current_user)):
+    """获取当前登录用户信息"""
     return {
         "user_id": current_user.user_id,
         "username": current_user.username,
         "role": current_user.role,
         "allowed_devices": current_user.allowed_devices
     }
+
+@router.get("/token/validate")
+async def validate_token(current_user: User = Depends(get_current_user)):
+    """验证token是否有效"""
+    return {"status": "success", "message": "Token is valid"}
 
 @router.get("/system/init-check")
 def check_system_initialization(db: Session = Depends(get_db)):
@@ -435,4 +447,156 @@ def debug_user(username: str, db: Session = Depends(get_db)):
         "role": user.role,
         "password_hash": user.password_hash,
         "is_bcrypt": user.password_hash.startswith("$2") if user.password_hash else False
-    } 
+    }
+
+# 模型相关的Pydantic模型
+class ModelBase(BaseModel):
+    model_name: str
+    model_type: str
+    description: Optional[str] = None
+    parameters: Optional[Dict[str, Any]] = None
+
+class ModelResponse(ModelBase):
+    model_id: str
+    file_path: str
+    file_size: int
+    format: str
+    upload_time: datetime
+    last_used: Optional[datetime] = None
+    is_active: bool
+
+    class Config:
+        from_attributes = True
+
+# 模型管理API
+@router.get("/models/", response_model=List[ModelResponse])
+def get_models(skip: int = 0, limit: int = 100, db: Session = Depends(get_db),
+              current_user: User = Depends(get_current_user)):
+    """获取所有检测模型列表"""
+    models = db.query(DetectionModel).offset(skip).limit(limit).all()
+    return models
+
+@router.get("/models/{model_id}", response_model=ModelResponse)
+def get_model(model_id: str, db: Session = Depends(get_db),
+             current_user: User = Depends(get_current_user)):
+    """获取特定模型详情"""
+    model = db.query(DetectionModel).filter(DetectionModel.model_id == model_id).first()
+    if not model:
+        raise HTTPException(status_code=404, detail="Model not found")
+    return model
+
+@router.post("/models/", response_model=ModelResponse)
+async def upload_model(
+    model_file: UploadFile = File(...),
+    model_name: str = Form(...),
+    model_type: str = Form(...),
+    description: Optional[str] = Form(None),
+    parameters: Optional[str] = Form(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """上传新模型文件"""
+    # 检查权限（只有管理员可以上传模型）
+    check_admin_permission(current_user)
+    
+    # 检查文件格式
+    file_ext = os.path.splitext(model_file.filename)[1].lower()
+    if file_ext not in ['.pt', '.onnx', '.pth', '.weights']:
+        raise HTTPException(status_code=400, detail="Unsupported model format. Supported formats: .pt, .onnx, .pth, .weights")
+    
+    # 创建模型ID
+    model_id = str(uuid.uuid4())
+    
+    # 确保模型目录存在
+    models_dir = Path("models")
+    models_dir.mkdir(exist_ok=True)
+    
+    # 保存文件
+    file_path = models_dir / f"{model_id}{file_ext}"
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(model_file.file, buffer)
+    
+    # 获取文件大小
+    file_size = os.path.getsize(file_path)
+    
+    # 解析参数JSON
+    model_params = {}
+    if parameters:
+        try:
+            model_params = json.loads(parameters)
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=400, detail="Invalid parameters JSON")
+    
+    # 创建数据库记录
+    db_model = DetectionModel(
+        model_id=model_id,
+        model_name=model_name,
+        model_type=model_type,
+        file_path=str(file_path),
+        file_size=file_size,
+        format=file_ext[1:],  # 去掉点号
+        description=description,
+        parameters=model_params,
+        upload_time=datetime.utcnow(),
+        is_active=True
+    )
+    
+    db.add(db_model)
+    db.commit()
+    db.refresh(db_model)
+    
+    # 记录操作日志
+    log_action(db, current_user.user_id, "upload_model", model_id, f"Uploaded model {model_name}")
+    
+    return db_model
+
+@router.delete("/models/{model_id}")
+def delete_model(model_id: str, db: Session = Depends(get_db),
+                current_user: User = Depends(get_current_user)):
+    """删除模型"""
+    # 检查权限
+    check_admin_permission(current_user)
+    
+    # 查找模型
+    model = db.query(DetectionModel).filter(DetectionModel.model_id == model_id).first()
+    if not model:
+        raise HTTPException(status_code=404, detail="Model not found")
+    
+    # 删除文件
+    try:
+        os.remove(model.file_path)
+    except OSError as e:
+        # 如果文件不存在，继续删除数据库记录
+        print(f"Error deleting file: {e}")
+    
+    # 删除数据库记录
+    db.delete(model)
+    db.commit()
+    
+    # 记录操作日志
+    log_action(db, current_user.user_id, "delete_model", model_id, f"Deleted model {model.model_name}")
+    
+    return {"message": "Model deleted successfully"}
+
+@router.put("/models/{model_id}/toggle")
+def toggle_model_active(model_id: str, active: bool, db: Session = Depends(get_db),
+                       current_user: User = Depends(get_current_user)):
+    """切换模型激活状态"""
+    # 检查权限
+    check_admin_permission(current_user)
+    
+    # 查找模型
+    model = db.query(DetectionModel).filter(DetectionModel.model_id == model_id).first()
+    if not model:
+        raise HTTPException(status_code=404, detail="Model not found")
+    
+    # 更新状态
+    model.is_active = active
+    db.commit()
+    db.refresh(model)
+    
+    # 记录操作日志
+    action = "activate_model" if active else "deactivate_model"
+    log_action(db, current_user.user_id, action, model_id, f"{'Activated' if active else 'Deactivated'} model {model.model_name}")
+    
+    return {"message": f"Model {'activated' if active else 'deactivated'} successfully"} 

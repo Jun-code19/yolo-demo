@@ -84,6 +84,21 @@ class SysLog(Base):
     detail = Column(Text)
     log_time = Column(DateTime, default=datetime.utcnow)
 
+class DetectionModel(Base):
+    __tablename__ = "detection_model"
+    
+    model_id = Column(String(64), primary_key=True)
+    model_name = Column(String(255), nullable=False)
+    model_type = Column(String(50), nullable=False)  # 例如：object_detection, segmentation等
+    file_path = Column(Text, nullable=False)  # 模型文件路径
+    file_size = Column(Integer)  # 文件大小（字节）
+    format = Column(String(20), nullable=False)  # 例如：pt, onnx等
+    description = Column(Text)
+    parameters = Column(JSONB)  # 存储模型参数，如类别、层数等
+    upload_time = Column(DateTime, default=datetime.utcnow)
+    last_used = Column(DateTime)
+    is_active = Column(Boolean, default=True)
+
 # 数据库连接配置
 DATABASE_URL = "postgresql://postgres:admin123@localhost:5432/eyris_core_db"
 

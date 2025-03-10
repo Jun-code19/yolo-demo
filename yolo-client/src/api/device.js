@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { ElMessage } from 'element-plus';
 
 // 创建 axios 实例
 const apiClient = axios.create({
@@ -28,6 +29,28 @@ apiClient.interceptors.request.use(
   }
 );
 
+// 添加响应拦截器，处理token过期情况
+apiClient.interceptors.response.use(
+  response => {
+    return response;
+  },
+  error => {
+    // 处理401错误（未授权，token过期）
+    if (error.response && error.response.status === 401) {
+      // 清除token和用户信息
+      localStorage.removeItem('token');
+      localStorage.removeItem('userInfo');
+      
+      // 显示提示信息
+      ElMessage.error('登录已过期，请重新登录');
+      
+      // 重定向到登录页面
+      window.location.href = '/login';
+    }
+    return Promise.reject(error);
+  }
+);
+
 // 设备相关 API
 export default {
   // 认证相关
@@ -50,6 +73,11 @@ export default {
   
   getCurrentUser() {
     return apiClient.get('/me');
+  },
+  
+  // Token验证
+  validateToken() {
+    return apiClient.get('/token/validate');
   },
   
   // 用户管理相关
@@ -98,5 +126,30 @@ export default {
   // 系统日志
   getSyslogs(params) {
     return apiClient.get('/syslogs/', { params });
+  },
+  
+  // 模型管理相关API
+  getModels() {
+    return apiClient.get('/models/');
+  },
+  
+  getModel(modelId) {
+    return apiClient.get(`/models/${modelId}`);
+  },
+  
+  uploadModel(formData) {
+    return apiClient.post('/models/', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      }
+    });
+  },
+  
+  deleteModel(modelId) {
+    return apiClient.delete(`/models/${modelId}`);
+  },
+  
+  toggleModelActive(modelId, active) {
+    return apiClient.put(`/models/${modelId}/toggle?active=${active}`);
   }
 }; 
