@@ -10,15 +10,28 @@
     <!-- 设备列表 -->
     <el-card class="device-list">
       <el-table :data="devices" style="width: 100%" v-loading="loading">
-        <el-table-column prop="name" label="设备名称" min-width="150" />
-        <el-table-column prop="ip" label="IP地址" min-width="150" />
+        <el-table-column prop="device_id" label="设备ID" min-width="120" />
+        <el-table-column prop="device_name" label="设备名称" min-width="150" />
+        <el-table-column prop="device_type" label="设备类型" min-width="120">
+          <template #default="{ row }">
+            <el-tag :type="getDeviceTypeTag(row.device_type)">
+              {{ getDeviceTypeName(row.device_type) }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="ip_address" label="IP地址" min-width="150" />
         <el-table-column prop="port" label="端口" width="100" />
         <el-table-column prop="username" label="用户名" min-width="120" />
         <el-table-column prop="status" label="状态" width="100">
           <template #default="{ row }">
-            <el-tag :type="row.status === 'online' ? 'success' : 'danger'">
-              {{ row.status === 'online' ? '在线' : '离线' }}
+            <el-tag :type="row.status ? 'success' : 'danger'">
+              {{ row.status ? '在线' : '离线' }}
             </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="last_heartbeat" label="最后心跳" min-width="180">
+          <template #default="{ row }">
+            {{ formatDateTime(row.last_heartbeat) }}
           </template>
         </el-table-column>
         <el-table-column label="操作" width="200" fixed="right">
@@ -62,13 +75,23 @@
         ref="deviceFormRef"
         :model="deviceForm"
         :rules="deviceRules"
-        label-width="80px"
+        label-width="100px"
       >
-        <el-form-item label="设备名称" prop="name">
-          <el-input v-model="deviceForm.name" placeholder="请输入设备名称" />
+        <el-form-item label="设备ID" prop="device_id">
+          <el-input v-model="deviceForm.device_id" placeholder="请输入设备ID" :disabled="dialogType === 'edit'" />
         </el-form-item>
-        <el-form-item label="IP地址" prop="ip">
-          <el-input v-model="deviceForm.ip" placeholder="请输入IP地址" />
+        <el-form-item label="设备名称" prop="device_name">
+          <el-input v-model="deviceForm.device_name" placeholder="请输入设备名称" />
+        </el-form-item>
+        <el-form-item label="设备类型" prop="device_type">
+          <el-select v-model="deviceForm.device_type" placeholder="请选择设备类型" style="width: 100%">
+            <el-option label="摄像头" value="camera" />
+            <el-option label="边缘服务器" value="edge_server" />
+            <el-option label="存储节点" value="storage_node" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="IP地址" prop="ip_address">
+          <el-input v-model="deviceForm.ip_address" placeholder="请输入IP地址" />
         </el-form-item>
         <el-form-item label="端口" prop="port">
           <el-input-number
@@ -76,6 +99,7 @@
             :min="1"
             :max="65535"
             placeholder="请输入端口号"
+            style="width: 100%"
           />
         </el-form-item>
         <el-form-item label="用户名" prop="username">
@@ -126,6 +150,10 @@
 import { ref, reactive, onMounted } from 'vue'
 import { Plus, VideoCamera } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import axios from 'axios'
+
+// API 基础URL
+const API_BASE_URL = 'http://localhost:8000/api/v1'
 
 // 列表数据
 const loading = ref(false)
@@ -143,46 +171,45 @@ const submitting = ref(false)
 // 表单相关
 const deviceFormRef = ref(null)
 const deviceForm = reactive({
-  name: '',
-  ip: '',
+  device_id: '',
+  device_name: '',
+  device_type: 'camera',
+  ip_address: '',
   port: 554,
   username: '',
   password: ''
 })
 
 const deviceRules = {
-  name: [{ required: true, message: '请输入设备名称', trigger: 'blur' }],
-  ip: [
+  device_id: [{ required: true, message: '请输入设备ID', trigger: 'blur' }],
+  device_name: [{ required: true, message: '请输入设备名称', trigger: 'blur' }],
+  device_type: [{ required: true, message: '请选择设备类型', trigger: 'change' }],
+  ip_address: [
     { required: true, message: '请输入IP地址', trigger: 'blur' },
-    { pattern: /^(\d{1,3}\.){3}\d{1,3}$/, message: '请输入正确的IP地址', trigger: 'blur' }
+    {
+      pattern: /^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/,
+      message: '请输入正确的IP地址',
+      trigger: 'blur'
+    }
   ],
   port: [{ required: true, message: '请输入端口号', trigger: 'blur' }],
   username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
   password: [{ required: true, message: '请输入密码', trigger: 'blur' }]
 }
 
-// 模拟数据加载
+// 加载设备数据
 const loadData = async () => {
   loading.value = true
   try {
-    // 模拟API请求
-    await new Promise(resolve => setTimeout(resolve, 500))
-    
-    // 模拟数据
-    const mockData = Array(total.value).fill(0).map((_, index) => ({
-      id: index + 1,
-      name: `摄像头 ${index + 1}`,
-      ip: `192.168.1.${index + 1}`,
-      port: 554,
-      username: 'admin',
-      status: Math.random() > 0.3 ? 'online' : 'offline'
-    }))
-    
-    const start = (currentPage.value - 1) * pageSize.value
-    const end = start + pageSize.value
-    devices.value = mockData.slice(start, end)
+    const skip = (currentPage.value - 1) * pageSize.value
+    const response = await axios.get(`${API_BASE_URL}/devices/`, {
+      params: { skip, limit: pageSize.value }
+    })
+    devices.value = response.data
+    total.value = response.data.length // 实际应用中应从后端获取总数
   } catch (error) {
-    ElMessage.error('加载数据失败')
+    console.error('加载设备数据失败:', error)
+    ElMessage.error('加载设备数据失败，请检查网络连接或服务器状态')
   } finally {
     loading.value = false
   }
@@ -190,7 +217,6 @@ const loadData = async () => {
 
 // 初始化
 onMounted(() => {
-  total.value = 25 // 模拟总数据量
   loadData()
 })
 
@@ -210,8 +236,10 @@ const handleAdd = () => {
   dialogType.value = 'add'
   dialogVisible.value = true
   Object.assign(deviceForm, {
-    name: '',
-    ip: '',
+    device_id: '',
+    device_name: '',
+    device_type: 'camera',
+    ip_address: '',
     port: 554,
     username: '',
     password: ''
@@ -223,27 +251,64 @@ const handleEdit = (row) => {
   dialogType.value = 'edit'
   dialogVisible.value = true
   Object.assign(deviceForm, {
-    ...row,
+    device_id: row.device_id,
+    device_name: row.device_name,
+    device_type: row.device_type,
+    ip_address: row.ip_address,
+    port: row.port,
+    username: row.username,
     password: '******' // 实际应用中不应显示原密码
+  })
+}
+
+// 提交表单
+const handleSubmit = async () => {
+  if (!deviceFormRef.value) return
+  
+  await deviceFormRef.value.validate(async (valid) => {
+    if (!valid) return
+    
+    submitting.value = true
+    try {
+      if (dialogType.value === 'add') {
+        // 创建设备
+        await axios.post(`${API_BASE_URL}/devices/`, deviceForm)
+        ElMessage.success('设备添加成功')
+      } else {
+        // 更新设备状态（目前API只支持更新状态）
+        await axios.put(`${API_BASE_URL}/devices/${deviceForm.device_id}/status?device_name=${deviceForm.device_name}&status=true`)
+        ElMessage.success('设备更新成功')
+      }
+      dialogVisible.value = false
+      loadData()
+    } catch (error) {
+      console.error('操作失败:', error)
+      ElMessage.error(`操作失败: ${error.response?.data?.detail || error.message}`)
+    } finally {
+      submitting.value = false
+    }
   })
 }
 
 // 删除设备
 const handleDelete = (row) => {
   ElMessageBox.confirm(
-    `确认删除设备 "${row.name}" 吗？`,
+    `确认删除设备 "${row.device_name}" 吗？`,
     '删除确认',
     {
       confirmButtonText: '确认',
       cancelButtonText: '取消',
       type: 'warning'
     }
-  ).then(() => {
-    // 模拟删除操作
-    setTimeout(() => {
+  ).then(async () => {
+    try {
+      await axios.delete(`${API_BASE_URL}/devices/${row.device_id}`)
       ElMessage.success('删除成功')
       loadData()
-    }, 500)
+    } catch (error) {
+      console.error('删除失败:', error)
+      ElMessage.error(`删除失败: ${error.response?.data?.detail || error.message}`)
+    }
   }).catch(() => {})
 }
 
@@ -252,22 +317,31 @@ const handlePreview = (row) => {
   previewVisible.value = true
 }
 
-// 提交表单
-const handleSubmit = () => {
-  if (!deviceFormRef.value) return
+// 格式化日期时间
+const formatDateTime = (dateTime) => {
+  if (!dateTime) return '-'
+  const date = new Date(dateTime)
+  return date.toLocaleString('zh-CN')
+}
 
-  deviceFormRef.value.validate((valid) => {
-    if (valid) {
-      submitting.value = true
-      // 模拟提交
-      setTimeout(() => {
-        ElMessage.success(dialogType.value === 'add' ? '添加成功' : '更新成功')
-        dialogVisible.value = false
-        submitting.value = false
-        loadData()
-      }, 1000)
-    }
-  })
+// 获取设备类型名称
+const getDeviceTypeName = (type) => {
+  const typeMap = {
+    'camera': '摄像头',
+    'edge_server': '边缘服务器',
+    'storage_node': '存储节点'
+  }
+  return typeMap[type] || type
+}
+
+// 获取设备类型标签样式
+const getDeviceTypeTag = (type) => {
+  const typeTagMap = {
+    'camera': '',
+    'edge_server': 'success',
+    'storage_node': 'warning'
+  }
+  return typeTagMap[type] || 'info'
 }
 </script>
 
@@ -283,53 +357,29 @@ const handleSubmit = () => {
   margin-bottom: 20px;
 }
 
-.page-header h2 {
-  margin: 0;
-  font-size: 24px;
-  font-weight: 600;
-  color: #2c3e50;
-}
-
 .device-list {
   margin-bottom: 20px;
 }
 
 .pagination {
   margin-top: 20px;
-  /* display: flex;
-  justify-content: flex-end; */
+  text-align: right;
 }
 
 .preview-container {
-  width: 100%;
-  height: 400px;
-  background-color: #000;
-  border-radius: 4px;
-  overflow: hidden;
   display: flex;
-  align-items: center;
   justify-content: center;
+  align-items: center;
+  height: 400px;
+  background-color: #f5f7fa;
+  border-radius: 4px;
 }
 
 .video-placeholder {
-  text-align: center;
-  color: #606266;
-}
-
-.video-placeholder .el-icon {
-  margin-bottom: 16px;
-}
-
-:deep(.el-dialog__body) {
-  padding-top: 20px;
-}
-
-.dialog-footer {
   display: flex;
-  justify-content: flex-end;
-}
-
-:deep(.el-form-item__content) {
-  flex-wrap: nowrap;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  color: #909399;
 }
 </style> 
