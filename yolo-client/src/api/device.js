@@ -52,6 +52,15 @@ export default {
     return apiClient.get('/me');
   },
   
+  // 用户管理相关
+  updateUserProfile(userData) {
+    return apiClient.put('/users/profile', userData);
+  },
+  
+  updatePassword(passwordData) {
+    return apiClient.put('/users/password', passwordData);
+  },
+  
   // 系统初始化相关
   checkSystemInitialized() {
     return apiClient.get('/system/init-check');

@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from models.database import get_db, Device, Video, AnalysisResult, Alarm, User, SysLog
 from pydantic import BaseModel, IPvAnyAddress
 from fastapi.security import OAuth2PasswordRequestForm
-from api.auth import authenticate_user, create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES, get_current_user, check_admin_permission, get_password_hash
+from api.auth import authenticate_user, create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES, get_current_user, check_admin_permission, get_password_hash, verify_password
 from api.logger import log_action
 from passlib.context import CryptContext
 
@@ -206,22 +206,32 @@ def update_alarm_status(alarm_id: str, status: str, db: Session = Depends(get_db
     db.commit()
     return {"message": "Alarm status updated successfully"}
 
-# 用户管理API
+# 用户管理API相关数据模型
 class UserCreate(BaseModel):
     user_id: str
     username: str
     password: str
     role: str
-    allowed_devices: List[str]
+    allowed_devices: List[str] = []
 
-@router.post("/users/")
-def create_user(user: UserCreate, db: Session = Depends(get_db)):
+class UserUpdate(BaseModel):
+    username: str
+    allowed_devices: Optional[List[str]] = []
+
+class PasswordUpdate(BaseModel):
+    user_id: str
+    old_password: str
+    new_password: str
+
+# 用户管理API
+@router.post("/users/", response_model=dict)
+def create_user(user: UserCreate, db: Session = Depends(get_db), current_user: User = Depends(check_admin_permission)):
     # 哈希处理密码
     hashed_password = get_password_hash(user.password)
     db_user = User(
         user_id=user.user_id,
         username=user.username,
-        password_hash=hashed_password,  # 使用哈希后的密码
+        password_hash=hashed_password,
         role=user.role,
         allowed_devices=user.allowed_devices
     )
@@ -229,7 +239,65 @@ def create_user(user: UserCreate, db: Session = Depends(get_db)):
         db.add(db_user)
         db.commit()
         db.refresh(db_user)
-        return db_user
+        # 记录操作日志
+        log_action(db, current_user.user_id, "create_user", db_user.user_id, f"Created user {db_user.username}")
+        return {"message": "用户创建成功", "user_id": db_user.user_id}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.put("/users/profile", response_model=dict)
+def update_user_profile(user_data: UserUpdate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """更新当前用户的个人信息"""
+    try:
+        # 更新用户信息
+        current_user.username = user_data.username
+        current_user.allowed_devices = user_data.allowed_devices
+        
+        db.commit()
+        db.refresh(current_user)
+        
+        # 记录操作日志
+        log_action(db, current_user.user_id, "update_profile", current_user.user_id, f"Updated user profile for {current_user.username}")
+        
+        return {
+            "message": "用户信息更新成功",
+            "user_id": current_user.user_id,
+            "username": current_user.username,
+            "role": current_user.role,
+            "allowed_devices": current_user.allowed_devices
+        }
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.put("/users/password", response_model=dict)
+def update_user_password(password_data: PasswordUpdate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """更新用户密码"""
+    # 验证是当前用户或管理员在操作
+    if current_user.user_id != password_data.user_id and current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="无权修改其他用户的密码")
+    
+    # 获取需要修改密码的用户
+    target_user = current_user
+    if current_user.user_id != password_data.user_id:
+        target_user = db.query(User).filter(User.user_id == password_data.user_id).first()
+        if not target_user:
+            raise HTTPException(status_code=404, detail="用户不存在")
+    
+    # 验证旧密码（管理员重置密码可跳过此步骤）
+    if current_user.role != "admin" and not verify_password(password_data.old_password, target_user.password_hash):
+        raise HTTPException(status_code=400, detail="当前密码不正确")
+    
+    # 更新密码
+    try:
+        target_user.password_hash = get_password_hash(password_data.new_password)
+        db.commit()
+        
+        # 记录操作日志
+        log_action(db, current_user.user_id, "update_password", target_user.user_id, f"Updated password for user {target_user.username}")
+        
+        return {"message": "密码更新成功"}
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=400, detail=str(e))

@@ -72,6 +72,14 @@ const routes = [
     meta: {
       requiresAuth: true
     }
+  },
+  {
+    path: '/profile',
+    name: 'UserProfile',
+    component: () => import('../views/UserProfile.vue'),
+    meta: {
+      requiresAuth: true
+    }
   }
 ]
 

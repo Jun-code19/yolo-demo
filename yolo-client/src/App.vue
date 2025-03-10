@@ -34,6 +34,15 @@ const handleLogout = () => {
   console.log("正在退出登录...");
   window.location.href = '/'
 }
+
+// 处理下拉菜单命令
+const handleDropdownCommand = (command) => {
+  if (command === 'logout') {
+    handleLogout()
+  } else if (command === 'profile') {
+    router.push('/profile')
+  }
+}
 </script>
 
 <template>
@@ -118,13 +127,14 @@ const handleLogout = () => {
               </el-icon>
             </el-button>
           </div>
-          <el-dropdown @command="handleLogout">
+          <el-dropdown @command="handleDropdownCommand">
             <div class="user-info">
               <span class="username">{{ username }}</span>
               <el-avatar :size="32" :icon="UserFilled" />
             </div>
             <template #dropdown>
               <el-dropdown-menu>
+                <el-dropdown-item command="profile">个人中心</el-dropdown-item>
                 <el-dropdown-item command="logout">退出登录</el-dropdown-item>
               </el-dropdown-menu>
             </template>
