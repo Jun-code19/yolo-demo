@@ -451,13 +451,13 @@ def debug_user(username: str, db: Session = Depends(get_db)):
 
 # 模型相关的Pydantic模型
 class ModelBase(BaseModel):
-    model_name: str
-    model_type: str
+    models_name: str
+    models_type: str
     description: Optional[str] = None
     parameters: Optional[Dict[str, Any]] = None
 
 class ModelResponse(ModelBase):
-    model_id: str
+    models_id: str
     file_path: str
     file_size: int
     format: str
@@ -476,20 +476,20 @@ def get_models(skip: int = 0, limit: int = 100, db: Session = Depends(get_db),
     models = db.query(DetectionModel).offset(skip).limit(limit).all()
     return models
 
-@router.get("/models/{model_id}", response_model=ModelResponse)
-def get_model(model_id: str, db: Session = Depends(get_db),
+@router.get("/models/{models_id}", response_model=ModelResponse)
+def get_model(models_id: str, db: Session = Depends(get_db),
              current_user: User = Depends(get_current_user)):
     """获取特定模型详情"""
-    model = db.query(DetectionModel).filter(DetectionModel.model_id == model_id).first()
+    model = db.query(DetectionModel).filter(DetectionModel.models_id == models_id).first()
     if not model:
         raise HTTPException(status_code=404, detail="Model not found")
     return model
 
 @router.post("/models/", response_model=ModelResponse)
 async def upload_model(
-    model_file: UploadFile = File(...),
-    model_name: str = Form(...),
-    model_type: str = Form(...),
+    models_file: UploadFile = File(...),
+    models_name: str = Form(...),
+    models_type: str = Form(...),
     description: Optional[str] = Form(None),
     parameters: Optional[str] = Form(None),
     db: Session = Depends(get_db),
@@ -500,43 +500,43 @@ async def upload_model(
     check_admin_permission(current_user)
     
     # 检查文件格式
-    file_ext = os.path.splitext(model_file.filename)[1].lower()
+    file_ext = os.path.splitext(models_file.filename)[1].lower()
     if file_ext not in ['.pt', '.onnx', '.pth', '.weights']:
         raise HTTPException(status_code=400, detail="Unsupported model format. Supported formats: .pt, .onnx, .pth, .weights")
     
     # 创建模型ID
-    model_id = str(uuid.uuid4())
+    models_id = str(uuid.uuid4())
     
     # 确保模型目录存在
     models_dir = Path("models")
     models_dir.mkdir(exist_ok=True)
     
     # 保存文件
-    file_path = models_dir / f"{model_id}{file_ext}"
+    file_path = models_dir / f"{models_id}{file_ext}"
     with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(model_file.file, buffer)
+        shutil.copyfileobj(models_file.file, buffer)
     
     # 获取文件大小
     file_size = os.path.getsize(file_path)
     
     # 解析参数JSON
-    model_params = {}
+    models_params = {}
     if parameters:
         try:
-            model_params = json.loads(parameters)
+            models_params = json.loads(parameters)
         except json.JSONDecodeError:
             raise HTTPException(status_code=400, detail="Invalid parameters JSON")
     
     # 创建数据库记录
     db_model = DetectionModel(
-        model_id=model_id,
-        model_name=model_name,
-        model_type=model_type,
+        models_id=models_id,
+        models_name=models_name,
+        models_type=models_type,
         file_path=str(file_path),
         file_size=file_size,
         format=file_ext[1:],  # 去掉点号
         description=description,
-        parameters=model_params,
+        parameters=models_params,
         upload_time=datetime.utcnow(),
         is_active=True
     )
@@ -546,19 +546,19 @@ async def upload_model(
     db.refresh(db_model)
     
     # 记录操作日志
-    log_action(db, current_user.user_id, "upload_model", model_id, f"Uploaded model {model_name}")
+    log_action(db, current_user.user_id, "upload_model", models_id, f"Uploaded model {models_name}")
     
     return db_model
 
-@router.delete("/models/{model_id}")
-def delete_model(model_id: str, db: Session = Depends(get_db),
+@router.delete("/models/{models_id}")
+def delete_model(models_id: str, db: Session = Depends(get_db),
                 current_user: User = Depends(get_current_user)):
     """删除模型"""
     # 检查权限
     check_admin_permission(current_user)
     
     # 查找模型
-    model = db.query(DetectionModel).filter(DetectionModel.model_id == model_id).first()
+    model = db.query(DetectionModel).filter(DetectionModel.models_id == models_id).first()
     if not model:
         raise HTTPException(status_code=404, detail="Model not found")
     
@@ -574,19 +574,19 @@ def delete_model(model_id: str, db: Session = Depends(get_db),
     db.commit()
     
     # 记录操作日志
-    log_action(db, current_user.user_id, "delete_model", model_id, f"Deleted model {model.model_name}")
+    log_action(db, current_user.user_id, "delete_model", models_id, f"Deleted model {model.models_name}")
     
     return {"message": "Model deleted successfully"}
 
-@router.put("/models/{model_id}/toggle")
-def toggle_model_active(model_id: str, active: bool, db: Session = Depends(get_db),
+@router.put("/models/{models_id}/toggle")
+def toggle_models_active(models_id: str, active: bool, db: Session = Depends(get_db),
                        current_user: User = Depends(get_current_user)):
     """切换模型激活状态"""
     # 检查权限
     check_admin_permission(current_user)
     
     # 查找模型
-    model = db.query(DetectionModel).filter(DetectionModel.model_id == model_id).first()
+    model = db.query(DetectionModel).filter(DetectionModel.models_id == models_id).first()
     if not model:
         raise HTTPException(status_code=404, detail="Model not found")
     
@@ -597,6 +597,6 @@ def toggle_model_active(model_id: str, active: bool, db: Session = Depends(get_d
     
     # 记录操作日志
     action = "activate_model" if active else "deactivate_model"
-    log_action(db, current_user.user_id, action, model_id, f"{'Activated' if active else 'Deactivated'} model {model.model_name}")
+    log_action(db, current_user.user_id, action, models_id, f"{'Activated' if active else 'Deactivated'} model {model.models_name}")
     
     return {"message": f"Model {'activated' if active else 'deactivated'} successfully"} 

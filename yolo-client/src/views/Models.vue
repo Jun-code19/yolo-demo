@@ -14,7 +14,7 @@
           <!-- 按模型类型分组展示 -->
           <el-tab-pane v-for="(models, type) in groupedModels" :key="type" :label="getModelTypeName(type)">
             <el-table :data="models" border style="width: 100%">
-              <el-table-column prop="model_name" label="模型名称" width="180" />
+              <el-table-column prop="models_name" label="模型名称" width="180" />
               <el-table-column prop="format" label="格式" width="100">
                 <template #default="scope">
                   <el-tag>{{ scope.row.format.toUpperCase() }}</el-tag>
@@ -140,9 +140,9 @@
     <el-dialog v-model="detailsDialogVisible" title="模型详情" width="700px">
       <div v-if="selectedModel" class="model-details">
         <el-descriptions :column="2" border>
-          <el-descriptions-item label="模型ID">{{ selectedModel.model_id }}</el-descriptions-item>
-          <el-descriptions-item label="模型名称">{{ selectedModel.model_name }}</el-descriptions-item>
-          <el-descriptions-item label="模型类型">{{ getModelTypeName(selectedModel.model_type) }}</el-descriptions-item>
+          <el-descriptions-item label="模型ID">{{ selectedModel.models_id }}</el-descriptions-item>
+          <el-descriptions-item label="模型名称">{{ selectedModel.models_name }}</el-descriptions-item>
+          <el-descriptions-item label="模型类型">{{ getModelTypeName(selectedModel.models_type) }}</el-descriptions-item>
           <el-descriptions-item label="文件格式">{{ selectedModel.format.toUpperCase() }}</el-descriptions-item>
           <el-descriptions-item label="文件大小">{{ formatFileSize(selectedModel.file_size) }}</el-descriptions-item>
           <el-descriptions-item label="状态">
@@ -220,10 +220,10 @@ const uploadRules = {
 const groupedModels = computed(() => {
   const groups = {}
   models.value.forEach(model => {
-    if (!groups[model.model_type]) {
-      groups[model.model_type] = []
+    if (!groups[model.models_type]) {
+      groups[model.models_type] = []
     }
-    groups[model.model_type].push(model)
+    groups[model.models_type].push(model)
   })
   return groups
 })
@@ -301,9 +301,9 @@ const uploadModel = async () => {
     try {
       // 创建FormData
       const formData = new FormData()
-      formData.append('model_file', uploadForm.value.modelFile)
-      formData.append('model_name', uploadForm.value.modelName)
-      formData.append('model_type', uploadForm.value.modelType)
+      formData.append('models_file', uploadForm.value.modelFile)
+      formData.append('models_name', uploadForm.value.modelName)
+      formData.append('models_type', uploadForm.value.modelType)
       
       if (uploadForm.value.description) {
         formData.append('description', uploadForm.value.description)
@@ -345,7 +345,7 @@ const viewModelDetails = (model) => {
 const toggleModelActive = async (model) => {
   try {
     const newStatus = !model.is_active
-    await deviceApi.toggleModelActive(model.model_id, newStatus)
+    await deviceApi.toggleModelActive(model.models_id, newStatus)
     model.is_active = newStatus
     ElMessage.success(`模型已${newStatus ? '激活' : '停用'}`)
   } catch (error) {
@@ -357,7 +357,7 @@ const toggleModelActive = async (model) => {
 // 确认删除模型
 const confirmDelete = (model) => {
   ElMessageBox.confirm(
-    `确定要删除模型"${model.model_name}"吗？此操作将永久删除该模型文件，且无法恢复。`,
+    `确定要删除模型"${model.models_name}"吗？此操作将永久删除该模型文件，且无法恢复。`,
     '删除确认',
     {
       confirmButtonText: '确定',
@@ -366,7 +366,7 @@ const confirmDelete = (model) => {
     }
   ).then(async () => {
     try {
-      await deviceApi.deleteModel(model.model_id)
+      await deviceApi.deleteModel(model.models_id)
       ElMessage.success('模型删除成功')
       loadModels() // 重新加载模型列表
     } catch (error) {

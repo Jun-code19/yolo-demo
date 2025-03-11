@@ -8,6 +8,7 @@
           placeholder="选择检测模型"
           class="model-select"
           :disabled="isDetecting"
+          :loading="loadingModels"
         >
           <el-option-group
             v-for="group in models"
@@ -23,9 +24,16 @@
               <div class="model-option">
                 <span class="model-name">{{ model.label }}</span>
                 <span class="model-desc">{{ model.description }}</span>
+                <span class="model-format">格式：{{ model.format }}</span>
               </div>
             </el-option>
           </el-option-group>
+          <template #empty>
+            <div class="empty-model-list">
+              <p v-if="loadingModels">加载模型中...</p>
+              <p v-else>暂无可用模型，请先上传并激活模型</p>
+            </div>
+          </template>
         </el-select>
         <el-upload
           class="upload-video"
@@ -90,47 +98,80 @@
             </div>
           </template>
           
-          <div class="video-info" v-if="videoFile">
-            <div class="info-item">
-              <label>文件名：</label>
-              <span>{{ videoFile.name }}</span>
+          <div class="detection-content">
+            <div class="video-info" v-if="videoFile">
+              <div class="info-item">
+                <label>文件名：</label>
+                <span class="info-value">{{ videoFile.name }}</span>
+              </div>
+              <div class="info-item">
+                <label>时长：</label>
+                <span>{{ duration }}</span>
+              </div>
+              <div class="info-item">
+                <label>大小：</label>
+                <span>{{ fileSize }}</span>
+              </div>
             </div>
-            <div class="info-item">
-              <label>时长：</label>
-              <span>{{ duration }}</span>
-            </div>
-            <div class="info-item">
-              <label>大小：</label>
-              <span>{{ fileSize }}</span>
-            </div>
-          </div>
 
-          <div class="detection-stats">
-            <div class="stat-item">
-              <label>检测状态：</label>
-              <el-tag :type="isDetecting ? 'success' : 'info'">
-                {{ isDetecting ? '检测中' : '未开始' }}
-              </el-tag>
+            <div class="detection-stats">
+              <div class="stat-item">
+                <label>检测状态：</label>
+                <el-tag :type="isDetecting ? 'success' : 'info'">
+                  {{ isDetecting ? '检测中' : '未开始' }}
+                </el-tag>
+              </div>
+              <div class="stat-item">
+                <label>目标数量：</label>
+                <span>{{ detectedCount }}</span>
+              </div>
+              <div v-if="modelDetails" class="stat-item">
+                <label>当前模型：</label>
+                <el-tooltip :content="modelDetails.description || '无描述'" placement="top">
+                  <el-tag type="primary">{{ modelDetails.models_name }}</el-tag>
+                </el-tooltip>
+              </div>
+              <div v-if="modelDetails" class="stat-item">
+                <label>模型类型：</label>
+                <span>{{ getModelTypeName(modelDetails.models_type) }}</span>
+              </div>
+              <div v-if="modelDetails" class="stat-item">
+                <label>模型格式：</label>
+                <span>{{ modelDetails.format.toUpperCase() }}</span>
+              </div>
             </div>
-            <div class="stat-item">
-              <label>目标数量：</label>
-              <span>{{ detectedCount }}</span>
+            
+            <div v-if="modelDetails && modelDetails.parameters" class="model-parameters">
+              <h4>模型参数</h4>
+              <el-collapse>
+                <el-collapse-item title="详细参数" name="1">
+                  <div class="parameter-list">
+                    <div v-if="Object.keys(modelDetails.parameters).length === 0" class="no-parameters">
+                      无自定义参数
+                    </div>
+                    <div v-else v-for="(value, key) in modelDetails.parameters" :key="key" class="parameter-item">
+                      <label>{{ key }}：</label>
+                      <span>{{ typeof value === 'object' ? JSON.stringify(value) : value }}</span>
+                    </div>
+                  </div>
+                </el-collapse-item>
+              </el-collapse>
             </div>
-          </div>
 
-          <div class="detection-list">
-            <h4>检测结果</h4>
-            <el-empty v-if="!detectionResults.length" description="暂无检测结果" />
-            <el-timeline v-else>
-              <el-timeline-item
-                v-for="(result, index) in detectionResults"
-                :key="index"
-                :timestamp="result.time"
-                :type="result.type"
-              >
-                {{ result.message }}
-              </el-timeline-item>
-            </el-timeline>
+            <div class="detection-list">
+              <h4>检测结果</h4>
+              <el-empty v-if="!detectionResults.length" description="暂无检测结果" />
+              <el-timeline v-else>
+                <el-timeline-item
+                  v-for="(result, index) in detectionResults"
+                  :key="index"
+                  :timestamp="result.time"
+                  :type="result.type"
+                >
+                  {{ result.message }}
+                </el-timeline-item>
+              </el-timeline>
+            </div>
           </div>
         </el-card>
       </el-col>
@@ -142,6 +183,7 @@
 import { ref, computed, onMounted, onUnmounted, watch, nextTick, onBeforeUnmount } from 'vue'
 import { VideoPlay } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import deviceApi from '@/api/device'
 
 // WebSocket 连接
 let ws = null
@@ -188,19 +230,138 @@ let avgDetectionDelay = 0
 const delayHistory = []
 const maxDelayHistorySize = 10
 
-// 检测模型列表
-const models = [
-  {
-    type: 'YOLO系列',
-    models: [
-      { label: 'YOLO11-n', value: 'yolo11n', description: '速度最快，适合实时检测' },
-      { label: 'YOLOv8-s', value: 'yolov8s', description: '速度和精度的平衡' },
-      { label: 'YOLOv8-m', value: 'yolov8m', description: '中等精度' },
-      { label: 'YOLOv8-l', value: 'yolov8l', description: '高精度' },
-      { label: 'YOLOv8-x', value: 'yolov8x', description: '最高精度' }
-    ]
+// 模型列表相关
+const models = ref([])
+const loadingModels = ref(false)
+const modelDetails = ref(null)
+
+// 从后端加载模型列表
+const loadModels = async () => {
+  try {
+    loadingModels.value = true
+    addDetectionRecord('info', '正在加载检测模型列表...')
+    
+    const { data } = await deviceApi.getModels()
+    
+    // 按模型类型分组
+    const groupedModels = {}
+    data.forEach(model => {
+      // 只加载激活状态的模型
+      if (!model.is_active) return
+      
+      const type = getModelTypeName(model.models_type)
+      if (!groupedModels[type]) {
+        groupedModels[type] = []
+      }
+      
+      // 获取模型描述信息，如果没有则提供默认描述
+      let description = model.description || getDefaultDescription(model.models_type, model.models_name)
+      
+      groupedModels[type].push({
+        label: model.models_name,
+        value: model.models_id,
+        description: description,
+        format: model.format.toUpperCase(),
+        size: formatFileSize(model.file_size),
+        uploadTime: formatDate(model.upload_time),
+        path: model.file_path,
+        parameters: model.parameters || {}
+      })
+    })
+    
+    // 转换为组件需要的格式
+    models.value = Object.keys(groupedModels).map(type => ({
+      type,
+      models: groupedModels[type]
+    }))
+    
+    if (models.value.length === 0) {
+      addDetectionRecord('warning', '未找到可用的检测模型，请先上传和激活模型')
+    } else {
+      addDetectionRecord('success', `成功加载 ${data.filter(m => m.is_active).length} 个检测模型`)
+    }
+  } catch (error) {
+    console.error('加载模型列表失败:', error)
+    addDetectionRecord('error', '加载模型列表失败: ' + (error.response?.data?.detail || error.message))
+  } finally {
+    loadingModels.value = false
   }
-]
+}
+
+// 获取模型类型名称
+const getModelTypeName = (type) => {
+  const typeMap = {
+    'object_detection': 'YOLO系列',
+    'segmentation': '分割模型',
+    'keypoint': '关键点检测',
+    'pose': '姿态估计',
+    'face': '人脸识别',
+    'other': '其他模型'
+  }
+  return typeMap[type] || type
+}
+
+// 获取默认描述
+const getDefaultDescription = (type, name) => {
+  if (type === 'object_detection') {
+    if (name.toLowerCase().includes('yolo')) {
+      if (name.toLowerCase().includes('n')) {
+        return '速度最快，适合实时检测'
+      } else if (name.toLowerCase().includes('s')) {
+        return '速度和精度的平衡'
+      } else if (name.toLowerCase().includes('m')) {
+        return '中等精度'
+      } else if (name.toLowerCase().includes('l')) {
+        return '高精度'
+      } else if (name.toLowerCase().includes('x')) {
+        return '最高精度'
+      }
+    }
+  }
+  return '通用检测模型'
+}
+
+// 监听选择模型变化时，获取模型详情
+watch(selectedModel, async (modelId) => {
+  if (!modelId) {
+    modelDetails.value = null
+    return
+  }
+  
+  try {
+    const { data } = await deviceApi.getModel(modelId)
+    modelDetails.value = data
+    addDetectionRecord('info', `已选择模型: ${data.models_name}`)
+  } catch (error) {
+    console.error('获取模型详情失败:', error)
+    addDetectionRecord('error', '获取模型详情失败: ' + (error.response?.data?.detail || error.message))
+  }
+})
+
+// 格式化文件大小
+const formatFileSize = (size) => {
+  if (size < 1024) {
+    return size + ' B'
+  } else if (size < 1024 * 1024) {
+    return (size / 1024).toFixed(2) + ' KB'
+  } else if (size < 1024 * 1024 * 1024) {
+    return (size / (1024 * 1024)).toFixed(2) + ' MB'
+  } else {
+    return (size / (1024 * 1024 * 1024)).toFixed(2) + ' GB'
+  }
+}
+
+// 格式化日期
+const formatDate = (dateStr) => {
+  const date = new Date(dateStr)
+  return date.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+}
 
 // 添加检测记录
 const addDetectionRecord = (type, message) => {
@@ -1104,56 +1265,71 @@ const stopDetection = async () => {
   addDetectionRecord('info', '检测已停止')
 }
 
-// 发送模型配置并等待确认
-const sendModelConfig = async () => {
-  if (!ws || ws.readyState !== WebSocket.OPEN) {
-    throw new Error('WebSocket连接未建立')
-  }
-
-  if (!selectedModel.value) {
-    throw new Error('请先选择检测模型')
-  }
-
+// 发送模型配置到WebSocket服务器
+const sendModelConfig = () => {
   return new Promise((resolve, reject) => {
-    const configTimeout = setTimeout(() => {
-      cleanup()
-      reject(new Error('模型配置超时，请重试'))
-    }, 10000) // 增加超时时间到10秒
+    if (!selectedModel.value || !modelDetails.value) {
+      reject(new Error('未选择模型或模型详情未加载'))
+      return
+    }
 
-    const handleConfigConfirm = (event) => {
-      try {
-        const data = JSON.parse(event.data)
-        if (data.type === 'config_confirm') {
-          console.log('Model configuration confirmed')
-          cleanup()
-          resolve()
-        } else if (data.type === 'error' && data.message.includes('model')) {
-          cleanup()
-          reject(new Error(`模型配置失败: ${data.message}`))
-        }
-      } catch (error) {
-        console.error('Error parsing config confirmation:', error)
+    try {
+      const modelConfig = {
+        type: 'config',
+        models_id: modelDetails.value.models_id,
+        models_name: modelDetails.value.models_name,
+        models_type: modelDetails.value.models_type,
+        models_path: modelDetails.value.file_path,
+        format: modelDetails.value.format,
+        parameters: modelDetails.value.parameters || {}
       }
-    }
 
-    const cleanup = () => {
-      clearTimeout(configTimeout)
-      ws.removeEventListener('message', handleConfigConfirm)
-    }
+      // 注册一次性消息处理器，等待配置确认
+      const configConfirmHandler = (event) => {
+        try {
+          const data = JSON.parse(event.data)
+          if (data.type === 'config_confirm') {
+            // 移除此处理器
+            ws.removeEventListener('message', configConfirmHandler)
+            
+            if (data.model === modelDetails.value.models_name) {
+              addDetectionRecord('success', `模型 ${modelDetails.value.models_name} 配置成功`)
+              resolve()
+            } else {
+              reject(new Error(data.message || '模型配置失败'))
+            }
+          }
+        } catch (error) {
+          console.error('处理模型配置响应失败:', error)
+        }
+      }
 
-    ws.addEventListener('message', handleConfigConfirm)
-    
-    // 发送模型配置
-    console.log('Sending model configuration:', selectedModel.value)
-    ws.send(JSON.stringify({
-      type: 'config',
-      model: selectedModel.value
-    }))
+      // 添加一次性消息监听器
+      ws.addEventListener('message', configConfirmHandler)
+
+      // 发送模型配置
+      console.log('Sending model config:', modelConfig)
+      ws.send(JSON.stringify(modelConfig))
+
+      // 设置超时，防止无限等待
+      setTimeout(() => {
+        // 如果仍然是侦听器，则移除并拒绝
+        ws.removeEventListener('message', configConfirmHandler)
+        reject(new Error('模型配置响应超时'))
+      }, 10000)
+      
+    } catch (error) {
+      reject(new Error('发送模型配置失败: ' + error.message))
+    }
   })
 }
 
-// 添加视频事件监听
-onMounted(() => {
+// 监听组件加载
+onMounted(async () => {
+  // 加载模型列表
+  await loadModels()
+  
+  // 恢复原有的初始化代码
   initWebSocket()
   window.addEventListener('resize', handleVideoResize)
 })
@@ -1267,9 +1443,17 @@ onBeforeUnmount(() => {
 }
 
 .detection-info {
-  height: 600px;
+  height: auto;
+  max-height: 700px;
   display: flex;
   flex-direction: column;
+}
+
+.detection-content {
+  overflow-y: auto;
+  max-height: calc(700px - 60px); /* 减去header高度 */
+  padding-right: 5px;
+  margin-right: -5px; /* 抵消padding-right导致的宽度增加 */
 }
 
 .card-header {
@@ -1279,15 +1463,14 @@ onBeforeUnmount(() => {
 }
 
 .video-info {
-  padding: 16px;
+  padding: 12px;
   background-color: #f8fafc;
   border-radius: 4px;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
 .info-item {
   display: flex;
-  justify-content: space-between;
   margin-bottom: 8px;
   font-size: 14px;
 }
@@ -1298,33 +1481,45 @@ onBeforeUnmount(() => {
 
 .info-item label {
   color: #606266;
+  flex: 0 0 70px;
+}
+
+.info-item .info-value {
+  flex: 1;
+  word-break: break-all;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .detection-stats {
-  padding: 16px;
+  padding: 12px;
   background-color: #f8fafc;
   border-radius: 4px;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
 .stat-item {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 }
 
 .stat-item:last-child {
   margin-bottom: 0;
 }
 
+.stat-item label {
+  flex: 0 0 70px;
+  color: #606266;
+}
+
 .detection-list {
   flex: 1;
-  overflow-y: auto;
+  margin-top: 12px;
 }
 
 .detection-list h4 {
-  margin: 0 0 16px;
+  margin: 0 0 12px;
   color: #2c3e50;
 }
 
@@ -1335,16 +1530,68 @@ onBeforeUnmount(() => {
 .model-option {
   display: flex;
   flex-direction: column;
-  gap: 4px;
 }
 
 .model-name {
-  font-weight: 500;
-  color: #2c3e50;
+  font-weight: bold;
+  color: #303133;
+  margin-bottom: 2px;
 }
 
 .model-desc {
   font-size: 12px;
   color: #909399;
+}
+
+.model-format {
+  font-size: 12px;
+  color: #67c23a;
+  margin-top: 2px;
+}
+
+.empty-model-list {
+  padding: 10px;
+  text-align: center;
+  color: #909399;
+}
+
+.model-parameters {
+  margin-top: 12px;
+  margin-bottom: 12px;
+}
+
+.model-parameters h4 {
+  margin-bottom: 8px;
+  font-size: 14px;
+  color: #303133;
+}
+
+.parameter-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.parameter-item {
+  display: flex;
+  font-size: 13px;
+}
+
+.parameter-item label {
+  flex: 0 0 70px;
+  color: #606266;
+  font-weight: 500;
+}
+
+.parameter-item span {
+  flex: 1;
+  word-break: break-all;
+}
+
+.no-parameters {
+  color: #909399;
+  font-style: italic;
+  font-size: 13px;
+  padding: 5px 0;
 }
 </style> 

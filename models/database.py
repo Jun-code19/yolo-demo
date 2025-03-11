@@ -87,9 +87,9 @@ class SysLog(Base):
 class DetectionModel(Base):
     __tablename__ = "detection_model"
     
-    model_id = Column(String(64), primary_key=True)
-    model_name = Column(String(255), nullable=False)
-    model_type = Column(String(50), nullable=False)  # 例如：object_detection, segmentation等
+    models_id = Column(String(64), primary_key=True)
+    models_name = Column(String(255), nullable=False)
+    models_type = Column(String(50), nullable=False)  # 例如：object_detection, segmentation等
     file_path = Column(Text, nullable=False)  # 模型文件路径
     file_size = Column(Integer)  # 文件大小（字节）
     format = Column(String(20), nullable=False)  # 例如：pt, onnx等

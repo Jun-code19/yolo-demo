@@ -8,6 +8,7 @@
           placeholder="选择检测模型"
           class="model-select"
           :disabled="isDetecting"
+          :loading="loadingModels"
         >
           <el-option-group
             v-for="group in models"
@@ -23,9 +24,16 @@
               <div class="model-option">
                 <span class="model-name">{{ model.label }}</span>
                 <span class="model-desc">{{ model.description }}</span>
+                <span class="model-format">格式：{{ model.format }}</span>
               </div>
             </el-option>
           </el-option-group>
+          <template #empty>
+            <div class="empty-model-list">
+              <p v-if="loadingModels">加载模型中...</p>
+              <p v-else>暂无可用模型，请先上传并激活模型</p>
+            </div>
+          </template>
         </el-select>
         <el-upload
           class="upload-image"
@@ -171,6 +179,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { Picture } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
+import deviceApi from '@/api/device'
 
 // WebSocket 连接
 let ws = null
@@ -184,25 +193,125 @@ const detectionResults = ref([])
 const selectedModel = ref('')
 const canvasRef = ref(null)
 
+// 模型列表相关
+const models = ref([])
+const loadingModels = ref(false)
+const modelDetails = ref(null)
+
 // 计算属性
 const currentImageIndex = computed(() => {
   if (currentImage.value) return imageList.value.findIndex(img => img.url === currentImage.value.url)
   return -1
 })
 
-// 检测模型列表
-const models = [
-  {
-    type: 'YOLO系列',
-    models: [
-      { label: 'YOLOv8-n', value: 'yolov8n', description: '速度最快，适合实时检测' },
-      { label: 'YOLOv8-s', value: 'yolov8s', description: '速度和精度的平衡' },
-      { label: 'YOLOv8-m', value: 'yolov8m', description: '中等精度' },
-      { label: 'YOLOv8-l', value: 'yolov8l', description: '高精度' },
-      { label: 'YOLOv8-x', value: 'yolov8x', description: '最高精度' }
-    ]
+// 从后端加载模型列表
+const loadModels = async () => {
+  try {
+    loadingModels.value = true
+    addDetectionRecord('info', '正在加载检测模型列表...')
+    
+    const { data } = await deviceApi.getModels()
+    
+    // 按模型类型分组
+    const groupedModels = {}
+    data.forEach(model => {
+      // 只加载激活状态的模型
+      if (!model.is_active) return
+      
+      const type = getModelTypeName(model.models_type)
+      if (!groupedModels[type]) {
+        groupedModels[type] = []
+      }
+      
+      // 获取模型描述信息，如果没有则提供默认描述
+      let description = model.description || getDefaultDescription(model.models_type, model.models_name)
+      
+      groupedModels[type].push({
+        label: model.models_name,
+        value: model.models_id,
+        description: description,
+        format: model.format.toUpperCase(),
+        size: formatFileSize(model.file_size),
+        uploadTime: formatDate(model.upload_time),
+        path: model.file_path,
+        parameters: model.parameters || {}
+      })
+    })
+    
+    // 转换为组件需要的格式
+    models.value = Object.keys(groupedModels).map(type => ({
+      type,
+      models: groupedModels[type]
+    }))
+    
+    if (models.value.length === 0) {
+      addDetectionRecord('warning', '未找到可用的检测模型，请先上传和激活模型')
+    } else {
+      addDetectionRecord('success', `成功加载 ${data.filter(m => m.is_active).length} 个检测模型`)
+    }
+  } catch (error) {
+    console.error('加载模型列表失败:', error)
+    addDetectionRecord('error', '加载模型列表失败: ' + (error.response?.data?.detail || error.message))
+  } finally {
+    loadingModels.value = false
   }
-]
+}
+
+// 获取模型类型名称
+const getModelTypeName = (type) => {
+  const typeMap = {
+    'object_detection': 'YOLO系列',
+    'segmentation': '分割模型',
+    'keypoint': '关键点检测',
+    'pose': '姿态估计',
+    'face': '人脸识别',
+    'other': '其他模型'
+  }
+  return typeMap[type] || type
+}
+
+// 获取默认描述
+const getDefaultDescription = (type, name) => {
+  if (type === 'object_detection') {
+    if (name.toLowerCase().includes('yolo')) {
+      if (name.toLowerCase().includes('n')) {
+        return '速度最快，适合实时检测'
+      } else if (name.toLowerCase().includes('s')) {
+        return '速度和精度的平衡'
+      } else if (name.toLowerCase().includes('m')) {
+        return '中等精度'
+      } else if (name.toLowerCase().includes('l')) {
+        return '高精度'
+      } else if (name.toLowerCase().includes('x')) {
+        return '最高精度'
+      }
+    }
+  }
+  return '通用检测模型'
+}
+// 格式化文件大小
+const formatFileSize = (size) => {
+  if (size < 1024) {
+    return size + ' B'
+  } else if (size < 1024 * 1024) {
+    return (size / 1024).toFixed(2) + ' KB'
+  } else if (size < 1024 * 1024 * 1024) {
+    return (size / (1024 * 1024)).toFixed(2) + ' MB'
+  } else {
+    return (size / (1024 * 1024 * 1024)).toFixed(2) + ' GB'
+  }
+}
+// 格式化日期
+const formatDate = (dateStr) => {
+  const date = new Date(dateStr)
+  return date.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+}
 
 // 修改WebSocket初始化函数
 const initWebSocket = () => {
@@ -500,18 +609,44 @@ const getImageResolution = (url) => {
 }
 
 // 添加检测记录
-const addDetectionRecord = (type, message, details = null, objectCount = null) => {
+const addDetectionRecord = (type, message) => {
+  const now = new Date()
+  const time = now.toLocaleTimeString()
+  
+  // 将自定义类型映射到 Element Plus 支持的类型
+  let timelineType = 'primary' // 默认类型
+  switch (type) {
+    case 'error':
+      timelineType = 'danger'
+      break
+    case 'success':
+      timelineType = 'success'
+      break
+    case 'info':
+      timelineType = 'info'
+      break
+    case 'warning':
+      timelineType = 'warning'
+      break
+  }
+
   detectionResults.value.unshift({
-    time: new Date().toLocaleTimeString(),
-    type,
-    message,
-    details,
-    objectCount
+    time,
+    type: timelineType, // 使用映射后的类型
+    message
   })
+
+  // 限制记录数量，保留最新的50条
+  if (detectionResults.value.length > 50) {
+    detectionResults.value = detectionResults.value.slice(0, 50)
+  }
 }
 
 // 生命周期钩子
-onMounted(() => {
+onMounted(async () => {
+  // 加载模型列表
+  await loadModels()
+
   initWebSocket()
 })
 

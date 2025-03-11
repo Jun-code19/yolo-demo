@@ -37,7 +37,7 @@ app.add_middleware(
 )
 
 # 全局变量
-model_cache = {}
+models_cache = {}
 frame_queues = {}
 max_queue_size = 1  # 减小队列大小以降低延迟
 executor = ThreadPoolExecutor(max_workers=2)  # 减少线程数以避免资源竞争
@@ -110,16 +110,16 @@ class FrameProcessor:
 
 frame_processor = FrameProcessor()
 
-def get_model(model_name):
+def get_model(models_name):
     """获取或加载YOLO模型"""
-    if model_name not in model_cache:
-        model_path = f"models/{model_name}.pt"
+    if models_name not in models_cache:
+        models_path = f"models/{models_name}.pt"
         try:
-            if not Path(model_path).exists():
-                logger.error(f"Model file not found: {model_path}")
+            if not Path(models_path).exists():
+                logger.error(f"Model file not found: {models_path}")
                 return None
             
-            model = YOLO(model_path)
+            model = YOLO(models_path)
             
             # 使用GPU并进行优化
             device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -132,7 +132,7 @@ def get_model(model_name):
             
             # 导出ONNX模型以提高性能
             try:
-                onnx_path = f"models/{model_name}.onnx"
+                onnx_path = f"models/{models_name}.onnx"
                 if not Path(onnx_path).exists():
                     model.export(format='onnx', dynamic=True, half=True)
                     logger.info(f"Model exported to ONNX: {onnx_path}")
@@ -141,27 +141,27 @@ def get_model(model_name):
                     import onnxruntime as ort
                     providers = ['CUDAExecutionProvider', 'CPUExecutionProvider'] if device == 'cuda' else ['CPUExecutionProvider']
                     session = ort.InferenceSession(onnx_path, providers=providers)
-                    model_cache[model_name] = {
+                    models_cache[models_name] = {
                         'type': 'onnx',
                         'session': session,
                         'model': model
                     }
                     logger.info("Using ONNX Runtime for inference")
-                    return model_cache[model_name]
+                    return models_cache[models_name]
             except Exception as e:
                 logger.warning(f"ONNX optimization failed: {e}")
             
-            model_cache[model_name] = {
+            models_cache[models_name] = {
                 'type': 'pytorch',
                 'model': model
             }
-            logger.info(f"Model {model_name} loaded successfully on {device}")
+            logger.info(f"Model {models_name} loaded successfully on {device}")
         except Exception as e:
-            logger.error(f"Error loading model {model_name}: {e}")
+            logger.error(f"Error loading model {models_name}: {e}")
             return None
-    return model_cache.get(model_name)
+    return models_cache.get(models_name)
 
-def process_frame(frame, model_info, frame_id, timestamp, total_frames=None, start_time=None):
+def process_frame(frame, models_info, frame_id, timestamp, total_frames=None, start_time=None):
     """处理单帧图像"""
     start_process_time = time.time()
     
@@ -175,9 +175,9 @@ def process_frame(frame, model_info, frame_id, timestamp, total_frames=None, sta
             frame = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)  # 使用INTER_AREA以提高性能
         
         # 运行检测
-        if model_info['type'] == 'onnx':
+        if models_info['type'] == 'onnx':
             # 使用ONNX Runtime进行推理
-            session = model_info['session']
+            session = models_info['session']
             # 预处理图像
             input_name = session.get_inputs()[0].name
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -207,7 +207,7 @@ def process_frame(frame, model_info, frame_id, timestamp, total_frames=None, sta
                         h = h / scale
                     
                     class_id = int(classes[i])
-                    class_name = model_info['model'].names[class_id]
+                    class_name = models_info['model'].names[class_id]
                     
                     detections.append({
                         "class": class_name,
@@ -221,7 +221,7 @@ def process_frame(frame, model_info, frame_id, timestamp, total_frames=None, sta
         else:
             # 使用PyTorch模型
             with torch.cuda.amp.autocast() if torch.cuda.is_available() else nullcontext():
-                results = model_info['model'](frame, conf=0.5)[0]
+                results = models_info['model'](frame, conf=0.5)[0]
             
             detections = []
             for r in results.boxes.data.tolist():
@@ -440,7 +440,7 @@ async def process_frame_queue(connection_id: str):
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     connection_id = await manager.connect(websocket)
-    model_info = None
+    models_info = None
     
     try:
         # 等待客户端的连接请求
@@ -457,8 +457,8 @@ async def websocket_endpoint(websocket: WebSocket):
                 
             elif message["type"] == "config":
                 # 处理模型配置
-                model_name = message.get("model")
-                if not model_name:
+                models_name = message.get("models_name")
+                if not models_name:
                     await websocket.send_json({
                         "type": "error",
                         "message": "No model specified in configuration"
@@ -466,25 +466,25 @@ async def websocket_endpoint(websocket: WebSocket):
                     continue
 
                 try:
-                    logger.info(f"Loading model {model_name} for client {connection_id}")
-                    model_info = get_model(model_name)
+                    logger.info(f"Loading model {models_name} for client {connection_id}")
+                    models_info = get_model(message.get("models_id"))
                     
-                    if not model_info:
+                    if not models_info:
                         await websocket.send_json({
                             "type": "error",
-                            "message": f"Failed to load model: {model_name}"
+                            "message": f"Failed to load model: {models_name}"
                         })
                         continue
                                         
                     # 发送配置确认
                     await websocket.send_json({
                         "type": "config_confirm",
-                        "model": model_name
+                        "model": models_name
                     })
-                    logger.info(f"Model {model_name} configured successfully for client {connection_id}")
+                    logger.info(f"Model {models_name} configured successfully for client {connection_id}")
                 
                 except Exception as e:
-                    error_msg = f"Error configuring model {model_name}: {str(e)}"
+                    error_msg = f"Error configuring model {models_name}: {str(e)}"
                     logger.error(error_msg)
                     await websocket.send_json({
                         "type": "error",
@@ -494,7 +494,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 
             elif message["type"] == "video_info":
                 # 处理视频信息
-                if not model_info:
+                if not models_info:
                     await websocket.send_json({
                         "type": "error",
                         "message": "Model not configured. Please configure model first."
@@ -510,7 +510,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 
             elif message["type"] == "frame":
                 # 处理视频帧
-                if not model_info:
+                if not models_info:
                     await websocket.send_json({
                         "type": "error",
                         "message": "Model not configured. Please configure model first."
@@ -544,7 +544,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     # 将帧数据放入队列
                     results =await frame_queues[connection_id].put({
                         "frame": frame,
-                        "model": model_info,
+                        "model": models_info,
                         "frame_id": frame_id,
                         "timestamp": frame_timestamp,
                         "total_frames": message.get("total_frames"),

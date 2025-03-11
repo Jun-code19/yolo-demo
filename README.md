@@ -5,7 +5,7 @@
 ## 功能特点
 
 - 支持实时视频流处理
-- 支持多种 YOLO 模型（YOLOv8、YOLOv11）
+- 支持多种 YOLO 模型（YOLOv11）
 - WebSocket 通信，低延迟
 - 自动模型缓存
 - 支持跨域请求
@@ -39,11 +39,8 @@ pip install -r requirements.txt
 4. 下载 YOLO 模型：
 将下载的 YOLO 模型文件（.pt）放在 `models` 目录下。
 支持的模型：
-- YOLOv8n.pt
-- YOLOv8s.pt
-- YOLOv8m.pt
-- YOLOv8l.pt
-- YOLOv8x.pt
+- YOLO11n.pt
+- YOLO11s.pt
 
 ## 运行服务器
 
