@@ -437,6 +437,72 @@ async def process_frame_queue(connection_id: str):
     finally:
         logger.info(f"Frame queue processing ended for client {connection_id}")
 
+def non_max_suppression(boxes, scores, iou_threshold=0.45):
+    """
+    执行非极大值抑制(NMS)，去除重叠的检测框
+    
+    参数:
+        boxes: 边界框列表 [[x, y, w, h], ...]
+        scores: 对应的置信度分数
+        iou_threshold: IoU阈值，高于此值的框会被抑制
+        
+    返回:
+        保留的检测框的索引列表
+    """
+    try:
+        # 检查输入有效性
+        if len(boxes) == 0 or len(scores) != len(boxes):
+            return []
+        
+        # 转换成numpy数组
+        boxes = np.array(boxes)
+        scores = np.array(scores)
+        
+        # 计算每个框的面积和右下角坐标
+        x1 = boxes[:, 0]
+        y1 = boxes[:, 1]
+        w = boxes[:, 2]
+        h = boxes[:, 3]
+        x2 = x1 + w
+        y2 = y1 + h
+        area = w * h
+        
+        # 按照分数从高到低排序
+        idxs = np.argsort(scores)[::-1]
+        
+        # 保留的框的索引
+        keep = []
+        
+        while len(idxs) > 0:
+            # 取分数最高的框
+            i = idxs[0]
+            keep.append(i)
+            
+            # 计算其他框与当前框的IoU
+            xx1 = np.maximum(x1[i], x1[idxs[1:]])
+            yy1 = np.maximum(y1[i], y1[idxs[1:]])
+            xx2 = np.minimum(x2[i], x2[idxs[1:]])
+            yy2 = np.minimum(y2[i], y2[idxs[1:]])
+            
+            # 计算重叠区域的宽和高
+            w_inter = np.maximum(0, xx2 - xx1)
+            h_inter = np.maximum(0, yy2 - yy1)
+            
+            # 计算重叠区域的面积
+            intersection = w_inter * h_inter
+            
+            # 计算IoU
+            union = area[i] + area[idxs[1:]] - intersection
+            iou = intersection / (union + 1e-8)  # 避免除以0
+            
+            # 保留IoU小于阈值的框
+            idxs = idxs[1:][iou < iou_threshold]
+        
+        return keep
+    except Exception as e:
+        logger.error(f"Error in NMS: {e}")
+        return list(range(len(boxes)))  # 出错时返回所有框
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     connection_id = await manager.connect(websocket)
@@ -485,6 +551,188 @@ async def websocket_endpoint(websocket: WebSocket):
                 
                 except Exception as e:
                     error_msg = f"Error configuring model {models_name}: {str(e)}"
+                    logger.error(error_msg)
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": error_msg
+                    })
+                continue
+            
+            # 增加处理图片检测请求的逻辑
+            elif message["type"] == "image":
+                # 处理单张图片检测请求
+                if not models_info:
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "Model not configured. Please configure model first."
+                    })
+                    continue
+                
+                start_time = time.time()
+                try:
+                    # 获取图片信息
+                    image_id = message.get("image_id", 0)
+                    image_name = message.get("image_name", f"image_{image_id}")
+                    timestamp = message.get("timestamp", time.time())
+                    width = message.get("width", 0)
+                    height = message.get("height", 0)
+                    original_width = message.get("original_width", width)
+                    original_height = message.get("original_height", height)
+                    scale = message.get("scale", 1.0)
+                    
+                    logger.info(f"Processing image {image_name} (ID: {image_id}) for client {connection_id}")
+                    
+                    # 解码图像
+                    decode_start_time = time.time()
+                    try:
+                        img_data = base64.b64decode(message.get("frame"))
+                        nparr = np.frombuffer(img_data, np.uint8)
+                        frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                        
+                        if frame is None:
+                            raise ValueError("Failed to decode image")
+                        
+                        decode_time = time.time() - decode_start_time
+                        logger.info(f"Image decoded successfully in {decode_time:.3f}s, shape: {frame.shape}")
+                    except Exception as e:
+                        error_msg = f"Error decoding image: {str(e)}"
+                        logger.error(error_msg)
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": error_msg
+                        })
+                        continue
+                    
+                    # 处理图片
+                    try:
+                        # 性能优化：如果图像尺寸过大，可以缩小后处理
+                        max_dim = 1280  # 最大尺寸
+                        orig_h, orig_w = frame.shape[:2]
+                        target_frame = frame
+                        target_scale = 1.0
+                        
+                        # 如果原始图像过大，先缩小进行检测，再缩放结果
+                        if max(orig_h, orig_w) > max_dim:
+                            resize_scale = max_dim / max(orig_h, orig_w)
+                            new_h, new_w = int(orig_h * resize_scale), int(orig_w * resize_scale)
+                            target_frame = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
+                            target_scale = resize_scale
+                            logger.info(f"Resized image for detection: {orig_w}x{orig_h} -> {new_w}x{new_h}")
+                        
+                        # 检测开始时间
+                        detect_start_time = time.time()
+                        
+                        # 使用process_frame函数处理图片
+                        result = process_frame(
+                            frame=target_frame,
+                            models_info=models_info,
+                            frame_id=image_id,
+                            timestamp=timestamp
+                        )
+                        
+                        # 检测时间
+                        detect_time = time.time() - detect_start_time
+                        
+                        if not result:
+                            raise ValueError("Failed to process image")
+                        
+                        # 处理缩放以匹配原始尺寸
+                        if target_scale < 1.0:
+                            for obj in result["objects"]:
+                                if "bbox" in obj:
+                                    x, y, w, h = obj["bbox"]
+                                    obj["bbox"] = [
+                                        x / target_scale,
+                                        y / target_scale,
+                                        w / target_scale,
+                                        h / target_scale
+                                    ]
+                                if all(k in obj for k in ["x1", "y1", "x2", "y2"]):
+                                    obj["x1"] /= target_scale
+                                    obj["y1"] /= target_scale
+                                    obj["x2"] /= target_scale
+                                    obj["y2"] /= target_scale
+                        
+                        # 应用非极大值抑制(NMS)处理重叠检测框
+                        nms_start_time = time.time()
+                        nms_applied = False
+                        try:
+                            if len(result["objects"]) > 1:
+                                logger.info(f"Applying NMS on {len(result['objects'])} detections")
+                                
+                                # 提取边界框和分数
+                                boxes = []
+                                scores = []
+                                for obj in result["objects"]:
+                                    if "bbox" in obj:
+                                        boxes.append(obj["bbox"])
+                                        scores.append(obj["confidence"])
+                                
+                                # 应用NMS
+                                if boxes and scores:
+                                    keep_indices = non_max_suppression(boxes, scores, iou_threshold=0.45)
+                                    
+                                    # 仅保留NMS后的检测结果
+                                    filtered_objects = [result["objects"][i] for i in keep_indices]
+                                    logger.info(f"NMS reduced detections from {len(result['objects'])} to {len(filtered_objects)}")
+                                    result["objects"] = filtered_objects
+                                    nms_applied = True
+                        except Exception as e:
+                            logger.error(f"Error applying NMS: {e}")
+                            # 继续使用原始检测结果
+                        
+                        nms_time = time.time() - nms_start_time
+                        
+                        # 如果图片进行了缩放，需要调整检测框坐标
+                        if scale != 1.0 and original_width > 0 and original_height > 0:
+                            scale_factor = 1.0 / scale
+                            for obj in result["objects"]:
+                                # 调整检测框坐标和尺寸
+                                if "bbox" in obj:
+                                    x, y, w, h = obj["bbox"]
+                                    obj["bbox"] = [
+                                        x * scale_factor,
+                                        y * scale_factor,
+                                        w * scale_factor,
+                                        h * scale_factor
+                                    ]
+                                # 更新x1, y1, x2, y2坐标(如果存在)
+                                if all(k in obj for k in ["x1", "y1", "x2", "y2"]):
+                                    obj["x1"] *= scale_factor
+                                    obj["y1"] *= scale_factor
+                                    obj["x2"] *= scale_factor
+                                    obj["y2"] *= scale_factor
+                        
+                        # 添加图片ID和名称到结果
+                        result["image_id"] = image_id
+                        result["image_name"] = image_name
+                        result["original_width"] = original_width
+                        result["original_height"] = original_height
+                        
+                        # 添加性能信息
+                        total_time = time.time() - start_time
+                        result["performance"] = {
+                            "decode_time": round(decode_time * 1000, 2),  # ms
+                            "detection_time": round(detect_time * 1000, 2),  # ms
+                            "nms_time": round(nms_time * 1000, 2),  # ms
+                            "total_time": round(total_time * 1000, 2),  # ms
+                            "nms_applied": nms_applied
+                        }
+                        
+                        logger.info(f"Image {image_name} processed in {total_time:.3f}s, found {len(result['objects'])} objects")
+                        
+                        # 发送检测结果
+                        await websocket.send_json(result)
+                        
+                    except Exception as e:
+                        error_msg = f"Error processing image: {str(e)}"
+                        logger.error(error_msg)
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": error_msg
+                        })
+                except Exception as e:
+                    error_msg = f"Error handling image detection request: {str(e)}"
                     logger.error(error_msg)
                     await websocket.send_json({
                         "type": "error",

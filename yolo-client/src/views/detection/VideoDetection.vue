@@ -204,7 +204,7 @@ const videoWidth = ref(0)  // 添加视频宽度变量
 const videoHeight = ref(0)  // 添加视频高度变量
 const isDetecting = ref(false)
 const progress = ref(0)
-const remainingTime = ref('计算中...')
+const remainingTime = ref('00:00')
 const detectedCount = ref(0)
 const detectionResults = ref([])
 const selectedModel = ref('')
@@ -400,9 +400,47 @@ const addDetectionRecord = (type, message) => {
 // 计算属性
 const duration = ref('00:00')
 
+// 添加对视频播放进度的监听
+const updateVideoProgress = () => {
+  const video = videoRef.value
+  if (!video || video.duration === 0 || video.duration === Infinity || isNaN(video.duration)) {
+    progress.value = 0
+    remainingTime.value = '00:00'
+    return
+  }
+  
+  // 计算播放进度百分比
+  const currentProgress = (video.currentTime / video.duration) * 100
+  progress.value = Math.round(currentProgress)
+  
+  // 计算剩余时间
+  const remainingSecs = video.duration - video.currentTime
+  if (remainingSecs < 0 || isNaN(remainingSecs)) {
+    remainingTime.value = '00:00'
+    return
+  }
+  
+  const minutes = Math.floor(remainingSecs / 60)
+  const seconds = Math.floor(remainingSecs % 60)
+  remainingTime.value = `${minutes}分${seconds}秒`
+}
+
+// 初始化视频进度
+const initVideoProgress = () => {
+  progress.value = 0
+  remainingTime.value = '00:00'
+  
+  // 确保在视频加载完成后更新一次进度
+  const video = videoRef.value
+  if (video) {
+    video.addEventListener('loadedmetadata', updateVideoProgress, { once: true })
+  }
+}
+
 // 监听视频加载完成
 watch(videoUrl, async (newUrl) => {
   if (newUrl) {
+    initVideoProgress() // 初始化视频进度
     try {
       // 等待组件更新完成
       await nextTick()
@@ -462,6 +500,8 @@ watch(videoUrl, async (newUrl) => {
     }
   } else {
     duration.value = '00:00'
+    progress.value = 0
+    remainingTime.value = '00:00'
   }
 })
 
@@ -500,7 +540,7 @@ const initWebSocket = () => {
 
     function createNewConnection() {
       try {
-        ws = new WebSocket('ws://localhost:8765/ws')
+        ws = new WebSocket('ws://10.83.34.35:8765/ws')
         
         ws.onopen = () => {
           console.log('WebSocket connection established, sending handshake...')
@@ -564,14 +604,8 @@ const handleWsMessage = (event) => {
         console.log('Model configuration confirmed by server')
         break
       case 'progress':
-        if (data.progress !== undefined) {
-          progress.value = Math.round(data.progress)
-        }
-        if (data.remaining_time !== undefined) {
-          const minutes = Math.floor(data.remaining_time / 60)
-          const seconds = Math.floor(data.remaining_time % 60)
-          remainingTime.value = `${minutes}分${seconds}秒`
-        }
+        // 不再更新进度条和剩余时间，因为它们现在由视频播放事件更新
+        console.log('Server progress update:', data)
         break
       case 'error':
         console.error('Server error:', data.message)
@@ -977,6 +1011,7 @@ const handleVideoChange = async (file) => {
     // 重置状态
     videoFile.value = null
     progress.value = 0
+    remainingTime.value = '00:00'
     detectedCount.value = 0
     detectionResults.value = []
     
@@ -1019,11 +1054,14 @@ const handleVideoChange = async (file) => {
       const handleLoad = () => {
         console.log('Video metadata loaded, readyState:', videoElement.readyState)
         videoElement.addEventListener('loadeddata', handleDataLoad)
+        // 添加进度更新
+        updateVideoProgress()
       }
       
       const handleDataLoad = () => {
         console.log('Video data loaded, readyState:', videoElement.readyState)
         if (videoElement.readyState >= 2) {
+          updateVideoProgress() // 再次更新进度
           cleanup()
           resolve()
         }
@@ -1079,6 +1117,10 @@ const handleVideoChange = async (file) => {
     videoFile.value = null
     
     addDetectionRecord('error', `视频加载失败: ${error.message || '未知错误'}`)
+    
+    // 重置进度
+    progress.value = 0
+    remainingTime.value = '00:00'
   }
   
   return false
@@ -1118,8 +1160,6 @@ const startDetection = async () => {
     }
 
     isDetecting.value = true
-    progress.value = 0
-    remainingTime.value = '计算中...'
     detectedCount.value = 0
     detectionResults.value = []
     frameId.value = 0
@@ -1223,8 +1263,6 @@ const handleReconnect = async () => {
 // 修改停止检测函数
 const stopDetection = async () => {
   isDetecting.value = false
-  progress.value = 0
-  remainingTime.value = '已停止'
   
   if (animationFrameId) {
     cancelAnimationFrame(animationFrameId)
@@ -1329,6 +1367,12 @@ onMounted(async () => {
   // 加载模型列表
   await loadModels()
   
+  // 添加视频播放进度更新事件
+  const video = videoRef.value
+  if (video) {
+    video.addEventListener('timeupdate', updateVideoProgress)
+  }
+  
   // 恢复原有的初始化代码
   initWebSocket()
   window.addEventListener('resize', handleVideoResize)
@@ -1337,6 +1381,12 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   if (isDetecting.value) {
     stopDetection()
+  }
+  
+  // 移除视频播放进度更新事件
+  const video = videoRef.value
+  if (video) {
+    video.removeEventListener('timeupdate', updateVideoProgress)
   }
   
   if (wsReconnectTimer) {
@@ -1502,6 +1552,7 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   margin-bottom: 10px;
+  font-size: 14px;
 }
 
 .stat-item:last-child {

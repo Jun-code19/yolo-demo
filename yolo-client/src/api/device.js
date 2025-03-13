@@ -3,7 +3,7 @@ import { ElMessage } from 'element-plus';
 
 // 创建 axios 实例
 const apiClient = axios.create({
-  baseURL: 'http://localhost:8000/api/v1',
+  baseURL: 'http://10.83.34.35:8000/api/v1',
   headers: {
     'Content-Type': 'application/json',
   },
@@ -64,7 +64,7 @@ export default {
     
     // 直接使用axios.post，完整控制Headers
     return axios.post('/api/v1/token', params, {
-      baseURL: 'http://localhost:8000',
+      baseURL: 'http://10.83.34.35:8000',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded'
       }
