@@ -22,7 +22,7 @@ class DeviceCreate(BaseModel):
     device_id: str
     device_name: str
     device_type: str
-    ip_address: IPvAnyAddress
+    ip_address: str
     port: int
     username: str
     password: str
@@ -48,15 +48,14 @@ class DeviceUpdate(BaseModel):
     port: int
     username: str
     password: Optional[str]
-    status: bool
 
 # 设备管理API
 @router.post("/devices/", response_model=DeviceResponse)
 def create_device(device: DeviceCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     # 处理IP地址，将IPv4Address转换为字符串
     device_data = device.dict()
-    if isinstance(device_data['ip_address'], (str, bytes, bytearray)):
-        device_data['ip_address'] = str(device_data['ip_address'])
+    # if isinstance(device_data['ip_address'], (str, bytes, bytearray)):
+    #     device_data['ip_address'] = str(device_data['ip_address'])
     
     db_device = Device(**device_data)
     try:

@@ -114,8 +114,8 @@ export default {
   },
   
   // 更新设备状态
-  updateDeviceStatus(deviceId, deviceName, status) {
-    return apiClient.put(`/devices/${deviceId}/status?device_name=${deviceName}&status=${status}`);
+  updateDevice(deviceId, deviceData) {
+    return apiClient.put(`/devices/${deviceId}`,deviceData);
   },
   
   // 删除设备 (这个接口在后端可能需要添加)

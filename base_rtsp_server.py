@@ -19,6 +19,8 @@ from contextlib import nullcontext
 import struct
 from typing import Dict
 from api.routes import router as api_router
+import av
+import uuid
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -48,6 +50,351 @@ max_size = 320  # 减小处理尺寸以提高性能
 
 # 添加 WebSocket 连接管理
 active_connections: Dict[str, WebSocket] = {}
+rtsp_sessions: Dict[str, dict] = {}
+
+class RTSPManager:
+    """管理RTSP流的类"""
+    
+    def __init__(self):
+        self.active_streams = {}
+        self.stop_events = {}
+        self.frame_buffers = {}
+        self.frame_ready_events = {}
+        self.thread_executors = ThreadPoolExecutor(max_workers=4)  # 专用于RTSP的线程池
+        self.stream_status = {}  # 用于线程和异步任务间通信
+    
+    async def start_stream(self, connection_id: str, stream_url: str) -> bool:
+        """启动RTSP流处理"""
+        if connection_id in self.active_streams:
+            return False
+        
+        # 设置停止事件和帧缓冲
+        stop_event = threading.Event()
+        self.stop_events[connection_id] = stop_event
+        self.frame_buffers[connection_id] = deque(maxlen=5)  # 存储最多5帧
+        self.stream_status[connection_id] = {"status": "connecting", "info": None, "error": None}
+        
+        # 在单独的线程中运行RTSP捕获
+        self.thread_executors.submit(
+            self._capture_rtsp_frames,
+            connection_id,
+            stream_url,
+            stop_event
+        )
+        
+        # 创建异步任务处理流
+        task = asyncio.create_task(
+            self._process_frames_async(connection_id)
+        )
+        self.active_streams[connection_id] = task
+        
+        return True
+    
+    async def stop_stream(self, connection_id: str) -> bool:
+        """停止RTSP流处理"""
+        if connection_id not in self.active_streams:
+            return False
+        
+        # 设置停止事件
+        if connection_id in self.stop_events:
+            self.stop_events[connection_id].set()
+        
+        # 等待任务结束
+        task = self.active_streams[connection_id]
+        if not task.done():
+            await asyncio.wait([task], timeout=5)
+            if not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+        
+        # 清理资源
+        self.active_streams.pop(connection_id, None)
+        self.stop_events.pop(connection_id, None)
+        if connection_id in self.frame_buffers:
+            self.frame_buffers.pop(connection_id)
+        if connection_id in self.stream_status:
+            self.stream_status.pop(connection_id)
+        
+        return True
+    
+    def _capture_rtsp_frames(self, connection_id: str, stream_url: str, stop_event):
+        """在单独的线程中从RTSP流捕获帧"""
+        logger.info(f"开始RTSP捕获线程: {stream_url}")
+        frame_count = 0
+        frame_buffer = self.frame_buffers.get(connection_id)
+        skip_frame_count = 0
+        
+        try:
+            # 尝试从RTSP连接视频源
+            try:
+                container = av.open(stream_url, options={
+                    'rtsp_transport': 'tcp',
+                    'stimeout': '5000000',  # 增加超时时间，单位为微秒
+                    'timeout': '5000000'
+                })
+                logger.info(f"RTSP连接成功: {stream_url}")
+                
+                # 获取视频流信息
+                video_stream = None
+                for stream in container.streams:
+                    if stream.type == 'video':
+                        video_stream = stream
+                        break
+                        
+                if not video_stream:
+                    # 设置错误状态
+                    if connection_id in self.stream_status:
+                        self.stream_status[connection_id] = {
+                            "status": "error", 
+                            "error": "RTSP流中没有视频轨道"
+                        }
+                    return
+                
+                # 更新流状态和信息
+                width = video_stream.width
+                height = video_stream.height
+                fps = video_stream.average_rate
+                
+                if connection_id in self.stream_status:
+                    self.stream_status[connection_id] = {
+                        "status": "connected",
+                        "info": {
+                            "width": width,
+                            "height": height,
+                            "fps": float(fps) if fps else 30.0
+                        },
+                        "error": None
+                    }
+                
+                # 高效解码设置
+                video_stream.thread_type = 'AUTO'  # 启用多线程解码
+                
+                logger.info(f"视频流信息: 分辨率={width}x{height}, FPS={fps}")
+                
+                target_fps = min(30, fps if fps else 30)  # 目标帧率最高30fps
+                frame_interval = 1.0 / target_fps
+                
+                last_frame_time = time.time()
+                
+                # 循环处理视频帧
+                for frame in container.decode(video_stream):
+                    if stop_event.is_set():
+                        logger.info(f"收到停止事件，结束RTSP捕获线程: {connection_id}")
+                        break
+                    
+                    current_time = time.time()
+                    elapsed = current_time - last_frame_time
+                    
+                    # 控制帧率，避免缓冲区溢出
+                    if elapsed < frame_interval * 0.5:  # 如果时间间隔过短，跳过该帧
+                        skip_frame_count += 1
+                        if skip_frame_count % 30 == 0:
+                            logger.debug(f"跳过帧以控制帧率，已跳过: {skip_frame_count}")
+                        continue
+                    
+                    # 将PyAV帧转换为OpenCV格式
+                    img = frame.to_ndarray(format='bgr24')
+                    
+                    # 添加帧信息
+                    frame_data = {
+                        "frame": img,
+                        "frame_id": frame_count,
+                        "timestamp": current_time,
+                        "width": img.shape[1],
+                        "height": img.shape[0]
+                    }
+                    
+                    # 将帧放入共享缓冲区
+                    if frame_buffer is not None:
+                        if len(frame_buffer) >= frame_buffer.maxlen:
+                            frame_buffer.popleft()  # 移除最老的帧，避免延迟累积
+                        frame_buffer.append(frame_data)
+                        
+                    frame_count += 1
+                    last_frame_time = current_time
+                    
+                    # 避免CPU占用过高
+                    time.sleep(0.001)
+                
+                logger.info(f"RTSP捕获完成，共捕获 {frame_count} 帧，跳过 {skip_frame_count} 帧")
+                
+            except Exception as e:
+                logger.error(f"无法打开RTSP流: {e}")
+                # 设置错误状态
+                if connection_id in self.stream_status:
+                    self.stream_status[connection_id] = {
+                        "status": "error", 
+                        "error": f"无法连接到RTSP流: {str(e)}"
+                    }
+                return
+                
+        except Exception as e:
+            logger.error(f"RTSP捕获线程错误: {e}")
+            # 设置错误状态
+            if connection_id in self.stream_status:
+                self.stream_status[connection_id] = {
+                    "status": "error", 
+                    "error": f"视频流处理错误: {str(e)}"
+                }
+        finally:
+            # 关闭容器
+            try:
+                if 'container' in locals():
+                    container.close()
+            except Exception as e:
+                logger.error(f"关闭RTSP容器时发生错误: {e}")
+            
+            logger.info(f"RTSP捕获线程已结束: {connection_id}")
+    
+    async def _process_frames_async(self, connection_id: str):
+        """异步处理并发送捕获的帧"""
+        logger.info(f"开始帧处理任务: {connection_id}")
+        frame_buffer = self.frame_buffers.get(connection_id)
+        stop_event = self.stop_events.get(connection_id)
+        last_send_time = time.time()
+        send_interval = 1.0 / 30.0  # 控制发送帧率，最高30fps
+        processed_frames = 0
+        
+        # 通知参数
+        stream_notified = False
+        retry_count = 0
+        max_retry = 50  # 最多等待5秒
+        
+        try:
+            # 等待RTSP连接成功或失败
+            while retry_count < max_retry:
+                if connection_id in self.stream_status:
+                    status = self.stream_status[connection_id]
+                    
+                    # 检查是否有错误
+                    if status.get("status") == "error":
+                        websocket = active_connections.get(connection_id)
+                        if websocket:
+                            await websocket.send_json({
+                                "type": "error",
+                                "message": status.get("error", "未知错误")
+                            })
+                        return
+                    
+                    # 检查是否已连接
+                    if status.get("status") == "connected" and status.get("info"):
+                        websocket = active_connections.get(connection_id)
+                        if websocket:
+                            # 发送流信息
+                            await websocket.send_json({
+                                "type": "stream_info",
+                                "width": status["info"].get("width"),
+                                "height": status["info"].get("height"),
+                                "fps": status["info"].get("fps")
+                            })
+                            
+                            # 发送预览开始通知
+                            await websocket.send_json({
+                                "type": "preview_start",
+                                "width": status["info"].get("width"),
+                                "height": status["info"].get("height")
+                            })
+                            stream_notified = True
+                        break
+                
+                retry_count += 1
+                await asyncio.sleep(0.1)
+            
+            # 主循环处理帧
+            while not stop_event.is_set():
+                # 检查是否有新帧
+                if frame_buffer and len(frame_buffer) > 0:
+                    # 获取最新的帧
+                    frame_data = frame_buffer[-1]  # 总是处理最新的帧
+                    img = frame_data["frame"]
+                    frame_id = frame_data["frame_id"]
+                    
+                    current_time = time.time()
+                    elapsed = current_time - last_send_time
+                    
+                    # 控制发送频率
+                    if elapsed >= send_interval:
+                        # 处理图像质量
+                        try:
+                            # 原始分辨率
+                            orig_h, orig_w = img.shape[:2]
+                            
+                            # 调整尺寸（可选，保持高质量）
+                            max_dim = 1920  # 增加到1920以提高质量
+                            resized = False
+                            processed_img = img
+                            
+                            if max(orig_h, orig_w) > max_dim:
+                                scale = max_dim / max(orig_h, orig_w)
+                                new_width = int(orig_w * scale)
+                                new_height = int(orig_h * scale)
+                                processed_img = cv2.resize(img, (new_width, new_height), 
+                                                         interpolation=cv2.INTER_AREA)
+                                resized = True
+                                
+                            # 使用更高的JPEG质量
+                            _, buffer = cv2.imencode('.jpg', processed_img, 
+                                                   [cv2.IMWRITE_JPEG_QUALITY, 95])
+                            jpeg_data = base64.b64encode(buffer).decode('utf-8')
+                            
+                            # 获取当前帧的宽高
+                            current_width = processed_img.shape[1]
+                            current_height = processed_img.shape[0]
+                            
+                            # 发送数据到WebSocket
+                            websocket = active_connections.get(connection_id)
+                            if websocket:
+                                # 发送帧数据
+                                await websocket.send_json({
+                                    "type": "stream_data",
+                                    "format": "jpeg",
+                                    "data": jpeg_data,
+                                    "frame_id": frame_id,
+                                    "width": current_width,
+                                    "height": current_height,
+                                    "original_width": orig_w,
+                                    "original_height": orig_h,
+                                    "resized": resized
+                                })
+                                
+                                processed_frames += 1
+                                last_send_time = current_time
+                            else:
+                                logger.info(f"WebSocket连接已关闭，停止流处理: {connection_id}")
+                                break
+                                
+                        except Exception as e:
+                            logger.error(f"处理帧时发生错误: {e}")
+                    
+                # 检查WebSocket连接是否仍然活跃
+                if connection_id not in active_connections:
+                    logger.info(f"WebSocket连接已关闭，停止帧处理: {connection_id}")
+                    break
+                    
+                # 短暂休眠，让出控制权
+                await asyncio.sleep(0.01)
+                
+            logger.info(f"帧处理任务完成，共处理 {processed_frames} 帧")
+            
+        except asyncio.CancelledError:
+            logger.info(f"帧处理任务被取消: {connection_id}")
+        except Exception as e:
+            logger.error(f"帧处理任务错误: {e}")
+            # 通知客户端发生错误
+            websocket = active_connections.get(connection_id)
+            if websocket:
+                await websocket.send_json({
+                    "type": "error",
+                    "message": f"帧处理错误: {str(e)}"
+                })
+        finally:
+            logger.info(f"帧处理任务已结束: {connection_id}")
+
+# 创建RTSP管理器实例
+rtsp_manager = RTSPManager()
 
 class FrameProcessor:
     def __init__(self):
@@ -520,6 +867,39 @@ async def websocket_endpoint(websocket: WebSocket):
                 })
                 logger.info(f"Client {connection_id} connected")
                 continue
+            
+            # 处理RTSP预览请求
+            elif message["type"] == "preview_request":
+                # 获取RTSP URL
+                stream_url = message.get("stream_url")
+                device_id = message.get("device_id")
+                
+                if not stream_url:
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "缺少流URL"
+                    })
+                    continue
+                
+                logger.info(f"收到预览请求: {device_id}, URL: {stream_url}")
+                
+                # 将WebSocket连接添加到活动连接字典
+                active_connections[connection_id] = websocket
+                
+                # 启动RTSP流处理
+                await websocket.send_json({
+                    "type": "preview_connecting",
+                    "message": "正在连接RTSP流，请稍候..."
+                })
+                
+                result = await rtsp_manager.start_stream(connection_id, stream_url)
+                
+                if not result:
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "启动流处理失败，可能该流已在处理中"
+                    })
+                continue
                 
             elif message["type"] == "config":
                 # 处理模型配置
@@ -790,7 +1170,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         raise ValueError("Failed to decode image")
                     
                     # 将帧数据放入队列
-                    results =await frame_queues[connection_id].put({
+                    results = await frame_queues[connection_id].put({
                         "frame": frame,
                         "model": models_info,
                         "frame_id": frame_id,
@@ -810,7 +1190,11 @@ async def websocket_endpoint(websocket: WebSocket):
                         "message": f"Failed to process frame: {str(e)}"
                     })
             
+            # 处理停止请求
             elif message["type"] == "stop":
+                # 停止RTSP流处理
+                if connection_id in active_connections:
+                    await rtsp_manager.stop_stream(connection_id)
                 break
                 
     except WebSocketDisconnect:
@@ -818,6 +1202,9 @@ async def websocket_endpoint(websocket: WebSocket):
     except Exception as e:
         logger.error(f"WebSocket error for client {connection_id}: {str(e)}")
     finally:
+        # 确保断开连接时停止所有流处理
+        if connection_id in active_connections:
+            await rtsp_manager.stop_stream(connection_id)
         await manager.disconnect(connection_id)
 
 @app.get("/")
@@ -826,4 +1213,4 @@ async def root():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("server:app", host="0.0.0.0", port=8765, reload=True)
+    uvicorn.run("base_rtsp_server:app", host="0.0.0.0", port=8765, reload=True)
