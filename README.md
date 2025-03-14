@@ -58,7 +58,7 @@ python server.py
 ```json
 {
     "type": "frame",
-    "model": "yolov8n",
+    "model": "yolo11n",
     "data": "base64_encoded_image"
 }
 ```

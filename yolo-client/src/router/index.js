@@ -1,5 +1,9 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
+// 引入检测相关页面
+import DetectionConfig from '../views/DetectionConfig.vue'
+import DetectionEvents from '../views/DetectionEvents.vue'
+
 const routes = [
   {
     path: '/login',
@@ -79,6 +83,24 @@ const routes = [
     component: () => import('../views/Models.vue'),
     meta: {
       requiresAuth: true
+    }
+  },
+  {
+    path: '/detection/config',
+    name: 'DetectionConfig',
+    component: DetectionConfig,
+    meta: {
+      requiresAuth: true,
+      title: '检测配置'
+    }
+  },
+  {
+    path: '/detection/events',
+    name: 'DetectionEvents',
+    component: DetectionEvents,
+    meta: {
+      requiresAuth: true,
+      title: '检测事件'
     }
   }
 ]

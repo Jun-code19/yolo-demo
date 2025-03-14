@@ -150,7 +150,17 @@ const getActionTypeTag = (type) => {
     'create_device': 'success',
     'update_device': 'warning',
     'delete_device': 'danger',
-    'login': 'info'
+    'login': 'info',
+    'create_admin': 'success',
+    'update_admin': 'warning',
+    'delete_admin': 'danger',
+    'update_password':'warning',
+    'update_profile':'warning',
+    'upload_model':'success',
+    'delete_model':'danger',
+    'activate_model':'success',
+    'deactivate_model':'warning'
+    
   }
   return typeTagMap[type] || ''
 }

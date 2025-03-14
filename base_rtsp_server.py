@@ -2,7 +2,7 @@ import asyncio
 import json
 import cv2
 import numpy as np
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from ultralytics import YOLO
 import base64
@@ -15,18 +15,40 @@ from concurrent.futures import ThreadPoolExecutor
 import torch
 import logging
 from pathlib import Path
-from contextlib import nullcontext
+from contextlib import nullcontext, asynccontextmanager
 import struct
-from typing import Dict
+from typing import Dict, List, Optional
 from api.routes import router as api_router
 import av
 import uuid
+from pydantic import BaseModel
+from models.database import SessionLocal, Device, DetectionConfig
+from detection_service import detection_manager, start_enabled_detections, add_frame_to_detection
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI()
+@asynccontextmanager
+async def lifespan(app):
+    # 执行启动时的代码
+    logger.info("服务启动中...")
+    
+    # 启动所有已启用的检测配置
+    background_tasks = BackgroundTasks()
+    background_tasks.add_task(start_enabled_detections)
+    
+    yield
+    
+    # 服务关闭时执行清理工作
+    logger.info("服务关闭中...")
+
+app = FastAPI(
+    title="RTSP Stream Server",
+    description="用于处理RTSP视频流的服务器API",
+    version="1.0",
+    lifespan=lifespan
+)
 app.include_router(api_router, prefix="/api/v1")
 
 # 配置CORS
@@ -126,6 +148,11 @@ class RTSPManager:
         frame_count = 0
         frame_buffer = self.frame_buffers.get(connection_id)
         skip_frame_count = 0
+        device_id = None
+        
+        # 提取设备ID（如果有）
+        if connection_id in rtsp_sessions and 'device_id' in rtsp_sessions[connection_id]:
+            device_id = rtsp_sessions[connection_id]['device_id']
         
         try:
             # 尝试从RTSP连接视频源
@@ -212,7 +239,17 @@ class RTSPManager:
                         if len(frame_buffer) >= frame_buffer.maxlen:
                             frame_buffer.popleft()  # 移除最老的帧，避免延迟累积
                         frame_buffer.append(frame_data)
-                        
+                    
+                    # 如果有设备ID且检测服务正在运行，将帧发送到检测服务
+                    if device_id:
+                        # 每5帧发送一帧到检测服务，避免过度消耗资源
+                        if frame_count % 5 == 0:
+                            add_frame_to_detection(device_id, img, {
+                                "frame_id": frame_count,
+                                "source": "rtsp",
+                                "connection_id": connection_id
+                            })
+                    
                     frame_count += 1
                     last_frame_time = current_time
                     
@@ -853,6 +890,7 @@ def non_max_suppression(boxes, scores, iou_threshold=0.45):
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     connection_id = await manager.connect(websocket)
+    rtsp_sessions[connection_id] = {"status": "connected"}
     models_info = None
     
     try:
@@ -1190,13 +1228,126 @@ async def websocket_endpoint(websocket: WebSocket):
                         "message": f"Failed to process frame: {str(e)}"
                     })
             
-            # 处理停止请求
-            elif message["type"] == "stop":
-                # 停止RTSP流处理
-                if connection_id in active_connections:
-                    await rtsp_manager.stop_stream(connection_id)
-                break
+            # 处理特定命令
+            elif message["type"] == "start_stream":
+                stream_url = message.get("url", "")
+                device_id = message.get("device_id", None)  # 添加设备ID参数
                 
+                if not stream_url:
+                    await manager.send_json(connection_id, {
+                        "error": "未提供有效的流URL"
+                    })
+                    continue
+                
+                # 存储设备ID（如果有）
+                if device_id:
+                    rtsp_sessions[connection_id]["device_id"] = device_id
+                
+                # 启动RTSP流
+                success = await rtsp_manager.start_stream(connection_id, stream_url)
+                
+                if success:
+                    await manager.send_json(connection_id, {
+                        "message": "RTSP流已启动",
+                        "status": "started"
+                    })
+                else:
+                    await manager.send_json(connection_id, {
+                        "error": "无法启动RTSP流",
+                        "status": "error"
+                    })
+            
+            elif message["type"] == "stop_stream":
+                await rtsp_manager.stop_stream(connection_id)
+                await manager.send_json(connection_id, {
+                    "message": "RTSP流已停止",
+                    "status": "stopped"
+                })
+            
+            # 添加检测控制命令
+            elif message["type"] == "start_detection":
+                device_id = message.get("device_id")
+                config_id = message.get("config_id", None)
+                
+                if not device_id:
+                    await manager.send_json(connection_id, {
+                        "error": "未提供设备ID",
+                        "status": "error"
+                    })
+                    continue
+                
+                # 保存设备ID关联
+                rtsp_sessions[connection_id]["device_id"] = device_id
+                
+                # 启动检测
+                success = await detection_manager.start_detection(device_id, config_id)
+                
+                if success:
+                    await manager.send_json(connection_id, {
+                        "message": f"设备 {device_id} 的检测任务已启动",
+                        "status": "detection_started"
+                    })
+                else:
+                    await manager.send_json(connection_id, {
+                        "error": f"无法为设备 {device_id} 启动检测",
+                        "status": "error"
+                    })
+            
+            elif message["type"] == "stop_detection":
+                device_id = message.get("device_id")
+                
+                if not device_id:
+                    # 尝试从会话中获取设备ID
+                    device_id = rtsp_sessions.get(connection_id, {}).get("device_id")
+                    
+                    if not device_id:
+                        await manager.send_json(connection_id, {
+                            "error": "未提供设备ID且无法从会话获取",
+                            "status": "error"
+                        })
+                        continue
+                
+                # 停止检测
+                success = await detection_manager.stop_detection(device_id)
+                
+                if success:
+                    await manager.send_json(connection_id, {
+                        "message": f"设备 {device_id} 的检测任务已停止",
+                        "status": "detection_stopped"
+                    })
+                else:
+                    await manager.send_json(connection_id, {
+                        "error": f"无法为设备 {device_id} 停止检测",
+                        "status": "error"
+                    })
+            
+            elif message["type"] == "check_detection_status":
+                device_id = message.get("device_id")
+                
+                if not device_id:
+                    # 尝试从会话中获取设备ID
+                    device_id = rtsp_sessions.get(connection_id, {}).get("device_id")
+                    
+                    if not device_id:
+                        await manager.send_json(connection_id, {
+                            "error": "未提供设备ID且无法从会话获取",
+                            "status": "error"
+                        })
+                        continue
+                
+                # 检查设备是否在检测中
+                is_active = device_id in detection_manager.get_active_devices()
+                
+                await manager.send_json(connection_id, {
+                    "device_id": device_id,
+                    "is_detecting": is_active,
+                    "status": "active" if is_active else "inactive"
+                })
+            
+            else:
+                # 处理其他现有命令...
+                pass
+
     except WebSocketDisconnect:
         logger.info(f"Client {connection_id} disconnected")
     except Exception as e:
@@ -1210,6 +1361,57 @@ async def websocket_endpoint(websocket: WebSocket):
 @app.get("/")
 async def root():
     return {"message": "YOLO Detection Server"}
+
+# 添加检测服务相关API接口
+class DeviceDetectionRequest(BaseModel):
+    device_id: str
+    config_id: Optional[str] = None
+
+@app.post("/api/v1/detection/start")
+async def start_detection(
+    request: DeviceDetectionRequest,
+    background_tasks: BackgroundTasks
+):
+    """启动设备检测"""
+    # 验证设备存在
+    db = SessionLocal()
+    try:
+        device = db.query(Device).filter(Device.device_id == request.device_id).first()
+        if not device:
+            raise HTTPException(status_code=404, detail="设备不存在")
+        
+        # 在后台任务中启动检测
+        background_tasks.add_task(
+            detection_manager.start_detection,
+            request.device_id,
+            request.config_id
+        )
+        
+        return {"message": f"设备 {request.device_id} 的检测任务已启动"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
+
+@app.post("/api/v1/detection/stop")
+async def stop_detection(
+    request: DeviceDetectionRequest,
+    background_tasks: BackgroundTasks
+):
+    """停止设备检测"""
+    # 在后台任务中停止检测
+    background_tasks.add_task(
+        detection_manager.stop_detection,
+        request.device_id
+    )
+    
+    return {"message": f"设备 {request.device_id} 的检测任务已停止"}
+
+@app.get("/api/v1/detection/active")
+async def get_active_detections():
+    """获取当前活跃的检测设备列表"""
+    active_devices = detection_manager.get_active_devices()
+    return {"active_devices": active_devices, "count": len(active_devices)}
 
 if __name__ == "__main__":
     import uvicorn

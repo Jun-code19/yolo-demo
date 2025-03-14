@@ -1,9 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
-from models.database import get_db, Device, Video, AnalysisResult, Alarm, User, SysLog, DetectionModel
-from pydantic import BaseModel, IPvAnyAddress
+from models.database import get_db, Device, Video, AnalysisResult, Alarm, User, SysLog, DetectionModel, DetectionConfig, DetectionEvent, DetectionSchedule, DetectionStat, DetectionPerformance, SaveMode, EventStatus, DetectionFrequency
+from pydantic import BaseModel, IPvAnyAddress, Field
 from fastapi.security import OAuth2PasswordRequestForm
 from api.auth import authenticate_user, create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES, get_current_user, check_admin_permission, get_password_hash, verify_password
 from api.logger import log_action
@@ -14,6 +14,8 @@ import shutil
 import uuid
 import json
 from pathlib import Path
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy import func, text, desc, and_, or_
 
 router = APIRouter()
 
@@ -598,4 +600,554 @@ def toggle_models_active(models_id: str, active: bool, db: Session = Depends(get
     action = "activate_model" if active else "deactivate_model"
     log_action(db, current_user.user_id, action, models_id, f"{'Activated' if active else 'Deactivated'} model {model.models_name}")
     
-    return {"message": f"Model {'activated' if active else 'deactivated'} successfully"} 
+    return {"message": f"Model {'activated' if active else 'deactivated'} successfully"}
+
+# 添加检测配置的Pydantic模型
+class DetectionConfigBase(BaseModel):
+    device_id: str
+    models_id: str
+    enabled: bool = False
+    sensitivity: float = 0.5
+    target_classes: List[str] = []
+    frequency: str = "realtime"
+    save_mode: str = "screenshot"
+    save_duration: int = 10
+    max_storage_days: int = 30
+
+class DetectionConfigCreate(DetectionConfigBase):
+    pass
+
+class DetectionConfigUpdate(BaseModel):
+    models_id: Optional[str] = None
+    enabled: Optional[bool] = None
+    sensitivity: Optional[float] = None
+    target_classes: Optional[List[str]] = None
+    frequency: Optional[str] = None
+    save_mode: Optional[str] = None
+    save_duration: Optional[int] = None
+    max_storage_days: Optional[int] = None
+
+class DetectionConfigResponse(DetectionConfigBase):
+    config_id: str
+    created_at: datetime
+    updated_at: datetime
+    created_by: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+# 添加检测计划的Pydantic模型
+class DetectionScheduleBase(BaseModel):
+    config_id: str
+    start_time: datetime
+    end_time: datetime
+    weekdays: List[int] = []
+    is_active: bool = True
+
+class DetectionScheduleCreate(DetectionScheduleBase):
+    pass
+
+class DetectionScheduleResponse(DetectionScheduleBase):
+    schedule_id: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+# 添加检测事件的Pydantic模型
+class DetectionEventBase(BaseModel):
+    device_id: str
+    config_id: str
+    event_type: str
+    confidence: float
+    bounding_box: dict
+    meta_data: Optional[dict] = None
+    location: Optional[str] = None
+
+class DetectionEventCreate(DetectionEventBase):
+    pass
+
+class DetectionEventUpdate(BaseModel):
+    status: Optional[str] = None
+    notes: Optional[str] = None
+    viewed_by: Optional[str] = None
+
+class DetectionEventResponse(DetectionEventBase):
+    event_id: str
+    timestamp: datetime
+    snippet_path: Optional[str] = None
+    thumbnail_path: Optional[str] = None
+    status: str
+    viewed_at: Optional[datetime] = None
+    viewed_by: Optional[str] = None
+    notes: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+# 获取检测配置列表
+@router.get("/detection/configs", response_model=List[DetectionConfigResponse], tags=["检测配置"])
+async def get_detection_configs(
+    device_id: Optional[str] = None,
+    enabled: Optional[bool] = None,
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db)
+):
+    """
+    获取检测配置列表，可按设备ID和启用状态筛选
+    """
+    query = db.query(DetectionConfig)
+    
+    if device_id:
+        query = query.filter(DetectionConfig.device_id == device_id)
+    if enabled is not None:
+        query = query.filter(DetectionConfig.enabled == enabled)
+    
+    configs = query.offset(skip).limit(limit).all()
+    return configs
+
+# 获取单个检测配置
+@router.get("/detection/configs/{config_id}", response_model=DetectionConfigResponse, tags=["检测配置"])
+async def get_detection_config(
+    config_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    通过配置ID获取检测配置详情
+    """
+    config = db.query(DetectionConfig).filter(DetectionConfig.config_id == config_id).first()
+    if not config:
+        raise HTTPException(status_code=404, detail="检测配置不存在")
+    return config
+
+# 创建检测配置
+@router.post("/detection/configs", response_model=DetectionConfigResponse, tags=["检测配置"])
+async def create_detection_config(
+    config: DetectionConfigCreate,
+    db: Session = Depends(get_db)
+):
+    """
+    创建新的检测配置
+    """
+    # 检查设备是否存在
+    device = db.query(Device).filter(Device.device_id == config.device_id).first()
+    if not device:
+        raise HTTPException(status_code=404, detail="设备不存在")
+    
+    # 检查模型是否存在
+    model = db.query(DetectionModel).filter(DetectionModel.models_id == config.models_id).first()
+    if not model:
+        raise HTTPException(status_code=404, detail="检测模型不存在")
+    
+    # 创建配置
+    try:
+        config_id = str(uuid.uuid4())
+        db_config = DetectionConfig(
+            config_id=config_id,
+            device_id=config.device_id,
+            models_id=config.models_id,
+            enabled=config.enabled,
+            sensitivity=config.sensitivity,
+            target_classes=config.target_classes,
+            frequency=getattr(DetectionFrequency, config.frequency),
+            save_mode=getattr(SaveMode, config.save_mode),
+            save_duration=config.save_duration,
+            max_storage_days=config.max_storage_days,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow()
+        )
+        db.add(db_config)
+        db.commit()
+        db.refresh(db_config)
+        return db_config
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"创建检测配置失败: {str(e)}")
+
+# 更新检测配置
+@router.put("/detection/configs/{config_id}", response_model=DetectionConfigResponse, tags=["检测配置"])
+async def update_detection_config(
+    config_id: str,
+    config_update: DetectionConfigUpdate,
+    db: Session = Depends(get_db)
+):
+    """
+    更新检测配置
+    """
+    db_config = db.query(DetectionConfig).filter(DetectionConfig.config_id == config_id).first()
+    if not db_config:
+        raise HTTPException(status_code=404, detail="检测配置不存在")
+    
+    # 更新字段
+    update_data = config_update.dict(exclude_unset=True)
+    
+    if "models_id" in update_data:
+        # 检查模型是否存在
+        model = db.query(DetectionModel).filter(DetectionModel.models_id == update_data["models_id"]).first()
+        if not model:
+            raise HTTPException(status_code=404, detail="检测模型不存在")
+    
+    if "frequency" in update_data:
+        update_data["frequency"] = getattr(DetectionFrequency, update_data["frequency"])
+    
+    if "save_mode" in update_data:
+        update_data["save_mode"] = getattr(SaveMode, update_data["save_mode"])
+    
+    # 更新时间戳
+    update_data["updated_at"] = datetime.utcnow()
+    
+    try:
+        for key, value in update_data.items():
+            setattr(db_config, key, value)
+        
+        db.commit()
+        db.refresh(db_config)
+        return db_config
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"更新检测配置失败: {str(e)}")
+
+@router.put("/detection/configs/{config_id}/toggle")
+def toggle_detection_active(config_id: str, enabled: bool, db: Session = Depends(get_db),
+                       current_user: User = Depends(get_current_user)):
+    """切换检测配置启用状态"""
+    # 检查权限
+    check_admin_permission(current_user)
+    
+    # 查找模型
+    config = db.query(DetectionConfig).filter(DetectionConfig.config_id == config_id).first()
+    if not config:
+        raise HTTPException(status_code=404, detail="检测配置不存在")
+    
+    # 更新状态
+    config.enabled = enabled
+    db.commit()
+    db.refresh(config)
+    return {"message": f"检测配置 {'启用' if enabled else '禁用'} 成功"}
+
+# 删除检测配置
+@router.delete("/detection/configs/{config_id}", tags=["检测配置"])
+async def delete_detection_config(
+    config_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    删除检测配置
+    """
+    db_config = db.query(DetectionConfig).filter(DetectionConfig.config_id == config_id).first()
+    if not db_config:
+        raise HTTPException(status_code=404, detail="检测配置不存在")
+    
+    try:
+        db.delete(db_config)
+        db.commit()
+        return {"message": "检测配置已成功删除"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"删除检测配置失败: {str(e)}")
+
+# 获取设备的所有检测事件
+@router.get("/detection/events", response_model=List[DetectionEventResponse], tags=["检测事件"])
+async def get_detection_events(
+    device_id: Optional[str] = None,
+    config_id: Optional[str] = None,
+    event_type: Optional[str] = None,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+    status: Optional[str] = None,
+    min_confidence: Optional[float] = None,
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db)
+):
+    """
+    获取检测事件列表，支持多种筛选条件
+    """
+    query = db.query(DetectionEvent)
+    
+    # 应用筛选条件
+    if device_id:
+        query = query.filter(DetectionEvent.device_id == device_id)
+    if config_id:
+        query = query.filter(DetectionEvent.config_id == config_id)
+    if event_type:
+        query = query.filter(DetectionEvent.event_type == event_type)
+    if start_date:
+        query = query.filter(DetectionEvent.created_at >= start_date)
+    if end_date:
+        query = query.filter(DetectionEvent.created_at <= end_date)
+    if status:
+        query = query.filter(DetectionEvent.status == getattr(EventStatus, status))
+    if min_confidence:
+        query = query.filter(DetectionEvent.confidence >= min_confidence)
+    
+    # 按时间倒序排列
+    query = query.order_by(desc(DetectionEvent.created_at))
+    
+    events = query.offset(skip).limit(limit).all()
+    return events
+
+# 获取单个检测事件详情
+@router.get("/detection/events/{event_id}", response_model=DetectionEventResponse, tags=["检测事件"])
+async def get_detection_event(
+    event_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    通过事件ID获取检测事件详情
+    """
+    event = db.query(DetectionEvent).filter(DetectionEvent.event_id == event_id).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="检测事件不存在")
+    return event
+
+# 创建检测事件
+@router.post("/detection/events", response_model=DetectionEventResponse, tags=["检测事件"])
+async def create_detection_event(
+    event: DetectionEventCreate,
+    db: Session = Depends(get_db)
+):
+    """
+    创建新的检测事件
+    """
+    # 检查设备是否存在
+    device = db.query(Device).filter(Device.device_id == event.device_id).first()
+    if not device:
+        raise HTTPException(status_code=404, detail="设备不存在")
+    
+    # 检查配置是否存在
+    config = db.query(DetectionConfig).filter(DetectionConfig.config_id == event.config_id).first()
+    if not config:
+        raise HTTPException(status_code=404, detail="检测配置不存在")
+    
+    try:
+        event_id = str(uuid.uuid4())
+        db_event = DetectionEvent(
+            event_id=event_id,
+            device_id=event.device_id,
+            config_id=event.config_id,
+            timestamp=datetime.utcnow(),
+            event_type=event.event_type,
+            confidence=event.confidence,
+            bounding_box=event.bounding_box,
+            meta_data=event.meta_data,
+            status=EventStatus.new,
+            location=event.location,
+            created_at=datetime.utcnow()
+        )
+        db.add(db_event)
+        db.commit()
+        db.refresh(db_event)
+        
+        # 更新统计数据
+        update_detection_stats(db, event.device_id, event.event_type)
+        
+        return db_event
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"创建检测事件失败: {str(e)}")
+
+# 更新检测事件状态
+@router.put("/detection/events/{event_id}", response_model=DetectionEventResponse, tags=["检测事件"])
+async def update_detection_event(
+    event_id: str,
+    event_update: DetectionEventUpdate,
+    db: Session = Depends(get_db)
+):
+    """
+    更新检测事件状态、备注等信息
+    """
+    db_event = db.query(DetectionEvent).filter(DetectionEvent.event_id == event_id).first()
+    if not db_event:
+        raise HTTPException(status_code=404, detail="检测事件不存在")
+    
+    # 更新字段
+    update_data = event_update.dict(exclude_unset=True)
+    
+    if "status" in update_data:
+        update_data["status"] = getattr(EventStatus, update_data["status"])
+    
+    if "viewed_by" in update_data and update_data["viewed_by"]:
+        # 检查用户是否存在
+        user = db.query(User).filter(User.user_id == update_data["viewed_by"]).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="用户不存在")
+        update_data["viewed_at"] = datetime.utcnow()
+    
+    try:
+        for key, value in update_data.items():
+            setattr(db_event, key, value)
+        
+        db.commit()
+        db.refresh(db_event)
+        return db_event
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"更新检测事件失败: {str(e)}")
+
+# 删除检测事件
+@router.delete("/detection/events/{event_id}", tags=["检测事件"])
+async def delete_detection_event(
+    event_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    删除检测事件
+    """
+    db_event = db.query(DetectionEvent).filter(DetectionEvent.event_id == event_id).first()
+    if not db_event:
+        raise HTTPException(status_code=404, detail="检测事件不存在")
+    
+    try:
+        db.delete(db_event)
+        db.commit()
+        return {"message": "检测事件已成功删除"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"删除检测事件失败: {str(e)}")
+
+# 获取设备的检测统计数据
+@router.get("/detection/stats", response_model=List[dict], tags=["检测统计"])
+async def get_detection_stats(
+    device_id: Optional[str] = None,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+    db: Session = Depends(get_db)
+):
+    """
+    获取设备的检测统计数据
+    """
+    query = db.query(DetectionStat)
+    
+    if device_id:
+        query = query.filter(DetectionStat.device_id == device_id)
+    if start_date:
+        query = query.filter(DetectionStat.date >= start_date)
+    if end_date:
+        query = query.filter(DetectionStat.date <= end_date)
+    
+    stats = query.order_by(DetectionStat.date).all()
+    
+    result = []
+    for stat in stats:
+        result.append({
+            "stat_id": stat.stat_id,
+            "device_id": stat.device_id,
+            "date": stat.date,
+            "total_events": stat.total_events,
+            "by_class": stat.by_class,
+            "peak_hour": stat.peak_hour,
+            "peak_hour_count": stat.peak_hour_count
+        })
+    
+    return result
+
+# 检测计划相关API
+@router.get("/detection/schedules", response_model=List[DetectionScheduleResponse], tags=["检测计划"])
+async def get_detection_schedules(
+    config_id: Optional[str] = None,
+    active_only: bool = False,
+    db: Session = Depends(get_db)
+):
+    """
+    获取检测计划列表
+    """
+    query = db.query(DetectionSchedule)
+    
+    if config_id:
+        query = query.filter(DetectionSchedule.config_id == config_id)
+    if active_only:
+        query = query.filter(DetectionSchedule.is_active == True)
+    
+    schedules = query.all()
+    return schedules
+
+@router.post("/detection/schedules", response_model=DetectionScheduleResponse, tags=["检测计划"])
+async def create_detection_schedule(
+    schedule: DetectionScheduleCreate,
+    db: Session = Depends(get_db)
+):
+    """
+    创建新的检测计划
+    """
+    # 检查配置是否存在
+    config = db.query(DetectionConfig).filter(DetectionConfig.config_id == schedule.config_id).first()
+    if not config:
+        raise HTTPException(status_code=404, detail="检测配置不存在")
+    
+    # 验证时间范围
+    if schedule.start_time >= schedule.end_time:
+        raise HTTPException(status_code=400, detail="开始时间必须早于结束时间")
+    
+    # 验证周几设置
+    for day in schedule.weekdays:
+        if day < 1 or day > 7:
+            raise HTTPException(status_code=400, detail="周几设置必须是1-7的整数")
+    
+    try:
+        schedule_id = str(uuid.uuid4())
+        db_schedule = DetectionSchedule(
+            schedule_id=schedule_id,
+            config_id=schedule.config_id,
+            start_time=schedule.start_time,
+            end_time=schedule.end_time,
+            weekdays=schedule.weekdays,
+            is_active=schedule.is_active,
+            created_at=datetime.utcnow()
+        )
+        db.add(db_schedule)
+        db.commit()
+        db.refresh(db_schedule)
+        return db_schedule
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"创建检测计划失败: {str(e)}")
+
+# 辅助函数：更新检测统计数据
+def update_detection_stats(db: Session, device_id: str, event_type: str):
+    # 获取今天的日期（不包含时间）
+    today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    
+    # 查找今天的统计记录
+    stat = db.query(DetectionStat).filter(
+        DetectionStat.device_id == device_id,
+        func.date(DetectionStat.date) == func.date(today)
+    ).first()
+    
+    # 如果不存在，创建新记录
+    if not stat:
+        stat = DetectionStat(
+            stat_id=str(uuid.uuid4()),
+            device_id=device_id,
+            date=today,
+            total_events=1,
+            by_class={event_type: 1},
+            peak_hour=datetime.utcnow().hour,
+            peak_hour_count=1,
+            created_at=datetime.utcnow()
+        )
+        db.add(stat)
+    else:
+        # 更新统计数据
+        stat.total_events += 1
+        
+        # 更新分类统计
+        by_class = stat.by_class or {}
+        by_class[event_type] = by_class.get(event_type, 0) + 1
+        stat.by_class = by_class
+        
+        # 更新峰值小时
+        current_hour = datetime.utcnow().hour
+        hourly_events = db.query(func.count(DetectionEvent.event_id)).filter(
+            DetectionEvent.device_id == device_id,
+            func.date(DetectionEvent.created_at) == func.date(today),
+            func.extract('hour', DetectionEvent.created_at) == current_hour
+        ).scalar()
+        
+        if hourly_events > stat.peak_hour_count:
+            stat.peak_hour = current_hour
+            stat.peak_hour_count = hourly_events
+    
+    db.commit() 

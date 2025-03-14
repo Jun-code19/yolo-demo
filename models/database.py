@@ -1,9 +1,10 @@
 from sqlalchemy import create_engine, Column, String, Boolean, DateTime, Integer, Float, Enum, ForeignKey, ARRAY, Text, SmallInteger
 from sqlalchemy.dialects.postgresql import INET, JSONB
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import sessionmaker, relationship
 import enum
 from datetime import datetime
+import uuid
 
 Base = declarative_base()
 
@@ -18,6 +19,22 @@ class AnalysisTarget(enum.Enum):
     fire = "fire"
     helmet = "helmet"
 
+class SaveMode(enum.Enum):
+    screenshot = "screenshot"
+    video = "video"
+    both = "both"
+
+class EventStatus(enum.Enum):
+    new = "new"
+    viewed = "viewed"
+    flagged = "flagged"
+    archived = "archived"
+
+class DetectionFrequency(enum.Enum):
+    realtime = "realtime"
+    scheduled = "scheduled"
+    manual = "manual"
+
 class Device(Base):
     __tablename__ = "device"
     
@@ -30,6 +47,9 @@ class Device(Base):
     password = Column(String(256), nullable=False)
     status = Column(Boolean, default=True)
     last_heartbeat = Column(DateTime)
+    
+    detection_configs = relationship("DetectionConfig", back_populates="device", cascade="all, delete-orphan")
+    detection_events = relationship("DetectionEvent", back_populates="device", cascade="all, delete-orphan")
 
 class Video(Base):
     __tablename__ = "video"
@@ -89,17 +109,107 @@ class DetectionModel(Base):
     
     models_id = Column(String(64), primary_key=True)
     models_name = Column(String(255), nullable=False)
-    models_type = Column(String(50), nullable=False)  # 例如：object_detection, segmentation等
-    file_path = Column(Text, nullable=False)  # 模型文件路径
-    file_size = Column(Integer)  # 文件大小（字节）
-    format = Column(String(20), nullable=False)  # 例如：pt, onnx等
+    models_type = Column(String(50), nullable=False)
+    file_path = Column(Text, nullable=False)
+    file_size = Column(Integer)
+    format = Column(String(20), nullable=False)
     description = Column(Text)
-    parameters = Column(JSONB)  # 存储模型参数，如类别、层数等
+    parameters = Column(JSONB)
     upload_time = Column(DateTime, default=datetime.utcnow)
     last_used = Column(DateTime)
     is_active = Column(Boolean, default=True)
+    
+    detection_configs = relationship("DetectionConfig", back_populates="model", cascade="all, delete-orphan")
 
-# 数据库连接配置
+class DetectionConfig(Base):
+    __tablename__ = "detection_config"
+    
+    config_id = Column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
+    device_id = Column(String(64), ForeignKey('device.device_id'), nullable=False)
+    models_id = Column(String(64), ForeignKey('detection_model.models_id'), nullable=False)
+    enabled = Column(Boolean, default=False)
+    sensitivity = Column(Float, default=0.5)
+    target_classes = Column(ARRAY(Text))
+    frequency = Column(Enum(DetectionFrequency), default=DetectionFrequency.realtime)
+    save_mode = Column(Enum(SaveMode), default=SaveMode.screenshot)
+    save_duration = Column(Integer, default=10)
+    max_storage_days = Column(Integer, default=30)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_by = Column(String(64), ForeignKey('users.user_id'))
+    
+    device = relationship("Device", back_populates="detection_configs")
+    model = relationship("DetectionModel", back_populates="detection_configs")
+    schedules = relationship("DetectionSchedule", back_populates="config", cascade="all, delete-orphan")
+    events = relationship("DetectionEvent", back_populates="config", cascade="all, delete-orphan")
+
+class DetectionSchedule(Base):
+    __tablename__ = "detection_schedule"
+    
+    schedule_id = Column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
+    config_id = Column(String(64), ForeignKey('detection_config.config_id'), nullable=False)
+    start_time = Column(DateTime, nullable=False)
+    end_time = Column(DateTime, nullable=False)
+    weekdays = Column(ARRAY(Integer))
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    config = relationship("DetectionConfig", back_populates="schedules")
+
+class DetectionEvent(Base):
+    __tablename__ = "detection_event"
+    
+    event_id = Column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
+    device_id = Column(String(64), ForeignKey('device.device_id'), nullable=False)
+    config_id = Column(String(64), ForeignKey('detection_config.config_id'), nullable=False)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+    event_type = Column(String(50))
+    confidence = Column(Float)
+    bounding_box = Column(JSONB)
+    snippet_path = Column(Text)
+    thumbnail_path = Column(Text)
+    meta_data = Column(JSONB)
+    status = Column(Enum(EventStatus), default=EventStatus.new)
+    viewed_at = Column(DateTime)
+    viewed_by = Column(String(64), ForeignKey('users.user_id'))
+    notes = Column(Text)
+    location = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    device = relationship("Device", back_populates="detection_events")
+    config = relationship("DetectionConfig", back_populates="events")
+    viewer = relationship("User", foreign_keys=[viewed_by])
+
+class DetectionStat(Base):
+    __tablename__ = "detection_stat"
+    
+    stat_id = Column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
+    device_id = Column(String(64), ForeignKey('device.device_id'))
+    date = Column(DateTime, default=datetime.utcnow)
+    total_events = Column(Integer, default=0)
+    by_class = Column(JSONB)
+    peak_hour = Column(Integer)
+    peak_hour_count = Column(Integer)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    device = relationship("Device")
+
+class DetectionPerformance(Base):
+    __tablename__ = "detection_performance"
+    
+    performance_id = Column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
+    device_id = Column(String(64), ForeignKey('device.device_id'))
+    config_id = Column(String(64), ForeignKey('detection_config.config_id'))
+    timestamp = Column(DateTime, default=datetime.utcnow)
+    detection_time = Column(Float)
+    preprocessing_time = Column(Float)
+    postprocessing_time = Column(Float)
+    frame_width = Column(Integer)
+    frame_height = Column(Integer)
+    objects_detected = Column(Integer)
+    device = relationship("Device")
+    config = relationship("DetectionConfig")
+
 DATABASE_URL = "postgresql://postgres:admin123@localhost:5432/eyris_core_db"
 
 engine = create_engine(DATABASE_URL)

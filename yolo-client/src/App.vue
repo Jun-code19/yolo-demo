@@ -122,6 +122,16 @@ const handleDropdownCommand = (command) => {
             <el-icon><Picture /></el-icon>
             <template #title>图片检测</template>
           </el-menu-item>
+          
+          <el-menu-item index="/detection/config">
+            <el-icon><Setting /></el-icon>
+            <template #title>检测配置</template>
+          </el-menu-item>
+          
+          <el-menu-item index="/detection/events">
+            <el-icon><DataLine /></el-icon>
+            <template #title>检测事件</template>
+          </el-menu-item>
         </el-sub-menu>
 
         <el-menu-item index="/devices">

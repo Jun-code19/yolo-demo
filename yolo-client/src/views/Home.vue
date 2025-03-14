@@ -69,7 +69,7 @@ const cards = ref([
   {
     title: '今日检测',
     value: 234,
-    type: '',
+    type: 'primary',
     tag: '实时',
     icon: 'VideoCameraFilled'
   },
