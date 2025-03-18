@@ -2,7 +2,7 @@ fastapi==0.100.0
 uvicorn==0.22.0
 websockets==12.0
 python-multipart==0.0.6
-ultralytics==8.3.128
+ultralytics==8.3.91
 numpy==1.24.3
 opencv-python==4.8.1.78
 python-jose==3.3.0

@@ -210,7 +210,7 @@ class DetectionPerformance(Base):
     device = relationship("Device")
     config = relationship("DetectionConfig")
 
-DATABASE_URL = "postgresql://postgres:admin123@localhost:5432/eyris_core_db"
+DATABASE_URL = "postgresql://postgres:admin123@10.83.34.35:5432/eyris_core_db"
 
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

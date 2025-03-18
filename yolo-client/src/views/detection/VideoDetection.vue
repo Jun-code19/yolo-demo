@@ -540,7 +540,7 @@ const initWebSocket = () => {
 
     function createNewConnection() {
       try {
-        ws = new WebSocket('ws://10.83.34.35:8765/ws')
+        ws = new WebSocket('ws://localhost:8765/ws')
         
         ws.onopen = () => {
           console.log('WebSocket connection established, sending handshake...')

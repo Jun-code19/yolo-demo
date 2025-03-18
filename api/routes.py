@@ -608,9 +608,9 @@ class DetectionConfigBase(BaseModel):
     models_id: str
     enabled: bool = False
     sensitivity: float = 0.5
-    target_classes: List[str] = []
-    frequency: str = "realtime"
-    save_mode: str = "screenshot"
+    target_classes: Optional[List[str]] = []
+    frequency: Optional[str] = "realtime"
+    save_mode: Optional[str] = "screenshot"
     save_duration: int = 10
     max_storage_days: int = 30
 
@@ -654,13 +654,18 @@ class DetectionScheduleResponse(DetectionScheduleBase):
     class Config:
         from_attributes = True
 
+class BoundingBoxItem(BaseModel):
+    bbox: List[float]
+    class_id: int
+    class_name: str
+    confidence: float
 # 添加检测事件的Pydantic模型
 class DetectionEventBase(BaseModel):
     device_id: str
     config_id: str
     event_type: str
     confidence: float
-    bounding_box: dict
+    bounding_box: List[BoundingBoxItem]  # 修改为列表
     meta_data: Optional[dict] = None
     location: Optional[str] = None
 
@@ -687,7 +692,7 @@ class DetectionEventResponse(DetectionEventBase):
         from_attributes = True
 
 # 获取检测配置列表
-@router.get("/detection/configs", response_model=List[DetectionConfigResponse], tags=["检测配置"])
+@router.get("/detection/configs", response_model=List[DetectionConfigResponse])
 async def get_detection_configs(
     device_id: Optional[str] = None,
     enabled: Optional[bool] = None,
@@ -706,7 +711,28 @@ async def get_detection_configs(
         query = query.filter(DetectionConfig.enabled == enabled)
     
     configs = query.offset(skip).limit(limit).all()
-    return configs
+    
+    # 数据转换，确保枚举值被正确处理
+    result = []
+    for config in configs:
+        config_dict = {
+            "config_id": config.config_id,
+            "device_id": config.device_id,
+            "models_id": config.models_id,
+            "enabled": config.enabled,
+            "sensitivity": config.sensitivity,
+            "target_classes": config.target_classes if config.target_classes else [],
+            "frequency": config.frequency.value if hasattr(config.frequency, "value") else config.frequency,
+            "save_mode": config.save_mode.value if hasattr(config.save_mode, "value") else config.save_mode,
+            "save_duration": config.save_duration,
+            "max_storage_days": config.max_storage_days,
+            "created_at": config.created_at,
+            "updated_at": config.updated_at,
+            "created_by": config.created_by
+        }
+        result.append(config_dict)
+    
+    return result
 
 # 获取单个检测配置
 @router.get("/detection/configs/{config_id}", response_model=DetectionConfigResponse, tags=["检测配置"])
@@ -715,12 +741,30 @@ async def get_detection_config(
     db: Session = Depends(get_db)
 ):
     """
-    通过配置ID获取检测配置详情
+    获取单个检测配置详情
     """
     config = db.query(DetectionConfig).filter(DetectionConfig.config_id == config_id).first()
     if not config:
         raise HTTPException(status_code=404, detail="检测配置不存在")
-    return config
+    
+    # 数据转换，确保枚举值被正确处理
+    config_dict = {
+        "config_id": config.config_id,
+        "device_id": config.device_id,
+        "models_id": config.models_id,
+        "enabled": config.enabled,
+        "sensitivity": config.sensitivity,
+        "target_classes": config.target_classes if config.target_classes else [],
+        "frequency": config.frequency.value if hasattr(config.frequency, "value") else config.frequency,
+        "save_mode": config.save_mode.value if hasattr(config.save_mode, "value") else config.save_mode,
+        "save_duration": config.save_duration,
+        "max_storage_days": config.max_storage_days,
+        "created_at": config.created_at,
+        "updated_at": config.updated_at,
+        "created_by": config.created_by
+    }
+    
+    return config_dict
 
 # 创建检测配置
 @router.post("/detection/configs", response_model=DetectionConfigResponse, tags=["检测配置"])
@@ -734,37 +778,58 @@ async def create_detection_config(
     # 检查设备是否存在
     device = db.query(Device).filter(Device.device_id == config.device_id).first()
     if not device:
-        raise HTTPException(status_code=404, detail="设备不存在")
+        raise HTTPException(status_code=400, detail="设备不存在")
     
     # 检查模型是否存在
     model = db.query(DetectionModel).filter(DetectionModel.models_id == config.models_id).first()
     if not model:
-        raise HTTPException(status_code=404, detail="检测模型不存在")
+        raise HTTPException(status_code=400, detail="检测模型不存在")
     
-    # 创建配置
+    # 处理枚举类型
     try:
-        config_id = str(uuid.uuid4())
-        db_config = DetectionConfig(
-            config_id=config_id,
-            device_id=config.device_id,
-            models_id=config.models_id,
-            enabled=config.enabled,
-            sensitivity=config.sensitivity,
-            target_classes=config.target_classes,
-            frequency=getattr(DetectionFrequency, config.frequency),
-            save_mode=getattr(SaveMode, config.save_mode),
-            save_duration=config.save_duration,
-            max_storage_days=config.max_storage_days,
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow()
-        )
-        db.add(db_config)
-        db.commit()
-        db.refresh(db_config)
-        return db_config
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"创建检测配置失败: {str(e)}")
+        frequency_enum = DetectionFrequency(config.frequency) if isinstance(config.frequency, str) else config.frequency
+        save_mode_enum = SaveMode(config.save_mode) if isinstance(config.save_mode, str) else config.save_mode
+    except ValueError:
+        raise HTTPException(status_code=400, detail="无效的频率或保存模式值")
+    
+    # 创建配置记录
+    db_config = DetectionConfig(
+        config_id=str(uuid.uuid4()),
+        device_id=config.device_id,
+        models_id=config.models_id,
+        enabled=config.enabled,
+        sensitivity=config.sensitivity,
+        target_classes=config.target_classes,
+        frequency=frequency_enum,
+        save_mode=save_mode_enum,
+        save_duration=config.save_duration,
+        max_storage_days=config.max_storage_days,
+        created_at=datetime.now(),
+        updated_at=datetime.now()
+    )
+    
+    db.add(db_config)
+    db.commit()
+    db.refresh(db_config)
+    
+    # 转换返回数据
+    config_dict = {
+        "config_id": db_config.config_id,
+        "device_id": db_config.device_id,
+        "models_id": db_config.models_id,
+        "enabled": db_config.enabled,
+        "sensitivity": db_config.sensitivity,
+        "target_classes": db_config.target_classes if db_config.target_classes else [],
+        "frequency": db_config.frequency.value if hasattr(db_config.frequency, "value") else db_config.frequency,
+        "save_mode": db_config.save_mode.value if hasattr(db_config.save_mode, "value") else db_config.save_mode,
+        "save_duration": db_config.save_duration,
+        "max_storage_days": db_config.max_storage_days,
+        "created_at": db_config.created_at,
+        "updated_at": db_config.updated_at,
+        "created_by": db_config.created_by
+    }
+    
+    return config_dict
 
 # 更新检测配置
 @router.put("/detection/configs/{config_id}", response_model=DetectionConfigResponse, tags=["检测配置"])
@@ -776,38 +841,71 @@ async def update_detection_config(
     """
     更新检测配置
     """
+    # 查找配置
     db_config = db.query(DetectionConfig).filter(DetectionConfig.config_id == config_id).first()
     if not db_config:
         raise HTTPException(status_code=404, detail="检测配置不存在")
     
-    # 更新字段
-    update_data = config_update.dict(exclude_unset=True)
-    
-    if "models_id" in update_data:
-        # 检查模型是否存在
-        model = db.query(DetectionModel).filter(DetectionModel.models_id == update_data["models_id"]).first()
+    # 更新模型ID（如果提供）
+    if config_update.models_id is not None:
+        model = db.query(DetectionModel).filter(DetectionModel.models_id == config_update.models_id).first()
         if not model:
-            raise HTTPException(status_code=404, detail="检测模型不存在")
+            raise HTTPException(status_code=400, detail="检测模型不存在")
+        db_config.models_id = config_update.models_id
     
-    if "frequency" in update_data:
-        update_data["frequency"] = getattr(DetectionFrequency, update_data["frequency"])
+    # 更新其他字段
+    if config_update.enabled is not None:
+        db_config.enabled = config_update.enabled
     
-    if "save_mode" in update_data:
-        update_data["save_mode"] = getattr(SaveMode, update_data["save_mode"])
+    if config_update.sensitivity is not None:
+        db_config.sensitivity = config_update.sensitivity
+    
+    if config_update.target_classes is not None:
+        db_config.target_classes = config_update.target_classes
+    
+    if config_update.frequency is not None:
+        try:
+            db_config.frequency = DetectionFrequency(config_update.frequency) if isinstance(config_update.frequency, str) else config_update.frequency
+        except ValueError:
+            raise HTTPException(status_code=400, detail="无效的频率值")
+    
+    if config_update.save_mode is not None:
+        try:
+            db_config.save_mode = SaveMode(config_update.save_mode) if isinstance(config_update.save_mode, str) else config_update.save_mode
+        except ValueError:
+            raise HTTPException(status_code=400, detail="无效的保存模式值")
+    
+    if config_update.save_duration is not None:
+        db_config.save_duration = config_update.save_duration
+    
+    if config_update.max_storage_days is not None:
+        db_config.max_storage_days = config_update.max_storage_days
     
     # 更新时间戳
-    update_data["updated_at"] = datetime.utcnow()
+    db_config.updated_at = datetime.now()
     
-    try:
-        for key, value in update_data.items():
-            setattr(db_config, key, value)
-        
-        db.commit()
-        db.refresh(db_config)
-        return db_config
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"更新检测配置失败: {str(e)}")
+    # 提交更改
+    db.commit()
+    db.refresh(db_config)
+    
+    # 转换返回数据
+    config_dict = {
+        "config_id": db_config.config_id,
+        "device_id": db_config.device_id,
+        "models_id": db_config.models_id,
+        "enabled": db_config.enabled,
+        "sensitivity": db_config.sensitivity,
+        "target_classes": db_config.target_classes if db_config.target_classes else [],
+        "frequency": db_config.frequency.value if hasattr(db_config.frequency, "value") else db_config.frequency,
+        "save_mode": db_config.save_mode.value if hasattr(db_config.save_mode, "value") else db_config.save_mode,
+        "save_duration": db_config.save_duration,
+        "max_storage_days": db_config.max_storage_days,
+        "created_at": db_config.created_at,
+        "updated_at": db_config.updated_at,
+        "created_by": db_config.created_by
+    }
+    
+    return config_dict
 
 @router.put("/detection/configs/{config_id}/toggle")
 def toggle_detection_active(config_id: str, enabled: bool, db: Session = Depends(get_db),
@@ -879,7 +977,11 @@ async def get_detection_events(
     if end_date:
         query = query.filter(DetectionEvent.created_at <= end_date)
     if status:
-        query = query.filter(DetectionEvent.status == getattr(EventStatus, status))
+        try:
+            status_enum = getattr(EventStatus, status)
+            query = query.filter(DetectionEvent.status == status_enum)
+        except AttributeError:
+            raise HTTPException(status_code=400, detail="无效的状态值")
     if min_confidence:
         query = query.filter(DetectionEvent.confidence >= min_confidence)
     
@@ -887,7 +989,49 @@ async def get_detection_events(
     query = query.order_by(desc(DetectionEvent.created_at))
     
     events = query.offset(skip).limit(limit).all()
-    return events
+    
+    # 转换结果
+    result = []
+    for event in events:
+        # 确保bounding_box是字典
+        bounding_box = event.bounding_box
+        if isinstance(bounding_box, str):
+            try:
+                bounding_box = json.loads(bounding_box)
+            except (json.JSONDecodeError, TypeError):
+                bounding_box = []
+        
+        # 确保meta_data是字典
+        meta_data = event.meta_data
+        if isinstance(meta_data, str):
+            try:
+                meta_data = json.loads(meta_data)
+            except (json.JSONDecodeError, TypeError):
+                meta_data = {}
+        elif meta_data is None:
+            meta_data = {}
+        
+        event_dict = {
+            "event_id": event.event_id,
+            "device_id": event.device_id,
+            "config_id": event.config_id,
+            "timestamp": event.timestamp,
+            "event_type": event.event_type,
+            "confidence": event.confidence,
+            "bounding_box": bounding_box,
+            "meta_data": meta_data,
+            "location": event.location,
+            "snippet_path": event.snippet_path,
+            "thumbnail_path": event.thumbnail_path,
+            "status": event.status.value if hasattr(event.status, "value") else event.status,
+            "viewed_at": event.viewed_at,
+            "viewed_by": event.viewed_by,
+            "notes": event.notes,
+            "created_at": event.created_at
+        }
+        result.append(event_dict)
+    
+    return result
 
 # 获取单个检测事件详情
 @router.get("/detection/events/{event_id}", response_model=DetectionEventResponse, tags=["检测事件"])
@@ -901,7 +1045,46 @@ async def get_detection_event(
     event = db.query(DetectionEvent).filter(DetectionEvent.event_id == event_id).first()
     if not event:
         raise HTTPException(status_code=404, detail="检测事件不存在")
-    return event
+    
+    # 确保bounding_box是字典
+    bounding_box = event.bounding_box
+    if isinstance(bounding_box, str):
+        try:
+            bounding_box = json.loads(bounding_box)
+        except (json.JSONDecodeError, TypeError):
+            bounding_box = []
+    
+    # 确保meta_data是字典
+    meta_data = event.meta_data
+    if isinstance(meta_data, str):
+        try:
+            meta_data = json.loads(meta_data)
+        except (json.JSONDecodeError, TypeError):
+            meta_data = {}
+    elif meta_data is None:
+        meta_data = {}
+    
+    # 转换结果
+    event_dict = {
+        "event_id": event.event_id,
+        "device_id": event.device_id,
+        "config_id": event.config_id,
+        "timestamp": event.timestamp,
+        "event_type": event.event_type,
+        "confidence": event.confidence,
+        "bounding_box": bounding_box,
+        "meta_data": meta_data,
+        "location": event.location,
+        "snippet_path": event.snippet_path,
+        "thumbnail_path": event.thumbnail_path,
+        "status": event.status.value if hasattr(event.status, "value") else event.status,
+        "viewed_at": event.viewed_at,
+        "viewed_by": event.viewed_by,
+        "notes": event.notes,
+        "created_at": event.created_at
+    }
+    
+    return event_dict
 
 # 创建检测事件
 @router.post("/detection/events", response_model=DetectionEventResponse, tags=["检测事件"])
@@ -922,20 +1105,36 @@ async def create_detection_event(
     if not config:
         raise HTTPException(status_code=404, detail="检测配置不存在")
     
+     # 确保bounding_box是列表
+    bounding_box = event.bounding_box
+    if not isinstance(bounding_box, list):
+        raise HTTPException(status_code=400, detail="bounding_box必须是一个有效的列表对象")
+    
+    # 确保每个元素都是字典
+    for item in bounding_box:
+        if not isinstance(item, dict):
+            raise HTTPException(status_code=400, detail="bounding_box中的每个元素必须是字典对象")
+    
+    # 确保meta_data是字典
+    meta_data = event.meta_data if event.meta_data is not None else {}
+    if not isinstance(meta_data, dict):
+        raise HTTPException(status_code=400, detail="meta_data必须是一个有效的JSON对象")
+    
     try:
         event_id = str(uuid.uuid4())
+        current_time = datetime.utcnow()
         db_event = DetectionEvent(
             event_id=event_id,
             device_id=event.device_id,
             config_id=event.config_id,
-            timestamp=datetime.utcnow(),
+            timestamp=current_time,
             event_type=event.event_type,
             confidence=event.confidence,
-            bounding_box=event.bounding_box,
-            meta_data=event.meta_data,
+            bounding_box=bounding_box,
+            meta_data=meta_data,
             status=EventStatus.new,
             location=event.location,
-            created_at=datetime.utcnow()
+            created_at=current_time
         )
         db.add(db_event)
         db.commit()
@@ -944,7 +1143,45 @@ async def create_detection_event(
         # 更新统计数据
         update_detection_stats(db, event.device_id, event.event_type)
         
-        return db_event
+        # 处理返回数据中的bounding_box
+        bounding_box_result = db_event.bounding_box
+        if isinstance(bounding_box_result, str):
+            try:
+                bounding_box_result = json.loads(bounding_box_result)
+            except (json.JSONDecodeError, TypeError):
+                bounding_box_result = []
+                
+        # 处理返回数据中的meta_data
+        meta_data_result = db_event.meta_data
+        if isinstance(meta_data_result, str):
+            try:
+                meta_data_result = json.loads(meta_data_result)
+            except (json.JSONDecodeError, TypeError):
+                meta_data_result = {}
+        elif meta_data_result is None:
+            meta_data_result = {}
+        
+        # 转换返回数据
+        event_dict = {
+            "event_id": db_event.event_id,
+            "device_id": db_event.device_id,
+            "config_id": db_event.config_id,
+            "timestamp": db_event.timestamp,
+            "event_type": db_event.event_type,
+            "confidence": db_event.confidence,
+            "bounding_box": bounding_box_result,
+            "meta_data": meta_data_result,
+            "location": db_event.location,
+            "snippet_path": db_event.snippet_path,
+            "thumbnail_path": db_event.thumbnail_path,
+            "status": db_event.status.value if hasattr(db_event.status, "value") else db_event.status,
+            "viewed_at": db_event.viewed_at,
+            "viewed_by": db_event.viewed_by,
+            "notes": db_event.notes,
+            "created_at": db_event.created_at
+        }
+        
+        return event_dict
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"创建检测事件失败: {str(e)}")
@@ -964,25 +1201,66 @@ async def update_detection_event(
         raise HTTPException(status_code=404, detail="检测事件不存在")
     
     # 更新字段
-    update_data = event_update.dict(exclude_unset=True)
+    if event_update.status is not None:
+        try:
+            db_event.status = getattr(EventStatus, event_update.status)
+        except AttributeError:
+            raise HTTPException(status_code=400, detail="无效的状态值")
     
-    if "status" in update_data:
-        update_data["status"] = getattr(EventStatus, update_data["status"])
+    if event_update.notes is not None:
+        db_event.notes = event_update.notes
     
-    if "viewed_by" in update_data and update_data["viewed_by"]:
+    if event_update.viewed_by is not None:
         # 检查用户是否存在
-        user = db.query(User).filter(User.user_id == update_data["viewed_by"]).first()
+        user = db.query(User).filter(User.user_id == event_update.viewed_by).first()
         if not user:
             raise HTTPException(status_code=404, detail="用户不存在")
-        update_data["viewed_at"] = datetime.utcnow()
+        db_event.viewed_by = event_update.viewed_by
+        db_event.viewed_at = datetime.utcnow()
     
     try:
-        for key, value in update_data.items():
-            setattr(db_event, key, value)
-        
         db.commit()
         db.refresh(db_event)
-        return db_event
+        
+        # 确保bounding_box是字典
+        bounding_box = db_event.bounding_box
+        if isinstance(bounding_box, str):
+            try:
+                bounding_box = json.loads(bounding_box)
+            except (json.JSONDecodeError, TypeError):
+                bounding_box = []
+        
+        # 确保meta_data是字典
+        meta_data = db_event.meta_data
+        if isinstance(meta_data, str):
+            try:
+                meta_data = json.loads(meta_data)
+            except (json.JSONDecodeError, TypeError):
+                meta_data = {}
+        elif meta_data is None:
+            meta_data = {}
+        
+        # 转换返回数据
+        event_dict = {
+            "event_id": db_event.event_id,
+            "device_id": db_event.device_id,
+            "config_id": db_event.config_id,
+            "timestamp": db_event.timestamp,
+            "event_type": db_event.event_type,
+            "confidence": db_event.confidence,
+            "bounding_box": bounding_box,
+            "meta_data": meta_data,
+            "location": db_event.location,
+            "snippet_path": db_event.snippet_path,
+            "thumbnail_path": db_event.thumbnail_path,
+            "status": db_event.status.value if hasattr(db_event.status, "value") else db_event.status,
+            "viewed_at": db_event.viewed_at,
+            "viewed_by": db_event.viewed_by,
+            "notes": db_event.notes,
+            "created_at": db_event.created_at
+        }
+        
+        return event_dict
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"更新检测事件失败: {str(e)}")

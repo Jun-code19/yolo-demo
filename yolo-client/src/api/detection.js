@@ -3,7 +3,7 @@ import { ElMessage } from 'element-plus';
 
 // 创建 axios 实例
 const apiClient = axios.create({
-  baseURL: 'http://10.83.34.35:8000/api/v1',
+  baseURL: 'http://localhost:8000/api/v1',
   headers: {
     'Content-Type': 'application/json',
   },

@@ -2,3 +2,11 @@ node_modules
 *.pyd
 *.dll
 *.lib
+new_venv
+*.log
+*.log.*
+*.log.*.*
+*.log.*.*.*
+*.log.*.*.*.*
+*.log.*.*.*.*.*
+*.log.*.*.*.*.*.*
