@@ -79,7 +79,7 @@
         
         <el-form-item>
           <el-button type="primary" @click="handleSearch">
-            <el-icon><search /></el-icon>搜索
+            <el-icon><Search /></el-icon>搜索
           </el-button>
           <el-button @click="resetFilter">
             重置
@@ -89,94 +89,128 @@
       
       <!-- 事件列表 -->
       <el-table
-        :columns="columns"
         :data="eventList"
         :loading="loading"
-        :pagination="{
-          pageSize: 10,
-          current: page,
-          total: total,
-          onChange: handlePageChange
-        }"
         row-key="event_id"
+        style="width: 100%"
       >
-        <!-- 设备名称列 -->
-        <template #body-cell="{ column, record }">
-          <template v-if="column.dataIndex === 'device_id'">
-            {{ getDeviceName(record.device_id) }}
+        <el-table-column
+          prop="device_id"
+          label="设备"
+          min-width="120"
+        >
+          <template #default="{ row }">
+            {{ getDeviceName(row.device_id) }}
           </template>
-          
-          <!-- 事件类型列 -->
-          <template v-if="column.dataIndex === 'event_type'">
-            <el-tag :type="getEventTypeColor(record.event_type)">
-              {{ record.event_type }}
+        </el-table-column>
+
+        <el-table-column
+          prop="event_type"
+          label="事件类型"
+          min-width="120"
+        >
+          <template #default="{ row }">
+            <el-tag :type="getEventTypeColor(row.event_type)">
+              {{ getEventTypeName(row.event_type) }}
             </el-tag>
           </template>
-          
-          <!-- 置信度列 -->
-          <template v-if="column.dataIndex === 'confidence'">
-            {{ (record.confidence * 100).toFixed(1) }}%
+        </el-table-column>
+
+        <el-table-column
+          prop="confidence"
+          label="置信度"
+          min-width="100"
+        >
+          <template #default="{ row }">
+            {{ (row.confidence * 100).toFixed(1) }}%
           </template>
-          
-          <!-- 时间列 -->
-          <template v-if="column.dataIndex === 'timestamp'">
-            {{ formatDateTime(record.timestamp) }}
+        </el-table-column>
+
+        <el-table-column
+          prop="timestamp"
+          label="时间"
+          min-width="160"
+        >
+          <template #default="{ row }">
+            {{ formatDateTime(row.timestamp) }}
           </template>
-          
-          <!-- 状态列 -->
-          <template v-if="column.dataIndex === 'status'">
-            <el-tag :type="getStatusColor(record.status)">
-              {{ getStatusLabel(record.status) }}
+        </el-table-column>
+
+        <el-table-column
+          prop="status"
+          label="状态"
+          min-width="100"
+        >
+          <template #default="{ row }">
+            <el-tag :type="getStatusColor(row.status)">
+              {{ getStatusLabel(row.status) }}
             </el-tag>
           </template>
-          
-          <!-- 操作列 -->
-          <template v-if="column.dataIndex === 'action'">
-            <el-space>
-              <el-button type="primary" size="small" @click="viewEvent(record)">
+        </el-table-column>
+
+        <el-table-column
+          label="操作"
+          width="180"
+          fixed="right"
+        >
+          <template #default="{ row }">
+            <el-button-group>
+              <el-button type="primary" size="small" @click="viewEvent(row)">
                 查看
               </el-button>
               <el-dropdown>
-                <template #overlay>
-                  <el-menu>
-                    <el-menu-item key="flag" @click="updateEventStatus(record, 'flagged')">
-                      标记重要
-                    </el-menu-item>
-                    <el-menu-item key="archive" @click="updateEventStatus(record, 'archived')">
-                      归档
-                    </el-menu-item>
-                    <el-menu-divider />
-                    <el-menu-item key="delete" @click="deleteEvent(record)">
-                      删除
-                    </el-menu-item>
-                  </el-menu>
-                </template>
                 <el-button size="small">
-                  更多 <el-icon><down /></el-icon>
+                  更多 <el-icon><ArrowDown /></el-icon>
                 </el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item @click="updateEventStatus(row, 'flagged')">
+                      标记重要
+                    </el-dropdown-item>
+                    <el-dropdown-item @click="updateEventStatus(row, 'archived')">
+                      归档
+                    </el-dropdown-item>
+                    <el-divider border-style="dashed" />
+                    <el-dropdown-item @click="deleteEvent(row)">
+                      删除
+                    </el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
               </el-dropdown>
-            </el-space>
+            </el-button-group>
           </template>
-        </template>
+        </el-table-column>
       </el-table>
+
+      <!-- 分页 -->
+      <div class="pagination">
+        <el-pagination
+          v-model:current-page="page"
+          v-model:page-size="pageSize"
+          :total="total"
+          :page-sizes="[10, 20, 50, 100]"
+          layout="prev, pager, next, jumper, ->, total, sizes"
+          @size-change="handleSizeChange"
+          @current-change="handlePageChange"
+        />
+      </div>
     </el-card>
     
     <!-- 事件详情模态框 -->
     <el-dialog
-      :visible="eventModalVisible"
+      v-model="eventModalVisible"
       :title="`事件详情 - ${selectedEvent?.event_type || ''}`"
-      @close="closeEventModal"
-      :footer="null"
       width="800px"
+      destroy-on-close
     >
       <template v-if="selectedEvent">
         <div class="event-detail">
           <div class="event-image">
             <img
-              :src="getImageUrl(selectedEvent.snippet_path, 'marked.jpg')"
+              :src="getImageUrl(selectedEvent.thumbnail_path)"
               alt="事件图片"
               class="main-image"
-              @click="showImagePreview(selectedEvent.snippet_path, 'marked.jpg')"
+              @click="showImagePreview(selectedEvent.thumbnail_path)"
             />
           </div>
           
@@ -187,7 +221,7 @@
               </el-descriptions-item>
               <el-descriptions-item label="事件类型">
                 <el-tag :type="getEventTypeColor(selectedEvent.event_type)">
-                  {{ selectedEvent.event_type }}
+                  {{ getEventTypeName(selectedEvent.event_type) }}
                 </el-tag>
               </el-descriptions-item>
               <el-descriptions-item label="置信度">
@@ -198,7 +232,7 @@
               </el-descriptions-item>
               <el-descriptions-item label="状态">
                 <el-select
-                  v-model:value="selectedEvent.status"
+                  v-model="selectedEvent.status"
                   style="width: 100%"
                   @change="(val) => updateEventStatus(selectedEvent, val)"
                 >
@@ -209,8 +243,9 @@
                 </el-select>
               </el-descriptions-item>
               <el-descriptions-item label="备注">
-                <el-textarea
-                  v-model:value="eventNotes"
+                <el-input
+                  v-model="eventNotes"
+                  type="textarea"
                   :rows="3"
                   placeholder="添加事件备注..."
                 />
@@ -228,7 +263,7 @@
               <el-space>
                 <el-button
                   type="primary"
-                  @click="showImagePreview(selectedEvent.snippet_path, 'original.jpg')"
+                  @click="showImagePreview(selectedEvent.thumbnail_path)"
                 >
                   查看原图
                 </el-button>
@@ -250,13 +285,16 @@
           </div>
         </div>
       </template>
+      <template #footer>
+        <span class="dialog-footer">
+          <el-button @click="eventModalVisible = false">关闭</el-button>
+        </span>
+      </template>
     </el-dialog>
     
     <!-- 图片预览 -->
     <el-dialog
-      :visible="imagePreviewVisible"
-      :footer="null"
-      @close="closeImagePreview"
+      v-model="imagePreviewVisible"
       width="auto"
       center
       destroy-on-close
@@ -273,10 +311,10 @@
 <script>
 import { defineComponent, ref, reactive, onMounted } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { Search, Delete, View, Star, Download, StarFilled } from '@element-plus/icons-vue';
+import { Search, Delete, View, Star, Download, StarFilled, ArrowDown } from '@element-plus/icons-vue';
 import dayjs from 'dayjs';
 import { detectionEventApi } from '@/api/detection';
-import deviceApi from '@/api/device'
+import deviceApi from '@/api/device';
 
 export default defineComponent({
   name: 'DetectionEvents',
@@ -286,7 +324,8 @@ export default defineComponent({
     View,
     Star,
     Download,
-    StarFilled
+    StarFilled,
+    ArrowDown
   },
   setup() {
     // 数据加载状态
@@ -302,6 +341,7 @@ export default defineComponent({
     
     // 分页
     const page = ref(1);
+    const pageSize = ref(10);
     const total = ref(0);
     
     // 筛选表单
@@ -312,21 +352,6 @@ export default defineComponent({
       dateRange: undefined,
       min_confidence: undefined
     });
-    
-    // 表格列定义
-    const columns = [
-      { title: '设备', dataIndex: 'device_id', key: 'device_id' },
-      { title: '事件类型', dataIndex: 'event_type', key: 'event_type' },
-      { title: '置信度', dataIndex: 'confidence', key: 'confidence', sorter: true },
-      { title: '时间', dataIndex: 'timestamp', key: 'timestamp', sorter: true },
-      { title: '状态', dataIndex: 'status', key: 'status', filters: [
-        { text: '新事件', value: 'new' },
-        { text: '已查看', value: 'viewed' },
-        { text: '已标记', value: 'flagged' },
-        { text: '已归档', value: 'archived' }
-      ]},
-      { title: '操作', dataIndex: 'action', key: 'action' }
-    ];
     
     // 事件详情模态框
     const eventModalVisible = ref(false);
@@ -346,15 +371,28 @@ export default defineComponent({
     // 获取事件类型颜色
     const getEventTypeColor = (eventType) => {
       const colorMap = {
-        'person': 'blue',
-        'car': 'green',
-        'truck': 'cyan',
-        'motorcycle': 'purple',
-        'bicycle': 'magenta',
-        'bus': 'orange'
+        'object_detection': 'primary',
+        'segmentation': 'success',
+        'keypoint': 'warning',
+        'pose': 'danger',
+        'face': 'info',
+        'other': 'success'
       };
       return colorMap[eventType] || 'default';
     };
+
+    // 获取模型类型名称
+    const getEventTypeName = (eventType) => {
+      const typeMap = {
+        'object_detection': '目标检测',
+        'segmentation': '图像分割',
+        'keypoint': '关键点检测',
+        'pose': '姿态估计',
+        'face': '人脸识别',
+        'other': '其他类型'
+      }
+      return typeMap[eventType] || 'default'
+    }
     
     // 获取状态标签
     const getStatusLabel = (status) => {
@@ -370,10 +408,10 @@ export default defineComponent({
     // 获取状态颜色
     const getStatusColor = (status) => {
       const map = {
-        'new': 'blue',
-        'viewed': 'green',
-        'flagged': 'red',
-        'archived': 'gray'
+        'new': 'primary',
+        'viewed': 'success',
+        'flagged': 'warning',
+        'archived': 'info'
       };
       return map[status] || 'default';
     };
@@ -387,7 +425,7 @@ export default defineComponent({
     // 加载设备列表
     const loadDeviceList = async () => {
       try {
-        const response = await await deviceApi.getDevices();
+        const response = await deviceApi.getDevices();
         deviceList.value = response.data;
       } catch (error) {
         ElMessage.error('获取设备列表失败: ' + error.message);
@@ -401,8 +439,8 @@ export default defineComponent({
       try {
         // 构建查询参数
         const params = {
-          skip: (page.value - 1) * 10,
-          limit: 10
+          skip: (page.value - 1) * pageSize.value,
+          limit: pageSize.value
         };
         
         if (filterForm.device_id) {
@@ -431,7 +469,7 @@ export default defineComponent({
         
         // 暂时假设总数为当前数据长度的10倍
         // 实际应用中应该从API获取总数
-        total.value = response.data.length * 10;
+        total.value = response.data.length;
       } catch (error) {
         ElMessage.error('获取事件列表失败: ' + error.message);
       } finally {
@@ -464,6 +502,12 @@ export default defineComponent({
       loadEvents();
     };
     
+    // 切换每页显示数量
+    const handleSizeChange = (newSize) => {
+      pageSize.value = newSize;
+      loadEvents();
+    };
+    
     // 查看事件详情
     const viewEvent = async (event) => {
       selectedEvent.value = { ...event };
@@ -474,12 +518,6 @@ export default defineComponent({
       if (event.status === 'new') {
         await updateEventStatus(event, 'viewed', false);
       }
-    };
-    
-    // 关闭事件详情模态框
-    const closeEventModal = () => {
-      eventModalVisible.value = false;
-      selectedEvent.value = null;
     };
     
     // 更新事件状态
@@ -529,41 +567,47 @@ export default defineComponent({
     
     // 删除事件
     const deleteEvent = async (event) => {
-      if (!event) return;
-      
-      try {
-        await detectionEventApi.deleteEvent(event.event_id);
-        
-        // 从列表中移除
-        eventList.value = eventList.value.filter(e => e.event_id !== event.event_id);
-        
-        // 如果正在查看该事件，关闭模态框
-        if (selectedEvent.value && selectedEvent.value.event_id === event.event_id) {
-          closeEventModal();
+      ElMessageBox.confirm(
+        `确认删除该事件吗？`,
+        '删除确认',
+        {
+          confirmButtonText: '确认',
+          cancelButtonText: '取消',
+          type: 'warning'
         }
-        
-        ElMessage.success('事件已删除');
-      } catch (error) {
-        ElMessage.error('删除事件失败: ' + error.message);
-      }
+      ).then(async () => {
+        try {
+          await detectionEventApi.deleteEvent(event.event_id);
+          
+          // 从列表中移除
+          eventList.value = eventList.value.filter(e => e.event_id !== event.event_id);
+          
+          // 如果正在查看该事件，关闭模态框
+          if (selectedEvent.value && selectedEvent.value.event_id === event.event_id) {
+            eventModalVisible.value = false;
+          }
+          
+          ElMessage.success('事件已删除');
+        } catch (error) {
+          ElMessage.error('删除事件失败: ' + error.message);
+        }
+      }).catch(() => {});
     };
     
     // 获取事件图片URL
-    const getImageUrl = (snippetPath, fileName) => {
-      if (!snippetPath) return '';
-      // 实际应用中应该从后端获取正确的URL
-      return `/storage/${snippetPath}/${fileName}`;
+    const getImageUrl = (thumbnailPath) => {
+      if (!thumbnailPath) return '';
+        // 假设后端服务的基础URL
+      const baseUrl = 'http://localhost:8001'; // 替换为您的后端服务地址
+  
+      // 返回完整的图片URL
+      return `${baseUrl}/${thumbnailPath.replace(/\\/g, '/')}`; // 替换反斜杠为正斜杠
     };
     
     // 显示图片预览
-    const showImagePreview = (snippetPath, fileName) => {
-      previewImageUrl.value = getImageUrl(snippetPath, fileName);
+    const showImagePreview = (thumbnailPath) => {
+      previewImageUrl.value = getImageUrl(thumbnailPath);
       imagePreviewVisible.value = true;
-    };
-    
-    // 关闭图片预览
-    const closeImagePreview = () => {
-      imagePreviewVisible.value = false;
     };
     
     // 检查是否有视频
@@ -596,9 +640,9 @@ export default defineComponent({
       deviceList,
       eventTypes,
       page,
+      pageSize,
       total,
       filterForm,
-      columns,
       eventModalVisible,
       selectedEvent,
       eventNotes,
@@ -606,6 +650,7 @@ export default defineComponent({
       previewImageUrl,
       getDeviceName,
       getEventTypeColor,
+      getEventTypeName,
       getStatusLabel,
       getStatusColor,
       formatDateTime,
@@ -613,14 +658,13 @@ export default defineComponent({
       handleSearch,
       resetFilter,
       handlePageChange,
+      handleSizeChange,
       viewEvent,
-      closeEventModal,
       updateEventStatus,
       saveEventNotes,
       deleteEvent,
       getImageUrl,
       showImagePreview,
-      closeImagePreview,
       hasVideo,
       playVideo,
       downloadEvent
@@ -640,6 +684,11 @@ export default defineComponent({
 
 .filter-form {
   margin-bottom: 24px;
+}
+
+.pagination {
+  margin-top: 20px;
+  text-align: right;
 }
 
 .event-detail {
