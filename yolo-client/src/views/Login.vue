@@ -78,7 +78,7 @@ onMounted(async () => {
     const { data } = await deviceApi.checkSystemInitialized()
     isSystemInitialized.value = data.initialized
   } catch (error) {
-    console.error('检查系统初始化状态失败:', error)
+    // console.error('检查系统初始化状态失败:', error)
   }
 })
 
@@ -91,9 +91,7 @@ const handleLogin = async () => {
     
     loading.value = true
     try {
-      console.log("开始登录请求...");
       const response = await deviceApi.login(loginForm.username, loginForm.password)
-      console.log("登录响应:", response.data);
       const { access_token } = response.data
       
       // 保存token
@@ -112,13 +110,13 @@ const handleLogin = async () => {
       // 强制刷新页面，确保登录状态更新并跳转
       window.location.href = '/'
     } catch (error) {
-      console.error('登录失败:', error)
+      // console.error('登录失败:', error)
       let errorMsg = '登录失败: 用户名或密码错误'
       
       // 显示详细错误信息以便调试
       if (error.response) {
         errorMsg += `\n状态码: ${error.response.status}`
-        console.error("错误详情:", error.response.data);
+        // console.error("错误详情:", error.response.data);
         if (error.response.data && error.response.data.detail) {
           errorMsg += `\n详情: ${error.response.data.detail}`
         }
@@ -159,7 +157,7 @@ const handleInitSystem = async () => {
       adminForm.password = ''
       adminForm.password_confirm = ''
     } catch (error) {
-      console.error('初始化系统失败:', error)
+      // console.error('初始化系统失败:', error)
       ElMessage.error(`初始化失败: ${error.response?.data?.detail || error.message}`)
     } finally {
       loading.value = false

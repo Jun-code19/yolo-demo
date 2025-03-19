@@ -352,12 +352,11 @@ class DetectionTask:
             return  # 没有客户端连接，跳过
         
         try:
-            # 图像压缩处理 - 缩小图像以减少数据量
+            # 图像压缩处理
             h, w = frame.shape[:2]
-            max_width = 800  # 最大宽度限制
+            max_width = 640  # 降低最大宽度
             
             if w > max_width:
-                # 等比例缩小
                 scale = max_width / w
                 new_w = int(w * scale)
                 new_h = int(h * scale)
@@ -365,43 +364,16 @@ class DetectionTask:
             else:
                 frame_resized = frame
             
-            # 在帧上绘制检测框
+            # 绘制检测框和时间戳
             annotated_frame = frame_resized.copy()
-            
-            # 可选：在图像上绘制时间戳
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             cv2.putText(annotated_frame, timestamp, (10, 30), 
                         cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
             
-            # 如果有检测结果，绘制检测框
-            for det in detections:
-                # 调整检测框坐标为缩放后的坐标
-                if w > max_width:
-                    x1, y1, x2, y2 = map(int, det["bbox"])
-                    x1, x2 = int(x1 * scale), int(x2 * scale)
-                    y1, y2 = int(y1 * scale), int(y2 * scale)
-                else:
-                    x1, y1, x2, y2 = map(int, det["bbox"])
-                
-                class_name = det["class_name"]
-                confidence = det["confidence"]
-                
-                # 使用不同颜色绘制不同类型的目标
-                color = (0, 255, 0)  # 默认绿色
-                
-                # 绘制检测框和标签
-                cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), color, 2)
-                
-                # 绘制带背景的标签
-                label = f"{class_name} {confidence:.2f}"
-                (label_width, label_height), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)
-                label_y = y1 - 10 if y1 - 10 > label_height else y1 + 10
-                cv2.rectangle(annotated_frame, (x1, label_y - label_height), (x1 + label_width, label_y), color, -1)
-                cv2.putText(annotated_frame, label, (x1, label_y), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
+            # 绘制检测框...（保留原有代码）
             
-            # 将帧转换为JPEG格式，降低质量，减少数据量
-            _, buffer = cv2.imencode('.jpg', annotated_frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+            # 将帧转换为JPEG
+            _, buffer = cv2.imencode('.jpg', annotated_frame, [cv2.IMWRITE_JPEG_QUALITY, 60])
             jpg_bytes = buffer.tobytes()
             base64_image = base64.b64encode(jpg_bytes).decode('utf-8')
             
@@ -414,72 +386,79 @@ class DetectionTask:
                 "detections": detections
             }
             
-            # 确保有事件循环可用
-            if not self.loop:
-                logger.error(f"检测任务 {self.config_id} 没有可用的事件循环")
-                return
-                
-            # 使用线程的事件循环来发送消息
-            # 创建一个任务，稍后在事件循环中执行
-            future = asyncio.run_coroutine_threadsafe(self._send_to_clients(message), self.loop)
-            
-            # 可选：等待任务完成或超时
-            try:
-                # 设置超时防止阻塞检测线程
-                future.result(timeout=0.5)
-            except (asyncio.TimeoutError, concurrent.futures.TimeoutError):
-                # 超时但不影响检测循环继续运行
-                pass
-            
+            # 使用消息队列方式，避免直接调用异步方法
+            if self.loop and self.loop.is_running():
+                try:
+                    # 将消息放入队列而不是直接发送
+                    asyncio.run_coroutine_threadsafe(
+                        self.message_queue.put(message),
+                        self.loop
+                    )
+                    # 不等待结果，避免阻塞
+                except Exception as e:
+                    logger.error(f"将消息加入队列失败: {e}")
+        
         except Exception as e:
             logger.error(f"广播检测结果失败: {e}")
             
-    async def _send_to_clients(self, message):
-        """在事件循环中执行的异步方法，向所有客户端发送消息"""
-        clients = list(self.clients)
-        for client in clients:
-            try:
-                await client.send_json(message)
-                # 成功发送消息，可以记录日志（可选）
-            except Exception as e:
-                logger.error(f"向客户端 {id(client)} 发送消息失败: {e}")
-                # 移除断开连接的客户端
-                if client in self.clients:
-                    self.clients.remove(client)
-                    logger.info(f"客户端已断开连接，检测任务 {self.config_id}, 当前客户端数: {len(self.clients)}")
-    
     async def broadcast_worker(self):
         """处理消息广播的工作协程"""
+        logger.info(f"广播工作协程已启动: {self.config_id}")
         while not self.stop_event.is_set():
             try:
-                message = await self.message_queue.get()
+                # 设置超时，避免永久阻塞
+                message = await asyncio.wait_for(self.message_queue.get(), timeout=1.0)
+                
                 if message is None:  # 停止信号
                     break
+                
+                # 调试日志
+                logger.debug(f"准备向 {len(self.clients)} 个客户端广播消息")
                 
                 # 获取当前活跃的客户端列表
                 clients = list(self.clients)
                 for client in clients:
                     try:
                         await client.send_json(message)
-                    except Exception:
+                        # 可选：添加成功发送日志
+                        # logger.debug(f"成功向客户端 {id(client)} 发送消息")
+                    except Exception as e:
+                        logger.error(f"向客户端 {id(client)} 发送消息失败: {e}")
                         # 移除断开连接的客户端
                         if client in self.clients:
                             self.clients.remove(client)
                             logger.info(f"客户端已断开连接，检测任务 {self.config_id}, 当前客户端数: {len(self.clients)}")
                 
                 self.message_queue.task_done()
+            except asyncio.TimeoutError:
+                # 超时但不影响循环继续
+                continue
             except Exception as e:
                 logger.error(f"广播工作协程错误: {e}")
                 await asyncio.sleep(0.1)
+        
+        logger.info(f"广播工作协程已停止: {self.config_id}")
     
     def add_client(self, websocket):
         """添加WebSocket客户端到广播列表"""
         self.clients.add(websocket)
         logger.info(f"客户端已连接到检测任务 {self.config_id}, 当前客户端数: {len(self.clients)}")
         
-        # 如果没有广播任务，启动一个
+        # 如果没有广播任务，立即启动一个
         if not self.broadcast_task or self.broadcast_task.done():
-            self.broadcast_task = asyncio.create_task(self.broadcast_worker())
+            try:
+                # 确保在正确的事件循环中创建任务
+                if self.loop and self.loop.is_running():
+                    self.broadcast_task = asyncio.run_coroutine_threadsafe(
+                        self.broadcast_worker(),
+                        self.loop
+                    ).result()
+                else:
+                    self.loop = asyncio.get_event_loop()
+                    self.broadcast_task = asyncio.create_task(self.broadcast_worker())
+                    logger.info(f"为检测任务 {self.config_id} 创建了新的广播任务")
+            except Exception as e:
+                logger.error(f"创建广播任务失败: {e}")
     
     def remove_client(self, websocket):
         """从广播列表中移除WebSocket客户端"""

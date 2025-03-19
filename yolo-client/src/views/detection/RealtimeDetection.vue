@@ -44,7 +44,7 @@
                 <el-tag :type="isConnected ? 'success' : 'info'" effect="dark">
                   {{ isConnected ? '已连接' : '未连接' }}
                 </el-tag>
-                <span class="detection-info" v-if="isConnected">
+                <span class="video-info" v-if="isConnected">
                   检测到: {{ detectedCount }} 个目标
                 </span>
               </div>
@@ -266,7 +266,6 @@ const loadConfigurations = async () => {
   try {
     // 替换为实际的API端点
     const response = await detectionConfigApi.getConfigs();
-    console.log('response.data-------------------:', response.data)
     // 转换配置数据
     configs.value = response.data.map(config => ({
       config_id: config.config_id,
@@ -352,11 +351,15 @@ const connectWebSocket = () => {
   
   ws.onmessage = (event) => {
     try {
+      // 添加调试日志
+      console.log('收到WebSocket消息，数据长度:', event.data.length);
+      
+      const data = JSON.parse(event.data);
+      console.log('解析WebSocket消息:', data.hasOwnProperty('image') ? '包含图像数据' : '不包含图像数据');
+      
       // 重置无数据超时计时器
       resetDataTimeout()
       
-      const data = JSON.parse(event.data)
-      console.log('接收检测结果-------------------:', data)
       // 处理不同类型的消息
       if (data.status === 'error') {
         // 处理错误消息
@@ -412,8 +415,7 @@ const connectWebSocket = () => {
         }
       }
     } catch (error) {
-      console.error('处理检测结果失败:', error)
-      addLog('danger', `处理数据失败: ${error.message}`)
+      console.error('处理WebSocket消息失败:', error);
     }
   }
 }
@@ -958,6 +960,11 @@ watch(selectedConfig, () => {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+.video-info {
+  font-size: 14px;
+  color: #409EFF;
 }
 
 .detection-info {
