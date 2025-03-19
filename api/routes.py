@@ -636,6 +636,18 @@ class DetectionConfigResponse(DetectionConfigBase):
     class Config:
         from_attributes = True
 
+class DetectionConfigInfoResponse(DetectionConfigBase):
+    config_id: str
+    device_name: str
+    models_name: str
+    models_type: str
+    created_at: datetime
+    updated_at: datetime
+    created_by: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
 # 添加检测计划的Pydantic模型
 class DetectionScheduleBase(BaseModel):
     config_id: str
@@ -692,7 +704,7 @@ class DetectionEventResponse(DetectionEventBase):
         from_attributes = True
 
 # 获取检测配置列表
-@router.get("/detection/configs", response_model=List[DetectionConfigResponse])
+@router.get("/detection/configs", response_model=List[DetectionConfigInfoResponse])
 async def get_detection_configs(
     device_id: Optional[str] = None,
     enabled: Optional[bool] = None,
@@ -703,7 +715,7 @@ async def get_detection_configs(
     """
     获取检测配置列表，可按设备ID和启用状态筛选
     """
-    query = db.query(DetectionConfig)
+    query = db.query(DetectionConfig).join(Device).join(DetectionModel)
     
     if device_id:
         query = query.filter(DetectionConfig.device_id == device_id)
@@ -718,7 +730,10 @@ async def get_detection_configs(
         config_dict = {
             "config_id": config.config_id,
             "device_id": config.device_id,
+            "device_name": config.device.device_name,
             "models_id": config.models_id,
+            "models_name": config.model.models_name,
+            "models_type": config.model.models_type,
             "enabled": config.enabled,
             "sensitivity": config.sensitivity,
             "target_classes": config.target_classes if config.target_classes else [],
@@ -735,7 +750,7 @@ async def get_detection_configs(
     return result
 
 # 获取单个检测配置
-@router.get("/detection/configs/{config_id}", response_model=DetectionConfigResponse, tags=["检测配置"])
+@router.get("/detection/configs/{config_id}", response_model=DetectionConfigInfoResponse, tags=["检测配置"])
 async def get_detection_config(
     config_id: str,
     db: Session = Depends(get_db)
@@ -743,7 +758,7 @@ async def get_detection_config(
     """
     获取单个检测配置详情
     """
-    config = db.query(DetectionConfig).filter(DetectionConfig.config_id == config_id).first()
+    config = db.query(DetectionConfig).join(Device).join(DetectionModel).filter(DetectionConfig.config_id == config_id).first()
     if not config:
         raise HTTPException(status_code=404, detail="检测配置不存在")
     
@@ -751,7 +766,10 @@ async def get_detection_config(
     config_dict = {
         "config_id": config.config_id,
         "device_id": config.device_id,
+        "device_name": config.device.device_name,
         "models_id": config.models_id,
+        "models_name": config.model.models_name,
+        "models_type": config.model.models_type,
         "enabled": config.enabled,
         "sensitivity": config.sensitivity,
         "target_classes": config.target_classes if config.target_classes else [],

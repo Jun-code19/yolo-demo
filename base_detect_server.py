@@ -20,6 +20,7 @@ from contextlib import asynccontextmanager
 from ultralytics import YOLO
 import torch
 from sqlalchemy.orm import Session
+import concurrent.futures
 
 from models.database import (
     SessionLocal, DetectionConfig, DetectionEvent, Device, 
@@ -52,6 +53,9 @@ class DetectionTask:
         self.reconnect_attempts = 0
         self.max_reconnect_attempts = 5
         self.clients = set()  # WebSocket客户端集合，用于实时预览
+        self.loop = None  # 添加事件循环引用
+        self.message_queue = asyncio.Queue()  # 添加消息队列
+        self.broadcast_task = None  # 添加广播任务引用
     
     def load_model(self):
         """加载YOLO模型"""
@@ -96,6 +100,15 @@ class DetectionTask:
     
     def run_detection(self):
         """执行检测的主循环"""
+        # 为检测线程创建和设置事件循环
+        try:
+            new_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(new_loop)
+            self.loop = new_loop
+            logger.info(f"为检测任务 {self.config_id} 创建了新的事件循环")
+        except Exception as e:
+            logger.error(f"为检测线程创建事件循环失败: {e}")
+            
         if not self.load_model():
             logger.error(f"无法启动检测任务 {self.config_id}，模型加载失败")
             return
@@ -109,21 +122,31 @@ class DetectionTask:
         frame_count = 0
         error_count = 0
         cooldown_period = 10  # 检测事件的冷却时间（秒）
+        last_reconnect_time = time.time()
+        skip_frame_count = 5  # 每隔多少帧进行一次检测
         
         while not self.stop_event.is_set():
             try:
+                # 改进重连逻辑，添加退避策略
                 if not self.connected or error_count > 5:
-                    if self.reconnect_attempts < self.max_reconnect_attempts:
-                        logger.info(f"尝试重新连接摄像机: {self.device_id}")
-                        self.reconnect_attempts += 1
-                        if self.connect_to_camera():
-                            error_count = 0
+                    current_time = time.time()
+                    # 添加最小间隔时间，防止频繁重试
+                    if current_time - last_reconnect_time > self.reconnect_attempts * 2:
+                        if self.reconnect_attempts < self.max_reconnect_attempts:
+                            logger.info(f"尝试重新连接摄像机: {self.device_id} (尝试 {self.reconnect_attempts + 1}/{self.max_reconnect_attempts})")
+                            last_reconnect_time = current_time
+                            self.reconnect_attempts += 1
+                            if self.connect_to_camera():
+                                error_count = 0
+                            else:
+                                time.sleep(min(2 * self.reconnect_attempts, 10))  # 指数退避策略，最长等待10秒
+                                continue
                         else:
-                            time.sleep(2)  # 等待2秒后重试
-                            continue
+                            logger.error(f"重连摄像机 {self.device_id} 失败，停止检测任务")
+                            break
                     else:
-                        logger.error(f"重连摄像机 {self.device_id} 失败，停止检测任务")
-                        break
+                        time.sleep(0.5)  # 短暂等待
+                        continue
                 
                 ret, frame = self.cap.read()
                 if not ret:
@@ -132,54 +155,76 @@ class DetectionTask:
                     time.sleep(0.1)  # 短暂暂停后重试
                     continue
                 
-                # 将帧添加到缓冲区
+                # 重置错误计数
+                if error_count > 0:
+                    error_count = 0
+                
+                # 将帧添加到缓冲区，使用深拷贝防止引用问题
                 self.frame_buffer.append(frame.copy())
                 
-                # 每5帧执行一次检测，减少计算负担
+                # 优化：每skip_frame_count帧执行一次检测，减少计算负担
                 frame_count += 1
-                if frame_count % 5 == 0:
+                if frame_count % skip_frame_count == 0:
                     # 如果设置了感兴趣区域，裁剪帧
+                    detect_frame = frame
                     if self.region_of_interest and isinstance(self.region_of_interest, list) and len(self.region_of_interest) == 4:
                         try:
-                            x1, y1, x2, y2 = self.region_of_interest
-                            detect_frame = frame[y1:y2, x1:x2]
+                            x1, y1, x2, y2 = map(int, self.region_of_interest)
+                            # 添加边界检查
+                            h, w = frame.shape[:2]
+                            x1, y1 = max(0, x1), max(0, y1)
+                            x2, y2 = min(w, x2), min(h, y2)
+                            if x1 < x2 and y1 < y2:  # 确保有效的区域
+                                detect_frame = frame[y1:y2, x1:x2]
                         except Exception as e:
                             logger.warning(f"裁剪感兴趣区域失败: {e}，使用完整帧")
-                            detect_frame = frame
-                    else:
-                        detect_frame = frame
                     
                     # 执行检测
                     current_time = time.time()
-                    results = self.model(detect_frame, conf=self.confidence, verbose=False)
+                    # 使用 try-except 捕获模型推理过程中的错误
+                    try:
+                        results = self.model(detect_frame, conf=self.confidence, verbose=False)
                     
-                    # 处理检测结果
-                    detections = []
-                    for r in results:
-                        boxes = r.boxes
-                        for box in boxes:
-                            x1, y1, x2, y2 = box.xyxy[0].tolist()
-                            confidence = box.conf.item()
-                            class_id = int(box.cls.item())
-                            class_name = r.names[class_id]
-                            
-                            detections.append({
-                                "bbox": [x1, y1, x2, y2],
-                                "confidence": confidence,
-                                "class_id": class_id,
-                                "class_name": class_name
-                            })
-                    
-                    # 判断是否需要创建检测事件
-                    if detections and (current_time - self.last_detection_time) > cooldown_period:
-                        self.last_detection_time = current_time
-                        self.save_detection_event(frame, detections)
-                    
-                    # 向WebSocket客户端推送检测结果
-                    self.broadcast_detection_result(frame, detections)
+                        # 处理检测结果
+                        detections = []
+                        for r in results:
+                            boxes = r.boxes
+                            for box in boxes:
+                                x1, y1, x2, y2 = box.xyxy[0].tolist()
+                                confidence = box.conf.item()
+                                class_id = int(box.cls.item())
+                                class_name = r.names[class_id]
+                                
+                                detections.append({
+                                    "bbox": [x1, y1, x2, y2],
+                                    "confidence": confidence,
+                                    "class_id": class_id,
+                                    "class_name": class_name
+                                })
+                        
+                        # 判断是否需要创建检测事件
+                        if detections and (current_time - self.last_detection_time) > cooldown_period:
+                            self.last_detection_time = current_time
+                            self.save_detection_event(frame, detections)
+                        
+                        # 向WebSocket客户端推送检测结果
+                        self.broadcast_detection_result(frame, detections)
+                    except Exception as e:
+                        logger.error(f"模型推理过程中出错: {e}")
+                        # 不终止整个检测循环，仅记录错误
+                
+                # 动态调整检测频率，根据是否有客户端连接来决定
+                if self.clients:
+                    # 有客户端连接时，更频繁地检测
+                    skip_frame_count = 3
+                    sleep_time = 0.01  # 短暂休眠防止CPU过载
+                else:
+                    # 无客户端连接时，减少检测频率以节省资源
+                    skip_frame_count = 10
+                    sleep_time = 0.05  # 更长的休眠时间
                 
                 # 防止CPU过载
-                time.sleep(0.01)
+                time.sleep(sleep_time)
                 
             except Exception as e:
                 logger.error(f"检测过程中出错: {e}")
@@ -206,8 +251,36 @@ class DetectionTask:
         """停止检测任务"""
         logger.info(f"正在停止检测任务: {self.config_id}")
         self.stop_event.set()
+        
+        # 停止广播任务
+        if self.broadcast_task and not self.broadcast_task.done():
+            self.broadcast_task.cancel()
+            self.broadcast_task = None
+        
+        # 发送停止信号到消息队列
+        if self.loop and self.loop.is_running():
+            try:
+                asyncio.run_coroutine_threadsafe(
+                    self.message_queue.put(None),
+                    self.loop
+                )
+            except Exception as e:
+                logger.error(f"发送停止信号到消息队列失败: {e}")
+        
         if self.thread:
             self.thread.join(timeout=5)
+            
+        # 清理事件循环
+        if self.loop and hasattr(self.loop, 'close'):
+            try:
+                if self.loop.is_running():
+                    # 停止事件循环
+                    self.loop.call_soon_threadsafe(self.loop.stop)
+                    logger.info(f"事件循环已停止: {self.config_id}")
+            except Exception as e:
+                logger.error(f"停止事件循环失败: {e}")
+            
+        logger.info(f"检测任务已完全停止: {self.config_id}")
     
     def save_detection_event(self, frame, detections):
         """保存检测事件到数据库并存储图像/视频"""
@@ -279,18 +352,55 @@ class DetectionTask:
             return  # 没有客户端连接，跳过
         
         try:
+            # 图像压缩处理 - 缩小图像以减少数据量
+            h, w = frame.shape[:2]
+            max_width = 800  # 最大宽度限制
+            
+            if w > max_width:
+                # 等比例缩小
+                scale = max_width / w
+                new_w = int(w * scale)
+                new_h = int(h * scale)
+                frame_resized = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
+            else:
+                frame_resized = frame
+            
             # 在帧上绘制检测框
-            annotated_frame = frame.copy()
+            annotated_frame = frame_resized.copy()
+            
+            # 可选：在图像上绘制时间戳
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            cv2.putText(annotated_frame, timestamp, (10, 30), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+            
+            # 如果有检测结果，绘制检测框
             for det in detections:
-                x1, y1, x2, y2 = map(int, det["bbox"])
+                # 调整检测框坐标为缩放后的坐标
+                if w > max_width:
+                    x1, y1, x2, y2 = map(int, det["bbox"])
+                    x1, x2 = int(x1 * scale), int(x2 * scale)
+                    y1, y2 = int(y1 * scale), int(y2 * scale)
+                else:
+                    x1, y1, x2, y2 = map(int, det["bbox"])
+                
                 class_name = det["class_name"]
                 confidence = det["confidence"]
                 
-                cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                cv2.putText(annotated_frame, f"{class_name} {confidence:.2f}", 
-                           (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+                # 使用不同颜色绘制不同类型的目标
+                color = (0, 255, 0)  # 默认绿色
+                
+                # 绘制检测框和标签
+                cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), color, 2)
+                
+                # 绘制带背景的标签
+                label = f"{class_name} {confidence:.2f}"
+                (label_width, label_height), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)
+                label_y = y1 - 10 if y1 - 10 > label_height else y1 + 10
+                cv2.rectangle(annotated_frame, (x1, label_y - label_height), (x1 + label_width, label_y), color, -1)
+                cv2.putText(annotated_frame, label, (x1, label_y), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
             
-            # 将帧转换为JPEG格式
+            # 将帧转换为JPEG格式，降低质量，减少数据量
             _, buffer = cv2.imencode('.jpg', annotated_frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
             jpg_bytes = buffer.tobytes()
             base64_image = base64.b64encode(jpg_bytes).decode('utf-8')
@@ -304,35 +414,83 @@ class DetectionTask:
                 "detections": detections
             }
             
-            # 异步广播消息
-            asyncio.create_task(self._broadcast_message(message))
+            # 确保有事件循环可用
+            if not self.loop:
+                logger.error(f"检测任务 {self.config_id} 没有可用的事件循环")
+                return
+                
+            # 使用线程的事件循环来发送消息
+            # 创建一个任务，稍后在事件循环中执行
+            future = asyncio.run_coroutine_threadsafe(self._send_to_clients(message), self.loop)
+            
+            # 可选：等待任务完成或超时
+            try:
+                # 设置超时防止阻塞检测线程
+                future.result(timeout=0.5)
+            except (asyncio.TimeoutError, concurrent.futures.TimeoutError):
+                # 超时但不影响检测循环继续运行
+                pass
             
         except Exception as e:
             logger.error(f"广播检测结果失败: {e}")
-    
-    async def _broadcast_message(self, message):
-        """异步广播消息到所有WebSocket客户端"""
-        disconnected_clients = set()
-        
-        for client in self.clients:
+            
+    async def _send_to_clients(self, message):
+        """在事件循环中执行的异步方法，向所有客户端发送消息"""
+        clients = list(self.clients)
+        for client in clients:
             try:
                 await client.send_json(message)
-            except Exception:
-                disconnected_clients.add(client)
-        
-        # 移除断开连接的客户端
-        self.clients -= disconnected_clients
+                # 成功发送消息，可以记录日志（可选）
+            except Exception as e:
+                logger.error(f"向客户端 {id(client)} 发送消息失败: {e}")
+                # 移除断开连接的客户端
+                if client in self.clients:
+                    self.clients.remove(client)
+                    logger.info(f"客户端已断开连接，检测任务 {self.config_id}, 当前客户端数: {len(self.clients)}")
+    
+    async def broadcast_worker(self):
+        """处理消息广播的工作协程"""
+        while not self.stop_event.is_set():
+            try:
+                message = await self.message_queue.get()
+                if message is None:  # 停止信号
+                    break
+                
+                # 获取当前活跃的客户端列表
+                clients = list(self.clients)
+                for client in clients:
+                    try:
+                        await client.send_json(message)
+                    except Exception:
+                        # 移除断开连接的客户端
+                        if client in self.clients:
+                            self.clients.remove(client)
+                            logger.info(f"客户端已断开连接，检测任务 {self.config_id}, 当前客户端数: {len(self.clients)}")
+                
+                self.message_queue.task_done()
+            except Exception as e:
+                logger.error(f"广播工作协程错误: {e}")
+                await asyncio.sleep(0.1)
     
     def add_client(self, websocket):
         """添加WebSocket客户端到广播列表"""
         self.clients.add(websocket)
         logger.info(f"客户端已连接到检测任务 {self.config_id}, 当前客户端数: {len(self.clients)}")
+        
+        # 如果没有广播任务，启动一个
+        if not self.broadcast_task or self.broadcast_task.done():
+            self.broadcast_task = asyncio.create_task(self.broadcast_worker())
     
     def remove_client(self, websocket):
         """从广播列表中移除WebSocket客户端"""
         if websocket in self.clients:
             self.clients.remove(websocket)
             logger.info(f"客户端已断开连接，检测任务 {self.config_id}, 当前客户端数: {len(self.clients)}")
+            
+            # 如果没有客户端了，停止广播任务
+            if not self.clients and self.broadcast_task:
+                self.broadcast_task.cancel()
+                self.broadcast_task = None
 
 
 class DetectionServer:
@@ -371,6 +529,9 @@ class DetectionServer:
                 save_mode=config.save_mode,
                 region_of_interest=None  # 暂时不使用区域参数，避免类型不匹配问题
             )
+            
+            # 设置事件循环
+            task.loop = asyncio.get_event_loop()
             
             # 启动任务
             task.start()
@@ -441,20 +602,36 @@ class DetectionServer:
             await websocket.close()
             return
         
-        # 添加WebSocket客户端到检测任务
-        self.tasks[config_id].add_client(websocket)
-        
         try:
+            # 获取当前的事件循环并设置到任务中
+            self.tasks[config_id].loop = asyncio.get_event_loop()
+            
+            # 添加WebSocket客户端到检测任务
+            self.tasks[config_id].add_client(websocket)
+            
+            # 发送初始连接成功消息
+            await websocket.send_json({
+                "status": "success",
+                "message": "已连接到检测服务",
+                "config_id": config_id
+            })
+            
             # 保持连接，直到客户端断开
             while True:
-                await websocket.receive_text()
-        except WebSocketDisconnect:
-            # 客户端断开连接时移除
-            self.tasks[config_id].remove_client(websocket)
+                try:
+                    await websocket.receive_text()
+                except WebSocketDisconnect:
+                    logger.info(f"WebSocket客户端断开连接: {id(websocket)}")
+                    break
+                except Exception as e:
+                    logger.error(f"WebSocket接收消息错误: {e}")
+                    break
         except Exception as e:
-            logger.error(f"WebSocket连接错误: {e}")
+            logger.error(f"WebSocket连接处理异常: {e}")
+        finally:
             # 确保客户端被移除
-            self.tasks[config_id].remove_client(websocket)
+            if config_id in self.tasks:
+                self.tasks[config_id].remove_client(websocket)
 
 
 # 创建检测服务器实例
@@ -530,7 +707,64 @@ async def get_detection_status():
 @app.websocket("/ws/detection/preview/{config_id}")
 async def detection_preview_websocket(websocket: WebSocket, config_id: str):
     """检测预览WebSocket端点"""
-    await detection_server.handle_preview(websocket, config_id)
+    await websocket.accept()
+    
+    # 检查检测任务是否存在
+    if config_id not in detection_server.tasks:
+        # 先尝试启动任务
+        logger.info(f"WebSocket请求的检测任务不存在，尝试启动: {config_id}")
+        db = SessionLocal()
+        result = await detection_server.start_detection(config_id, db)
+        db.close()
+        
+        if result["status"] == "error" or config_id not in detection_server.tasks:
+            # 启动失败，发送错误消息并关闭连接
+            await websocket.send_json({
+                "status": "error", 
+                "message": result.get("message") or "请求的检测任务不存在或无法启动"
+            })
+            await websocket.close()
+            return
+    
+    # 任务存在或已成功启动
+    task = detection_server.tasks[config_id]
+    
+    try:
+        # 确保任务的事件循环已设置
+        if not task.loop:
+            loop = asyncio.get_event_loop()
+            task.loop = loop
+            logger.info(f"为检测任务 {config_id} 设置主事件循环")
+        
+        # 发送初始连接成功消息
+        await websocket.send_json({
+            "status": "success",
+            "message": "已连接到检测服务",
+            "config_id": config_id,
+            "device_id": task.device_id
+        })
+        
+        # 添加WebSocket客户端到检测任务
+        task.add_client(websocket)
+        logger.info(f"WebSocket客户端已添加到检测任务: {config_id}")
+        
+        # 保持连接，直到客户端断开
+        while True:
+            try:
+                await websocket.receive_text()
+            except WebSocketDisconnect:
+                logger.info(f"WebSocket客户端断开连接: {id(websocket)}")
+                break
+            except Exception as e:
+                logger.error(f"WebSocket接收消息错误: {e}")
+                break
+    except Exception as e:
+        logger.error(f"WebSocket连接处理异常: {e}")
+    finally:
+        # 确保客户端被移除
+        if config_id in detection_server.tasks:
+            detection_server.tasks[config_id].remove_client(websocket)
+            logger.info(f"WebSocket客户端已从检测任务移除: {config_id}")
 
 
 if __name__ == "__main__":

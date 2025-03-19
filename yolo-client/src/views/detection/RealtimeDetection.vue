@@ -4,55 +4,32 @@
       <h2>实时检测</h2>
       <div class="header-controls">
         <el-select
-          v-model="selectedModel"
-          placeholder="选择检测模型"
-          class="model-select"
+          v-model="selectedConfig"
+          placeholder="选择检测配置"
+          class="config-select"
           filterable
         >
-          <el-option-group
-            v-for="group in models"
-            :key="group.type"
-            :label="group.type"
-          >
-            <el-option
-              v-for="model in group.models"
-              :key="model.value"
-              :label="model.label"
-              :value="model.value"
-            >
-              <div class="model-option">
-                <span class="model-name">{{ model.label }}</span>
-                <span class="model-desc">{{ model.description }}</span>
-              </div>
-            </el-option>
-          </el-option-group>
-        </el-select>
-        <el-select
-          v-model="selectedDevice"
-          placeholder="选择摄像头"
-          :disabled="isDetecting"
-        >
           <el-option
-            v-for="device in devices"
-            :key="device.deviceId"
-            :label="device.label"
-            :value="device.deviceId"
+            v-for="config in configs"
+            :key="config.config_id"
+            :label="config.device_id + '-' + config.device_name + ' - ' + config.model_name"
+            :value="config.config_id"
           />
         </el-select>
         <el-button-group>
           <el-button
             type="primary"
-            :disabled="!selectedDevice || !selectedModel"
-            @click="toggleDetection"
+            :disabled="!selectedConfig"
+            @click="toggleConnection"
           >
-            {{ isDetecting ? '停止检测' : '开始检测' }}
+            {{ isConnected ? '断开连接' : '连接' }}
           </el-button>
           <el-button
             type="info"
-            :disabled="!selectedModel"
-            @click="showModelInfo"
+            :disabled="!selectedConfig"
+            @click="showConfigInfo"
           >
-            模型信息
+            配置信息
           </el-button>
         </el-button-group>
       </div>
@@ -64,31 +41,27 @@
           <template #header>
             <div class="video-header">
               <div class="video-status">
-                <el-tag :type="isDetecting ? 'success' : 'info'" effect="dark">
-                  {{ isDetecting ? '检测中' : '未开始' }}
+                <el-tag :type="isConnected ? 'success' : 'info'" effect="dark">
+                  {{ isConnected ? '已连接' : '未连接' }}
                 </el-tag>
-                <span class="fps" v-if="isDetecting">30 FPS</span>
+                <span class="detection-info" v-if="isConnected">
+                  检测到: {{ detectedCount }} 个目标
+                </span>
               </div>
               <div class="video-controls">
                 <el-button-group>
                   <el-button 
                     type="primary" 
-                    :icon="isFullscreen ? 'FullscreenExit' : 'FullScreen'"
+                    icon="FullScreen"
                     @click="toggleFullscreen"
                   >
-                    {{ isFullscreen ? '退出全屏' : '全屏' }}
-                  </el-button>
-                  <el-button 
-                    type="primary"
-                    :icon="isRecording ? 'VideoPause' : 'VideoPlay'"
-                    @click="toggleRecording"
-                  >
-                    {{ isRecording ? '停止录制' : '开始录制' }}
+                    全屏
                   </el-button>
                   <el-button 
                     type="primary"
                     icon="Camera"
                     @click="takeSnapshot"
+                    :disabled="!isConnected"
                   >
                     截图
                   </el-button>
@@ -97,13 +70,33 @@
             </div>
           </template>
           <div class="video-container" ref="videoContainer">
-            <div v-if="!isDetecting" class="placeholder">
+            <div v-if="!isConnected" class="placeholder">
               <el-icon :size="64"><VideoCamera /></el-icon>
-              <p>选择设备并开始检测</p>
+              <p>选择检测配置并连接</p>
+            </div>
+            <div v-else-if="connectionError" class="error-container">
+              <el-icon :size="64"><CircleClose /></el-icon>
+              <p>{{ connectionError }}</p>
+              <el-button type="primary" @click="retryConnection">重试连接</el-button>
             </div>
             <div v-else class="video-wrapper">
-              <video ref="videoRef" class="video-player"></video>
-              <canvas ref="canvasRef" class="detection-canvas"></canvas>
+              <img 
+                v-if="currentFrame" 
+                :src="currentFrame" 
+                class="video-frame" 
+                ref="videoFrame"
+              />
+              <div v-else class="no-data-placeholder">
+                <el-icon :size="32"><VideoPlay /></el-icon>
+                <p>等待视频数据...</p>
+              </div>
+              <div class="loading-overlay" v-if="isConnecting">
+                <el-icon class="rotating" :size="32"><Loading /></el-icon>
+                <p>正在连接...</p>
+              </div>
+              <div class="connection-info" v-if="isConnected && !isConnecting">
+                <span>{{ lastDetectionTime }} - {{ detectedCount }} 个目标</span>
+              </div>
             </div>
           </div>
         </el-card>
@@ -113,24 +106,16 @@
         <el-card class="detection-info">
           <template #header>
             <div class="card-header">
-              <span>检测信息</span>
+              <span>检测日志</span>
               <div class="header-actions">
                 <el-button-group>
                   <el-button 
                     type="primary" 
                     link 
-                    :icon="isAutoScroll ? 'Lock' : 'Unlock'"
-                    @click="toggleAutoScroll"
-                  >
-                    {{ isAutoScroll ? '自动滚动' : '手动滚动' }}
-                  </el-button>
-                  <el-button 
-                    type="primary" 
-                    link
                     icon="Delete"
-                    @click="clearRecords"
+                    @click="clearLogs"
                   >
-                    清空记录
+                    清空日志
                   </el-button>
                 </el-button-group>
               </div>
@@ -141,8 +126,8 @@
             <div class="detection-stats">
               <div class="stat-group">
                 <div class="stat-item">
-                  <label>检测模型</label>
-                  <span>{{ selectedModel ? models.find(m => m.value === selectedModel)?.label : '未选择' }}</span>
+                  <label>检测配置</label>
+                  <span>{{ selectedConfigName }}</span>
                 </div>
                 <div class="stat-item">
                   <label>目标数量</label>
@@ -151,66 +136,56 @@
               </div>
               <div class="stat-group">
                 <div class="stat-item">
-                  <label>检测时长</label>
-                  <span>{{ detectionTime }}</span>
+                  <label>连接时长</label>
+                  <span>{{ connectionTime }}</span>
                 </div>
                 <div class="stat-item">
-                  <label>检测速度</label>
-                  <span>{{ fps }} FPS</span>
+                  <label>检测时间</label>
+                  <span>{{ lastDetectionTime }}</span>
                 </div>
               </div>
             </div>
 
             <div class="detection-list">
               <div class="list-header">
-                <h4>实时检测记录</h4>
-                <div class="list-controls">
-                  <el-radio-group v-model="logFilter" size="small">
-                    <el-radio-button label="all">全部</el-radio-button>
-                    <el-radio-button label="detection">检测</el-radio-button>
-                    <el-radio-button label="system">系统</el-radio-button>
-                  </el-radio-group>
-                  <el-button type="primary" link @click="exportRecords">
-                    <el-icon><Download /></el-icon>
-                    导出记录
-                  </el-button>
-                </div>
+                <h4>检测记录</h4>
               </div>
               
               <div class="records-container" ref="recordsContainer">
                 <el-scrollbar ref="scrollbar" :always="true">
                   <el-timeline>
                     <el-timeline-item
-                      v-for="(record, index) in filteredRecords"
+                      v-for="(log, index) in logs"
                       :key="index"
-                      :timestamp="record.time"
-                      :type="record.type"
-                      :hollow="record.category === 'system'"
-                      :size="record.category === 'detection' ? 'large' : 'normal'"
+                      :timestamp="log.time"
+                      :type="log.type"
                     >
                       <div class="record-content">
                         <div class="record-header">
                           <el-tag 
-                            :type="getRecordTagType(record.type)"
+                            :type="getLogTagType(log.type)"
                             size="small"
                             effect="plain"
                           >
-                            {{ getRecordTypeText(record.type) }}
+                            {{ getLogTypeText(log.type) }}
                           </el-tag>
-                          <span v-if="record.objectCount" class="object-count">
-                            检测到 {{ record.objectCount }} 个目标
+                          <span v-if="log.objectCount" class="object-count">
+                            检测到 {{ log.objectCount }} 个目标
                           </span>
                         </div>
-                        <p class="record-message">{{ record.message }}</p>
-                        <div v-if="record.details" class="record-details">
+                        <p class="record-message">{{ log.message }}</p>
+                        <div v-if="log.details && log.details.length > 0" class="record-details">
                           <el-collapse>
                             <el-collapse-item>
                               <template #title>
                                 <el-icon><InfoFilled /></el-icon>
-                                详细信息
+                                检测详情
                               </template>
                               <div class="details-content">
-                                <pre>{{ record.details }}</pre>
+                                <div v-for="(det, i) in log.details" :key="i" class="detection-item">
+                                  <span class="class-name">{{ det.class_name }}</span>
+                                  <span class="confidence">置信度: {{ (det.confidence * 100).toFixed(1) }}%</span>
+                                </div>
                               </div>
                             </el-collapse-item>
                           </el-collapse>
@@ -225,571 +200,517 @@
         </el-card>
       </el-col>
     </el-row>
+    
+    <!-- 配置信息对话框 -->
+    <el-dialog
+      v-model="configInfoDialogVisible"
+      title="检测配置信息"
+      width="500px"
+    >
+      <div v-if="selectedConfigDetails">
+        <el-descriptions :column="1" border>
+          <el-descriptions-item label="配置ID">{{ selectedConfigDetails.config_id }}</el-descriptions-item>
+          <el-descriptions-item label="设备">{{ selectedConfigDetails.device_name }} - {{ selectedConfigDetails.device_id }}</el-descriptions-item>
+          <el-descriptions-item label="模型">{{ getModelTypeName(selectedConfigDetails.models_type) }} - {{ selectedConfigDetails.models_name }}</el-descriptions-item>
+          <el-descriptions-item label="灵敏度">{{ (selectedConfigDetails.sensitivity * 100).toFixed(0) }}%</el-descriptions-item>
+          <el-descriptions-item label="状态">
+            <el-tag :type="selectedConfigDetails.enabled ? 'success' : 'info'">
+              {{ selectedConfigDetails.enabled ? '已启用' : '已禁用' }}
+            </el-tag>
+          </el-descriptions-item>
+        </el-descriptions>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
-import { VideoCamera, Download, InfoFilled } from '@element-plus/icons-vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import { VideoCamera, CircleClose, Loading, InfoFilled, Camera, VideoPlay } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { parse, unparse } from 'papaparse'
+import axios from 'axios'
+import { detectionConfigApi } from '@/api/detection';
 
-// 检测模型列表
-const models = [
-  {
-    type: 'YOLO系列',
-    models: [
-      { label: 'YOLOv8-n', value: 'yolov8n', description: '速度最快，适合实时检测' },
-      { label: 'YOLOv8-s', value: 'yolov8s', description: '速度和精度的平衡' },
-      { label: 'YOLOv8-m', value: 'yolov8m', description: '中等精度' },
-      { label: 'YOLOv8-l', value: 'yolov8l', description: '高精度' },
-      { label: 'YOLOv8-x', value: 'yolov8x', description: '最高精度' },
-      { label: 'YOLOv5-n', value: 'yolov5n', description: '轻量级模型' },
-      { label: 'YOLOv5-s', value: 'yolov5s', description: '小型模型' },
-      { label: 'YOLOv5-m', value: 'yolov5m', description: '中型模型' },
-      { label: 'YOLOv5-l', value: 'yolov5l', description: '大型模型' },
-      { label: 'YOLOv5-x', value: 'yolov5x', description: '超大模型' }
-    ]
-  },
-  {
-    type: 'Faster R-CNN系列',
-    models: [
-      { label: 'Faster R-CNN (ResNet50)', value: 'faster_rcnn_r50', description: '经典两阶段检测器' },
-      { label: 'Faster R-CNN (ResNet101)', value: 'faster_rcnn_r101', description: '高精度两阶段检测器' }
-    ]
-  },
-  {
-    type: 'SSD系列',
-    models: [
-      { label: 'SSD-300', value: 'ssd300', description: '单次检测器(300x300)' },
-      { label: 'SSD-512', value: 'ssd512', description: '单次检测器(512x512)' }
-    ]
-  }
-]
-
-const selectedModel = ref('')
-const selectedDevice = ref('')
-const devices = ref([])
-const isDetecting = ref(false)
-const videoRef = ref(null)
+// 响应式数据
+const selectedConfig = ref('')
+const configs = ref([])
+const isConnected = ref(false)
+const isConnecting = ref(false)
+const connectionError = ref(null)
 const detectedCount = ref(0)
-const detectionTime = ref('00:00:00')
-const detectionRecords = ref([])
-const logFilter = ref('all')
+const currentFrame = ref(null)
+const logs = ref([])
+const connectionStartTime = ref(null)
+const connectionTime = ref('00:00:00')
+const lastDetectionTime = ref('-')
+const configInfoDialogVisible = ref(false)
+const selectedConfigDetails = ref(null)
 
-// 新增的响应式变量
-const isFullscreen = ref(false)
-const isRecording = ref(false)
-const isAutoScroll = ref(true)
-const fps = ref(0)
+// DOM引用
 const videoContainer = ref(null)
-const canvasRef = ref(null)
-const recordsContainer = ref(null)
+const videoFrame = ref(null)
 const scrollbar = ref(null)
 
-// WebSocket 连接
+// WebSocket连接
 let ws = null
-let canvasContext = null
+let timeUpdateInterval = null
 
-// 修改WebSocket初始化函数
-const initWebSocket = () => {
-  ws = new WebSocket('ws://localhost:8765/ws')
+// 计算属性
+const selectedConfigName = computed(() => {
+  const config = configs.value.find(c => c.config_id === selectedConfig.value)
+  return config ? `${config.device_name} - ${config.model_name}` : '未选择'
+})
+
+// 加载检测配置
+const loadConfigurations = async () => {
+  try {
+    // 替换为实际的API端点
+    const response = await detectionConfigApi.getConfigs();
+    console.log('response.data-------------------:', response.data)
+    // 转换配置数据
+    configs.value = response.data.map(config => ({
+      config_id: config.config_id,
+      device_id: config.device_id,
+      device_name: config.device_name || config.device_id,
+      model_name: config.models_name || '默认模型',
+      sensitivity: config.sensitivity,
+      enabled: config.enabled
+    }))
+    
+  } catch (error) {
+    console.error('加载检测配置失败:', error)
+    ElMessage.error('加载检测配置失败')
+  }
+}
+
+// 切换WebSocket连接
+const toggleConnection = async () => {
+  if (isConnected.value) {
+    disconnectWebSocket()
+  } else {
+    connectWebSocket()
+  }
+}
+
+// 断开WebSocket连接
+const disconnectWebSocket = () => {
+  if (ws) {
+    ws.close(); // 关闭WebSocket连接
+    ws = null; // 清空WebSocket实例
+    handleDisconnection('手动断开连接'); // 处理断开连接的逻辑
+  }
+}
+
+// 连接WebSocket逻辑
+const connectWebSocket = () => {
+  if (!selectedConfig.value) {
+    ElMessage.warning('请先选择检测配置')
+    return
+  }
   
-  ws.onopen = () => {
-    console.log('WebSocket connected')
-    // 发送模型配置
-    if (selectedModel.value) {
-      ws.send(JSON.stringify({
-        type: 'config',
-        model: selectedModel.value
-      }))
+  isConnecting.value = true
+  connectionError.value = null
+  
+  // 创建WebSocket连接
+  const wsUrl = `ws://localhost:8003/ws/detection/preview/${selectedConfig.value}`
+  ws = new WebSocket(wsUrl)
+  
+  // 添加超时处理
+  const connectionTimeout = setTimeout(() => {
+    if (ws && ws.readyState !== WebSocket.OPEN) {
+      ws.close()
+      handleDisconnection('连接超时，请检查服务器状态')
+    }
+  }, 10000) // 10秒超时
+  
+  ws.onopen = async () => {
+    try {
+      // 启动检测任务
+      await startDetectionTask()
+      
+      clearTimeout(connectionTimeout)
+      addLog('info', '已连接到WebSocket服务器，等待视频数据...')
+      
+      // 添加无数据超时检测
+      startDataTimeoutMonitor()
+    } catch (error) {
+      clearTimeout(connectionTimeout)
+      handleDisconnection(`启动检测任务失败: ${error.message}`)
     }
   }
   
-  ws.onclose = () => {
-    console.log('WebSocket disconnected')
-    if (isDetecting.value) {
-      stopDetection()
-    }
+  ws.onclose = (event) => {
+    clearTimeout(connectionTimeout)
+    handleDisconnection(event.wasClean ? '连接已关闭' : '连接异常关闭')
   }
   
   ws.onerror = (error) => {
-    console.error('WebSocket error:', error)
-    ElMessage.error('WebSocket连接错误')
+    clearTimeout(connectionTimeout)
+    console.error('WebSocket错误:', error)
+    handleDisconnection('WebSocket连接出错')
   }
   
   ws.onmessage = (event) => {
     try {
+      // 重置无数据超时计时器
+      resetDataTimeout()
+      
       const data = JSON.parse(event.data)
-      handleDetectionResult(data)
+      console.log('接收检测结果-------------------:', data)
+      // 处理不同类型的消息
+      if (data.status === 'error') {
+        // 处理错误消息
+        addLog('danger', data.message || '服务器返回错误')
+        return
+      } else if (data.status === 'success' && data.message) {
+        // 处理成功消息
+        addLog('success', data.message)
+        if (!isConnected.value) {
+          isConnected.value = true
+          isConnecting.value = false
+          connectionStartTime.value = new Date()
+          timeUpdateInterval = setInterval(updateConnectionTime, 1000)
+        }
+        return
+      }
+      
+      // 如果是检测数据（图像和检测结果）
+      if (data.image) {
+        // 如果这是第一帧数据，标记为已连接
+        if (!isConnected.value) {
+          isConnected.value = true
+          isConnecting.value = false
+          connectionStartTime.value = new Date()
+          timeUpdateInterval = setInterval(updateConnectionTime, 1000)
+          addLog('success', '已接收到视频数据流')
+        }
+        
+        // 更新最后检测时间
+        lastDetectionTime.value = new Date().toLocaleTimeString()
+        
+        // 将base64图像数据显示在页面上
+        currentFrame.value = `data:image/jpeg;base64,${data.image}`
+        
+        // 更新检测到的目标数量
+        if (data.detections) {
+          const newCount = data.detections.length
+          
+          // 只有当数量变化时才记录
+          if (newCount !== detectedCount.value) {
+            detectedCount.value = newCount
+            
+            if (newCount > 0) {
+              addLog('success', `检测到 ${newCount} 个目标`, data.detections, newCount)
+            } else if (detectedCount.value > 0) {
+              // 从有到无的变化也记录
+              addLog('info', '未检测到目标')
+            }
+          }
+          
+          // 更新数量
+          detectedCount.value = newCount
+        }
+      }
     } catch (error) {
-      console.error('Error processing detection result:', error)
-      ElMessage.error('处理检测结果时出错')
+      console.error('处理检测结果失败:', error)
+      addLog('danger', `处理数据失败: ${error.message}`)
     }
   }
 }
 
-// 修改发送帧函数
-const sendFrame = async () => {
-  if (!isDetecting.value || !videoRef.value) {
-    return
-  }
-
-  if (!ws || ws.readyState !== WebSocket.OPEN) {
-    handleDisconnection()
-    return
-  }
-
-  const currentTime = Date.now()
-  if (currentTime - lastFrameTime.value < frameInterval) {
-    return
-  }
-
+// 启动检测任务
+const startDetectionTask = async () => {
   try {
-    const video = videoRef.value
-    if (video.readyState < 2) {
+    // 检查任务状态
+    const statusResponse = await axios.get(`http://localhost:8003/api/detection/status`)
+    const tasks = statusResponse.data.tasks || {}
+    
+    // 如果任务已在运行，直接返回
+    if (tasks[selectedConfig.value] && tasks[selectedConfig.value].is_running) {
+      addLog('info', '检测任务已在运行')
       return
     }
-
-    const canvas = document.createElement('canvas')
-    canvas.width = video.videoWidth
-    canvas.height = video.videoHeight
     
-    const ctx = canvas.getContext('2d')
-    ctx.drawImage(video, 0, 0)
+    // 启动任务
+    const response = await axios.post(`http://localhost:8003/api/detection/${selectedConfig.value}/start`)
     
-    const imageData = canvas.toDataURL('image/jpeg', 0.6)
-    
-    ws.send(JSON.stringify({
-      type: 'frame',
-      frame_id: frameId.value++,
-      timestamp: currentTime,
-      width: video.videoWidth,
-      height: video.videoHeight,
-      data: imageData
-    }))
-
-    lastFrameTime.value = currentTime
+    if (response.data.status === 'success') {
+      addLog('success', '检测任务已启动')
+    } else {
+      throw new Error(response.data.message || '启动任务失败')
+    }
   } catch (error) {
-    console.error('Error sending frame:', error)
-    handleDisconnection()
+    console.error('启动检测任务失败:', error)
+    throw error
   }
 }
 
-// 获取设备列表
-const fetchDevices = async () => {
-  try {
-    // 这里替换为实际的API调用
-    const response = await fetch('/api/devices')
-    devices.value = await response.json()
-  } catch (error) {
-    ElMessage.error('获取设备列表失败')
-  }
+// 无数据超时监控
+let dataTimeoutId = null
+const DATA_TIMEOUT = 60000 // 15秒无数据视为连接问题
+
+const startDataTimeoutMonitor = () => {
+  resetDataTimeout()
 }
 
-// 更新检测时间
-const updateDetectionTime = () => {
-  if (!detectionStartTime.value) return
+const resetDataTimeout = () => {
+  if (dataTimeoutId) {
+    clearTimeout(dataTimeoutId)
+  }
+  
+  dataTimeoutId = setTimeout(() => {
+    if (isConnected.value) {
+      addLog('warning', '长时间未收到检测数据，可能存在连接问题')
+      // 不断开连接，但显示警告
+      ElMessage.warning('长时间未收到检测数据，可能是后端服务出现问题')
+    }
+  }, DATA_TIMEOUT)
+}
+
+// 处理断开连接 - 添加自动重连机制
+let reconnectCount = 0
+const MAX_RECONNECT = 3
+let reconnectTimeoutId = null
+
+const handleDisconnection = (errorMessage) => {
+  isConnected.value = false
+  isConnecting.value = false
+  
+  if (dataTimeoutId) {
+    clearTimeout(dataTimeoutId)
+    dataTimeoutId = null
+  }
+  
+  if (timeUpdateInterval) {
+    clearInterval(timeUpdateInterval)
+    timeUpdateInterval = null
+  }
+  
+  connectionStartTime.value = null
+  
+  // 如果是手动断开，不显示错误
+  if (errorMessage === '手动断开连接') {
+    connectionError.value = null
+    addLog('info', '已断开连接')
+    reconnectCount = 0
+    return
+  }
+  
+  // 显示错误信息
+  connectionError.value = errorMessage
+  if (errorMessage) {
+    addLog('danger', errorMessage)
+  } else {
+    addLog('info', '连接已断开')
+  }
+  
+  // 尝试自动重连
+  // if (reconnectCount < MAX_RECONNECT) {
+  //   reconnectCount++
+  //   const delay = reconnectCount * 2000 // 递增延迟，2秒、4秒、6秒
+    
+  //   addLog('info', `将在${delay/1000}秒后尝试重新连接 (${reconnectCount}/${MAX_RECONNECT})`)
+    
+  //   if (reconnectTimeoutId) {
+  //     clearTimeout(reconnectTimeoutId)
+  //   }
+    
+  //   reconnectTimeoutId = setTimeout(() => {
+  //     if (!isConnected.value) {
+  //       addLog('info', '尝试重新连接...')
+  //       connectWebSocket()
+  //     }
+  //   }, delay)
+  // } else {
+  //   addLog('error', '多次重连失败，请手动重试')
+  // }
+}
+
+// 更新连接时间
+const updateConnectionTime = () => {
+  if (!connectionStartTime.value) return
   
   const now = new Date()
-  const diff = now - detectionStartTime.value
+  const diff = now - connectionStartTime.value
   const hours = Math.floor(diff / 3600000)
   const minutes = Math.floor((diff % 3600000) / 60000)
   const seconds = Math.floor((diff % 60000) / 1000)
   
-  detectionTime.value = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
+  connectionTime.value = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
 }
 
-// 检测状态变量
-const detectionStartTime = ref(null)
-const lastFrameTime = ref(0)
-const frameCount = ref(0)
-const detectedObjects = ref([])
-
-// 修改处理检测结果函数
-const handleDetectionResult = (data) => {
-  if (!data || !data.objects) return
-  
-  detectedCount.value = data.objects.length
-  
-  // 计算延迟
-  const latency = Date.now() - data.timestamp
-  if (latency > maxLatency) {
-    console.log(`Skipping frame due to high latency: ${latency}ms`)
-    return
-  }
-  
-  // 更新FPS
-  const currentTime = performance.now()
-  if (lastFrameTime.value) {
-    const timeDiff = currentTime - lastFrameTime.value
-    fps.value = Math.round(1000 / timeDiff)
-  }
-  lastFrameTime.value = currentTime
-  
-  // 绘制检测框
-  drawDetectionBoxes(data.objects)
-  
-  // 更新检测记录
-  if (data.objects.length > 0) {
-    const message = `检测到 ${data.objects.length} 个目标`
-    addDetectionRecord('success', message)
-  }
-}
-
-// 绘制检测框
-const drawDetectionBoxes = (objects) => {
-  const canvas = canvasRef.value
-  const video = videoRef.value
-  const ctx = canvas.getContext('2d')
-  
-  // 清空画布
-  ctx.clearRect(0, 0, canvas.width, canvas.height)
-  
-  // 设置画布尺寸与视频一致
-  canvas.width = video.videoWidth
-  canvas.height = video.videoHeight
-  
-  objects.forEach(obj => {
-    // 设置检测框样式
-    ctx.strokeStyle = getObjectColor(obj.class)
-    ctx.lineWidth = 2
-    ctx.fillStyle = `${ctx.strokeStyle}80` // 添加50%透明度
-    
-    // 绘制检测框
-    const [x, y, w, h] = obj.bbox
-    ctx.strokeRect(x, y, w, h)
-    ctx.fillRect(x, y, w, h)
-    
-    // 绘制标签
-    ctx.font = '14px Arial'
-    ctx.fillStyle = '#fff'
-    const label = `${obj.class} ${Math.round(obj.confidence * 100)}%`
-    const textWidth = ctx.measureText(label).width
-    
-    ctx.fillStyle = ctx.strokeStyle
-    ctx.fillRect(x, y - 20, textWidth + 10, 20)
-    
-    ctx.fillStyle = '#fff'
-    ctx.fillText(label, x + 5, y - 5)
-  })
-}
-
-// 获取目标类别对应的颜色
-const getObjectColor = (className) => {
-  const colors = {
-    person: '#ff0000',
-    car: '#00ff00',
-    truck: '#0000ff',
-    // 添加更多类别的颜色
-    default: '#ff9900'
-  }
-  return colors[className] || colors.default
-}
-
-// 开始检测
-const startDetection = async () => {
-  try {
-    // 获取视频流
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { deviceId: selectedDevice.value }
-    })
-    
-    // 设置视频源
-    videoRef.value.srcObject = stream
-    await videoRef.value.play()
-    
-    // 设置画布尺寸
-    canvasRef.value.width = videoRef.value.videoWidth
-    canvasRef.value.height = videoRef.value.videoHeight
-    
-    // 初始化检测状态
-    detectionStartTime.value = new Date()
-    frameCount.value = 0
-    detectedCount.value = 0
-    
-    // 开始发送视频帧
-    startFrameCapture()
-    
-    // 开始时间更新
-    timeUpdateInterval = setInterval(updateDetectionTime, 1000)
-    
-    isDetecting.value = true
-    addDetectionRecord('success', `开始使用 ${models.find(m => m.value === selectedModel.value).label} 模型检测`)
-  } catch (error) {
-    ElMessage.error('启动检测失败')
-    console.error('Error starting detection:', error)
-  }
-}
-
-// 停止检测
-const stopDetection = () => {
-  // 停止视频流
-  if (videoRef.value?.srcObject) {
-    videoRef.value.srcObject.getTracks().forEach(track => track.stop())
-    videoRef.value.srcObject = null
-  }
-  
-  // 清理画布
-  const ctx = canvasRef.value?.getContext('2d')
-  if (ctx) {
-    ctx.clearRect(0, 0, canvasRef.value.width, canvasRef.value.height)
-  }
-  
-  // 重置状态
-  isDetecting.value = false
-  detectionStartTime.value = null
-  clearInterval(timeUpdateInterval)
-  
-  addDetectionRecord('info', '检测已停止')
-}
-
-// 发送视频帧进行检测
-const startFrameCapture = () => {
-  const captureFrame = () => {
-    if (!isDetecting.value) return
-    
-    const canvas = document.createElement('canvas')
-    const video = videoRef.value
-    canvas.width = video.videoWidth
-    canvas.height = video.videoHeight
-    
-    const ctx = canvas.getContext('2d')
-    ctx.drawImage(video, 0, 0)
-    
-    // 将帧数据发送到服务器
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      canvas.toBlob(blob => {
-        ws.send(JSON.stringify({
-          type: 'frame',
-          model: selectedModel.value,
-          data: blob
-        }))
-      }, 'image/jpeg', 0.8)
-    }
-    
-    // 请求下一帧
-    requestAnimationFrame(captureFrame)
-  }
-  
-  captureFrame()
-}
-
-// 修改toggleDetection函数
-const toggleDetection = async () => {
-  if (!selectedDevice.value || !selectedModel.value) {
-    ElMessage.warning('请选择摄像头和检测模型')
-    return
-  }
-
-  if (isDetecting.value) {
-    stopDetection()
-  } else {
-    startDetection()
-  }
-}
-
-// 生命周期钩子
-onMounted(() => {
-  fetchDevices()
-  initWebSocket()
-})
-
-onUnmounted(() => {
-  if (isDetecting.value) {
-    stopDetection()
-  }
-  if (ws) {
-    ws.close()
-  }
-})
-
-// 添加检测记录
-const addDetectionRecord = (type, message, details = null, objectCount = null) => {
-  detectionRecords.value.unshift({
+// 添加日志
+const addLog = (type, message, details = null, objectCount = null) => {
+  logs.value.unshift({
     time: new Date().toLocaleTimeString(),
     type,
     message,
     details,
-    objectCount,
-    category: type === 'success' && objectCount ? 'detection' : 'system'
+    objectCount
   })
+  
+  // 保持日志数量在合理范围内
+  if (logs.value.length > 100) {
+    logs.value = logs.value.slice(0, 100)
+  }
 }
 
-// 过滤记录
-const filteredRecords = computed(() => {
-  if (logFilter.value === 'all') return detectionRecords.value
-  return detectionRecords.value.filter(record => record.category === logFilter.value)
-})
-
-// 获取记录类型标签样式
-const getRecordTagType = (type) => {
+// 获取日志标签类型
+const getLogTagType = (type) => {
   const typeMap = {
     success: 'success',
     warning: 'warning',
-    error: 'danger',
+    danger: 'danger',
     info: 'info'
   }
   return typeMap[type]
 }
 
-// 获取记录类型文本
-const getRecordTypeText = (type) => {
+// 获取日志类型文本
+const getLogTypeText = (type) => {
   const textMap = {
     success: '成功',
     warning: '警告',
-    error: '错误',
+    danger: '错误',
     info: '信息'
   }
   return textMap[type]
 }
 
-// 导出记录
-const exportRecords = () => {
-  if (detectionRecords.value.length === 0) {
-    ElMessage.warning('没有可导出的记录')
-    return
+// 获取模型类型名称
+const getModelTypeName = (type) => {
+  const typeMap = {
+    'object_detection': '目标检测',
+    'segmentation': '图像分割',
+    'keypoint': '关键点检测',
+    'pose': '姿态估计',
+    'face': '人脸识别',
+    'other': '其他类型'
   }
-
-  try {
-    const records = detectionRecords.value.map(record => ({
-      时间: record.time,
-      类型: getRecordTypeText(record.type),
-      消息: record.message,
-      目标数量: record.objectCount || '-',
-      详细信息: record.details ? JSON.stringify(record.details) : '-'
-    }))
-    
-    const csv = unparse(records, {
-      quotes: true, // 在所有字段周围添加引号
-      delimiter: ',', // 使用逗号作为分隔符
-      header: true // 包含表头
-    })
-    
-    // 添加 BOM 以确保 Excel 正确显示中文
-    const csvContent = '\ufeff' + csv
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
-    
-    // 创建下载链接
-    const link = document.createElement('a')
-    const now = new Date()
-    const timestamp = now.toISOString().replace(/[:.]/g, '-').slice(0, 19)
-    link.download = `detection_records_${timestamp}.csv`
-    link.href = URL.createObjectURL(blob)
-    
-    // 触发下载
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-    
-    // 清理 URL 对象
-    URL.revokeObjectURL(link.href)
-    
-    ElMessage.success('记录导出成功')
-  } catch (error) {
-    console.error('Error exporting records:', error)
-    ElMessage.error('导出记录失败：' + (error.message || '未知错误'))
-  }
-}
-
-// 更新检测记录示例
-const updateDetectionExample = () => {
-  addDetectionRecord('success', '检测到行人和汽车', {
-    persons: 2,
-    cars: 1,
-    confidence: 0.92
-  }, 3)
+  return typeMap[type] || type
 }
 
 // 全屏控制
 const toggleFullscreen = async () => {
-  if (!isFullscreen.value) {
-    try {
+  try {
+    if (!document.fullscreenElement) {
       await videoContainer.value.requestFullscreen()
-      isFullscreen.value = true
-    } catch (error) {
-      ElMessage.error('无法进入全屏模式')
-    }
-  } else {
-    try {
+    } else {
       await document.exitFullscreen()
-      isFullscreen.value = false
-    } catch (error) {
-      ElMessage.error('无法退出全屏模式')
     }
-  }
-}
-
-// 录制控制
-const toggleRecording = () => {
-  if (!isDetecting.value) {
-    ElMessage.warning('请先开始检测')
-    return
-  }
-  isRecording.value = !isRecording.value
-  if (isRecording.value) {
-    addDetectionRecord('info', '开始录制视频')
-  } else {
-    addDetectionRecord('info', '停止录制视频')
+  } catch (error) {
+    ElMessage.error('切换全屏失败')
   }
 }
 
 // 截图功能
 const takeSnapshot = () => {
-  if (!isDetecting.value) {
-    ElMessage.warning('请先开始检测')
+  if (!isConnected.value || !currentFrame.value) {
+    ElMessage.warning('无可用的视频帧')
     return
   }
   
   try {
-    const canvas = document.createElement('canvas')
-    const video = videoRef.value
-    canvas.width = video.videoWidth
-    canvas.height = video.videoHeight
-    canvas.getContext('2d').drawImage(video, 0, 0)
-    
     const link = document.createElement('a')
-    link.download = `snapshot_${new Date().toISOString().slice(0, 19).replace(/[:.]/g, '-')}.png`
-    link.href = canvas.toDataURL('image/png')
+    link.download = `detection_snapshot_${new Date().toISOString().replace(/[:.]/g, '-')}.jpg`
+    link.href = currentFrame.value
     link.click()
     
-    addDetectionRecord('success', '截图已保存')
+    addLog('success', '截图已保存')
   } catch (error) {
     ElMessage.error('截图失败')
-    console.error('Error taking snapshot:', error)
   }
 }
 
-// 自动滚动控制
-const toggleAutoScroll = () => {
-  isAutoScroll.value = !isAutoScroll.value
+// 清空日志
+const clearLogs = () => {
+  ElMessageBox.confirm(
+    '确定要清空日志吗？',
+    '提示',
+    {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning'
+    }
+  ).then(() => {
+    logs.value = []
+    ElMessage.success('日志已清空')
+  }).catch(() => {})
 }
 
-// 清空记录
-const clearRecords = async () => {
+// 重试连接
+const retryConnection = () => {
+  connectionError.value = null
+  reconnectCount = 0
+  if (reconnectTimeoutId) {
+    clearTimeout(reconnectTimeoutId)
+    reconnectTimeoutId = null
+  }
+  connectWebSocket()
+}
+
+// 显示配置信息
+const showConfigInfo = async () => {
+  if (!selectedConfig.value) {
+    ElMessage.warning('请先选择检测配置')
+    return
+  }
+  
   try {
-    await ElMessageBox.confirm(
-      '确定要清空所有检测记录吗？此操作不可恢复。',
-      '警告',
-      {
-        confirmButtonText: '确定',
-        cancelButtonText: '取消',
-        type: 'warning'
-      }
-    )
-    detectionRecords.value = []
-    ElMessage.success('记录已清空')
-  } catch {
-    // 用户取消操作
+    // 替换为实际的API端点
+    const response = await detectionConfigApi.getConfig(selectedConfig.value);
+    selectedConfigDetails.value = response.data
+    configInfoDialogVisible.value = true
+  } catch (error) {
+    ElMessage.error('获取配置信息失败')
   }
 }
 
-// 监听记录变化，自动滚动
-watch(filteredRecords, () => {
-  if (isAutoScroll.value && scrollbar.value) {
-    nextTick(() => {
-      scrollbar.value.setScrollTop(0)
+// 生命周期钩子
+onMounted(() => {
+  loadConfigurations()
+})
+
+onUnmounted(() => {
+  if (ws) {
+    ws.close()
+  }
+  
+  if (timeUpdateInterval) {
+    clearInterval(timeUpdateInterval)
+  }
+  
+  if (dataTimeoutId) {
+    clearTimeout(dataTimeoutId)
+  }
+  
+  if (reconnectTimeoutId) {
+    clearTimeout(reconnectTimeoutId)
+  }
+  
+  // 如果有活跃的连接，尝试停止检测任务
+  if (selectedConfig.value && isConnected.value) {
+    stopDetectionTask().catch(error => {
+      console.error('停止检测任务失败:', error)
     })
+  }
+})
+
+// 停止检测任务
+const stopDetectionTask = async () => {
+  try {
+    await axios.post(`http://localhost:8003/api/detection/${selectedConfig.value}/stop`)
+    console.log('检测任务已停止')
+  } catch (error) {
+    console.error('停止检测任务失败:', error)
+    throw error
+  }
+}
+
+// 监听配置变化
+watch(selectedConfig, () => {
+  if (isConnected.value) {
+    disconnectWebSocket()
   }
 })
 </script>
@@ -819,7 +740,7 @@ watch(filteredRecords, () => {
   align-items: center;
 }
 
-.model-select {
+.config-select {
   width: 240px;
 }
 
@@ -836,6 +757,7 @@ watch(filteredRecords, () => {
   justify-content: center;
   border-radius: 4px;
   overflow: hidden;
+  position: relative;
 }
 
 .placeholder {
@@ -843,18 +765,48 @@ watch(filteredRecords, () => {
   color: #606266;
 }
 
-.placeholder .el-icon {
-  margin-bottom: 16px;
+.error-container {
+  text-align: center;
+  color: #f56c6c;
 }
 
-.video-player {
+.video-wrapper {
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+
+.video-frame {
   width: 100%;
   height: 100%;
   object-fit: contain;
 }
 
+.loading-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  color: white;
+}
+
+.rotating {
+  animation: rotate 1.5s linear infinite;
+}
+
+@keyframes rotate {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 .detection-info {
-  height: 600px;
+  height: 700px;
   display: flex;
   flex-direction: column;
 }
@@ -914,7 +866,9 @@ watch(filteredRecords, () => {
 
 .detection-list {
   flex: 1;
-  overflow-y: auto;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .list-header {
@@ -925,16 +879,16 @@ watch(filteredRecords, () => {
   padding: 0 8px;
 }
 
-.list-controls {
-  display: flex;
-  gap: 16px;
-  align-items: center;
+.list-header h4 {
+  margin: 0;
 }
 
 .records-container {
   flex: 1;
   overflow: hidden;
-  padding: 0 8px;
+  display: flex;
+  flex-direction: column;
+  max-height: 400px; /* 设置最大高度 */
 }
 
 .record-content {
@@ -971,45 +925,27 @@ watch(filteredRecords, () => {
   padding: 8px;
   background-color: #ffffff;
   border-radius: 4px;
-  font-family: monospace;
-  font-size: 12px;
 }
 
-:deep(.el-timeline-item__node--normal) {
-  left: -1px;
-}
-
-:deep(.el-timeline-item__node--large) {
-  left: -2px;
-}
-
-:deep(.el-timeline-item__content) {
-  margin-left: 28px;
-}
-
-:deep(.el-timeline-item__timestamp) {
-  font-size: 12px;
-  color: #909399;
-}
-
-:deep(.el-radio-button__inner) {
-  padding: 4px 12px;
-}
-
-.model-option {
+.detection-item {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  justify-content: space-between;
+  padding: 6px 0;
+  border-bottom: 1px solid #f0f0f0;
 }
 
-.model-name {
+.detection-item:last-child {
+  border-bottom: none;
+}
+
+.class-name {
   font-weight: 500;
-  color: #2c3e50;
+  color: #409EFF;
 }
 
-.model-desc {
-  font-size: 12px;
+.confidence {
   color: #909399;
+  font-size: 13px;
 }
 
 .video-header {
@@ -1024,41 +960,23 @@ watch(filteredRecords, () => {
   gap: 12px;
 }
 
-.fps {
+.detection-info {
   font-size: 14px;
   color: #409EFF;
-  font-weight: 500;
-}
-
-.video-controls {
-  display: flex;
-  gap: 12px;
-}
-
-.video-wrapper {
-  position: relative;
-  width: 100%;
-  height: 100%;
-}
-
-.detection-canvas {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
 }
 
 .info-content {
   display: flex;
   flex-direction: column;
   height: 100%;
+  overflow: hidden;
 }
 
+/* 响应式布局 */
 @media (max-width: 1400px) {
   .stat-group {
     grid-template-columns: 1fr;
   }
 }
 </style> 
+ 
