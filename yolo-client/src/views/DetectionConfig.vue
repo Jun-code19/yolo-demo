@@ -242,6 +242,7 @@ import { ElMessage } from 'element-plus';
 import { Plus } from '@element-plus/icons-vue';
 import deviceApi from '@/api/device'
 import { detectionConfigApi, detectionServiceApi } from '@/api/detection';
+import { startDetection, stopDetection } from '@/api/detection_server';
 
 export default defineComponent({
   name: 'DetectionConfig',
@@ -491,8 +492,23 @@ export default defineComponent({
     // 切换启用状态
     const toggleEnabled = async (record) => {
       try {
-        await detectionConfigApi.toggleConfig(record.config_id, !record.enabled);
-        ElMessage.success(`已${record.enabled ? '禁用' : '启用'}配置`);
+        if(!record.enabled) {
+          // 启动任务
+          const response = await startDetection(record.config_id)         
+          if (response.status === 'success') {
+            ElMessage.success('检测任务已启动')
+          } else {
+            ElMessage.error(response.message || '启动任务失败')
+          }
+        } else {
+          // 停止任务
+          const response = await stopDetection(record.config_id)
+          if (response.status === 'success') {
+            ElMessage.success('检测任务已停止')
+          } else {
+            ElMessage.error(response.message || '停止任务失败')
+          }
+        }
         loadConfigList();
       } catch (error) {
         ElMessage.error('操作失败: ' + error.message);

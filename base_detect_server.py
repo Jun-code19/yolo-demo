@@ -78,7 +78,7 @@ class DetectionTask:
                 logger.error(f"未找到设备: {self.device_id}")
                 return False
             
-            rtsp_url = f"rtsp://{device.username}:{device.password}@{device.ip_address}:{device.port}/cam/realmonitor?channel=1&subtype=0"
+            rtsp_url = f"rtsp://{device.username}:{device.password}@{device.ip_address}:{device.port}/cam/realmonitor?channel=1&subtype=1"
             logger.info(f"连接到摄像机: {rtsp_url}")
             
             # 设置OpenCV连接参数
@@ -316,9 +316,12 @@ class DetectionTask:
             save_dir.mkdir(parents=True, exist_ok=True)
             
             if self.save_mode in [SaveMode.screenshot, SaveMode.both]:
-                # 保存截图
+                # 绘制检测框和标签
+                annotated_frame = self.draw_detections(frame, detections)
+                
+                # 保存带检测框的截图
                 thumbnail_path = save_dir / f"{event_id}.jpg"
-                cv2.imwrite(str(thumbnail_path), frame)
+                cv2.imwrite(str(thumbnail_path), annotated_frame)
                 event.thumbnail_path = str(thumbnail_path)
             
             if self.save_mode in [SaveMode.video, SaveMode.both]:
@@ -328,8 +331,11 @@ class DetectionTask:
                 fourcc = cv2.VideoWriter_fourcc(*'mp4v')
                 out = cv2.VideoWriter(str(snippet_path), fourcc, 5, (width, height))
                 
+                # 处理视频中的每一帧并添加检测框
                 for f in self.frame_buffer:
-                    out.write(f)
+                    # 在每一帧上绘制检测框
+                    annotated_f = self.draw_detections(f, detections)
+                    out.write(annotated_f)
                 out.release()
                 event.snippet_path = str(snippet_path)
             
@@ -346,6 +352,75 @@ class DetectionTask:
             if 'db' in locals() and db:
                 db.close()
     
+    def draw_detections(self, frame, detections):
+        """在图像上绘制检测框和标签"""
+        annotated_frame = frame.copy()
+        
+        # 在图像上绘制时间戳
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        cv2.putText(annotated_frame, timestamp, (10, 30), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+        
+        # 绘制每个检测框
+        for detection in detections:
+            # 获取边界框坐标
+            bbox = detection["bbox"]
+            x1, y1, x2, y2 = map(int, bbox)
+            
+            # 获取类别和置信度
+            class_name = detection["class_name"]
+            confidence = detection["confidence"]
+            
+            # 为不同类别选择不同颜色
+            # 使用类别ID来确定颜色，确保同一类别总是相同颜色
+            color_id = detection["class_id"] % 10
+            colors = [
+                (255, 0, 0),     # 红
+                (0, 255, 0),     # 绿
+                (0, 0, 255),     # 蓝
+                (255, 255, 0),   # 黄
+                (0, 255, 255),   # 青
+                (255, 0, 255),   # 紫
+                (255, 128, 0),   # 橙
+                (128, 0, 255),   # 紫蓝
+                (0, 128, 255),   # 浅蓝
+                (255, 0, 128)    # 粉红
+            ]
+            color = colors[color_id]
+            
+            # 绘制边界框
+            cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), color, 2)
+            
+            # 准备标签文本
+            label = f"{class_name}: {confidence:.2f}"
+            
+            # 绘制背景和文本
+            # 获取文本大小
+            (text_width, text_height), baseline = cv2.getTextSize(
+                label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+            
+            # 绘制标签背景
+            cv2.rectangle(
+                annotated_frame, 
+                (x1, y1 - text_height - 5), 
+                (x1 + text_width, y1), 
+                color, 
+                -1  # 填充矩形
+            )
+            
+            # 绘制文本
+            cv2.putText(
+                annotated_frame, 
+                label, 
+                (x1, y1 - 5), 
+                cv2.FONT_HERSHEY_SIMPLEX, 
+                0.5, 
+                (255, 255, 255), 
+                1
+            )
+        
+        return annotated_frame
+    
     def broadcast_detection_result(self, frame, detections):
         """向所有WebSocket客户端广播检测结果"""
         if not self.clients:
@@ -354,7 +429,8 @@ class DetectionTask:
         try:
             # 图像压缩处理
             h, w = frame.shape[:2]
-            max_width = 640  # 降低最大宽度
+            max_width = 1280  # 提高最大宽度以保持更高的分辨率
+            scale = 1
             
             if w > max_width:
                 scale = max_width / w
@@ -364,16 +440,23 @@ class DetectionTask:
             else:
                 frame_resized = frame
             
-            # 绘制检测框和时间戳
-            annotated_frame = frame_resized.copy()
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            cv2.putText(annotated_frame, timestamp, (10, 30), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+            # 调整检测框坐标
+            adjusted_detections = []
+            for detection in detections:
+                adjusted_detection = detection.copy()
+                adjusted_detection["bbox"] = [
+                    int(detection["bbox"][0] * scale),
+                    int(detection["bbox"][1] * scale),
+                    int(detection["bbox"][2] * scale),
+                    int(detection["bbox"][3] * scale)
+                ]
+                adjusted_detections.append(adjusted_detection)
+
+            # 绘制检测框和标签
+            annotated_frame = self.draw_detections(frame_resized, adjusted_detections)
             
-            # 绘制检测框...（保留原有代码）
-            
-            # 将帧转换为JPEG
-            _, buffer = cv2.imencode('.jpg', annotated_frame, [cv2.IMWRITE_JPEG_QUALITY, 60])
+            # 将帧转换为JPEG，增加质量参数
+            _, buffer = cv2.imencode('.jpg', annotated_frame, [cv2.IMWRITE_JPEG_QUALITY, 90])  # 提高JPEG质量
             jpg_bytes = buffer.tobytes()
             base64_image = base64.b64encode(jpg_bytes).decode('utf-8')
             
@@ -383,7 +466,7 @@ class DetectionTask:
                 "config_id": self.config_id,
                 "timestamp": time.time(),
                 "image": base64_image,
-                "detections": detections
+                "detections": adjusted_detections
             }
             
             # 使用消息队列方式，避免直接调用异步方法
@@ -452,7 +535,7 @@ class DetectionTask:
                     self.broadcast_task = asyncio.run_coroutine_threadsafe(
                         self.broadcast_worker(),
                         self.loop
-                    ).result()
+                    )
                 else:
                     self.loop = asyncio.get_event_loop()
                     self.broadcast_task = asyncio.create_task(self.broadcast_worker())
@@ -635,6 +718,15 @@ async def lifespan(app: FastAPI):
     logger.info("检测服务器关闭中...")
     for config_id, task in list(detection_server.tasks.items()):
         task.stop()
+
+    # 确保所有任务完成
+    # tasks = asyncio.all_tasks()
+    # for task in tasks:
+    #     if task is not asyncio.current_task():
+    #         task.cancel()
+    
+    # # 等待所有任务完成
+    # await asyncio.gather(*tasks, return_exceptions=True)
 
 
 # 创建FastAPI应用

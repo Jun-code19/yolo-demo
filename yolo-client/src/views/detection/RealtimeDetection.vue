@@ -230,6 +230,7 @@ import { VideoCamera, CircleClose, Loading, InfoFilled, Camera, VideoPlay } from
 import { ElMessage, ElMessageBox } from 'element-plus'
 import axios from 'axios'
 import { detectionConfigApi } from '@/api/detection';
+import { startDetection, stopDetection, getDetectionStatus } from '@/api/detection_server';
 
 // 响应式数据
 const selectedConfig = ref('')
@@ -324,11 +325,11 @@ const connectWebSocket = () => {
   
   ws.onopen = async () => {
     try {
-      // 启动检测任务
-      await startDetectionTask()
-      
+
       clearTimeout(connectionTimeout)
       addLog('info', '已连接到WebSocket服务器，等待视频数据...')
+      // 启动检测任务
+      await startDetectionTask()
       
       // 添加无数据超时检测
       startDataTimeoutMonitor()
@@ -352,10 +353,10 @@ const connectWebSocket = () => {
   ws.onmessage = (event) => {
     try {
       // 添加调试日志
-      console.log('收到WebSocket消息，数据长度:', event.data.length);
+      // console.log('收到WebSocket消息，数据长度:', event.data.length);
       
       const data = JSON.parse(event.data);
-      console.log('解析WebSocket消息:', data.hasOwnProperty('image') ? '包含图像数据' : '不包含图像数据');
+      // console.log('解析WebSocket消息:', data.hasOwnProperty('image') ? '包含图像数据' : '不包含图像数据');
       
       // 重置无数据超时计时器
       resetDataTimeout()
@@ -424,8 +425,8 @@ const connectWebSocket = () => {
 const startDetectionTask = async () => {
   try {
     // 检查任务状态
-    const statusResponse = await axios.get(`http://localhost:8003/api/detection/status`)
-    const tasks = statusResponse.data.tasks || {}
+    const statusResponse = await getDetectionStatus();
+    const tasks = statusResponse.tasks || {}
     
     // 如果任务已在运行，直接返回
     if (tasks[selectedConfig.value] && tasks[selectedConfig.value].is_running) {
@@ -434,12 +435,12 @@ const startDetectionTask = async () => {
     }
     
     // 启动任务
-    const response = await axios.post(`http://localhost:8003/api/detection/${selectedConfig.value}/start`)
+    const response = await startDetection(selectedConfig.value)
     
-    if (response.data.status === 'success') {
+    if (response.status === 'success') {
       addLog('success', '检测任务已启动')
     } else {
-      throw new Error(response.data.message || '启动任务失败')
+      throw new Error(response.message || '启动任务失败')
     }
   } catch (error) {
     console.error('启动检测任务失败:', error)
@@ -692,16 +693,14 @@ onUnmounted(() => {
   
   // 如果有活跃的连接，尝试停止检测任务
   if (selectedConfig.value && isConnected.value) {
-    stopDetectionTask().catch(error => {
-      console.error('停止检测任务失败:', error)
-    })
+    disconnectWebSocket()
   }
 })
 
 // 停止检测任务
 const stopDetectionTask = async () => {
   try {
-    await axios.post(`http://localhost:8003/api/detection/${selectedConfig.value}/stop`)
+    await stopDetection(selectedConfig.value)
     console.log('检测任务已停止')
   } catch (error) {
     console.error('停止检测任务失败:', error)

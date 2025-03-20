@@ -3,6 +3,7 @@ node_modules
 *.dll
 *.lib
 new_venv
+storage
 *.log
 *.log.*
 *.log.*.*
