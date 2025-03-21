@@ -16,6 +16,7 @@ import json
 from pathlib import Path
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import func, text, desc, and_, or_
+from ultralytics import YOLO
 
 router = APIRouter()
 
@@ -465,6 +466,7 @@ class ModelResponse(ModelBase):
     upload_time: datetime
     last_used: Optional[datetime] = None
     is_active: bool
+    models_classes: Optional[Dict[int, str]] = None
 
     class Config:
         from_attributes = True
@@ -528,6 +530,13 @@ async def upload_model(
         except json.JSONDecodeError:
             raise HTTPException(status_code=400, detail="Invalid parameters JSON")
     
+    # 加载模型并获取类别
+    try:
+        model = YOLO(file_path)  # 加载模型
+        classes = model.names  # 获取类别名称
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"模型加载失败: {str(e)}")
+
     # 创建数据库记录
     db_model = DetectionModel(
         models_id=models_id,
@@ -539,7 +548,8 @@ async def upload_model(
         description=description,
         parameters=models_params,
         upload_time=datetime.utcnow(),
-        is_active=True
+        is_active=True,
+        models_classes=classes  # 将类别信息存储到数据库
     )
     
     db.add(db_model)

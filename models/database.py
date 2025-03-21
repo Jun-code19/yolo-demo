@@ -118,7 +118,8 @@ class DetectionModel(Base):
     upload_time = Column(DateTime, default=datetime.utcnow)
     last_used = Column(DateTime)
     is_active = Column(Boolean, default=True)
-    
+    models_classes = Column(JSONB, nullable=True)  # 新增字段，用于存储类别信息
+
     detection_configs = relationship("DetectionConfig", back_populates="model", cascade="all, delete-orphan")
 
 class DetectionConfig(Base):

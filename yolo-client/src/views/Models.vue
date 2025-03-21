@@ -154,6 +154,22 @@
           <el-descriptions-item label="最后使用">{{ selectedModel.last_used ? formatDate(selectedModel.last_used) : '暂未使用' }}</el-descriptions-item>
           <el-descriptions-item label="文件路径" :span="2">{{ selectedModel.file_path }}</el-descriptions-item>
           <el-descriptions-item label="描述" :span="2">{{ selectedModel.description || '暂无描述' }}</el-descriptions-item>
+          <!-- 新增的类别信息展示 -->
+          <el-descriptions-item label="检测类别" :span="2">
+            <div>
+              <div v-if="Array.isArray(selectedModel.models_classes) && selectedModel.models_classes.length > 5">
+                <el-tag v-for="(name, index) in selectedModel.models_classes.slice(0, 5)" :key="index" style="margin-right: 5px;">
+                  {{ name.name }}
+                </el-tag>
+                <el-link type="primary" @click="showAllClasses">查看所有类别，共计{{ selectedModel.models_classes.length }}个</el-link>
+              </div>
+              <div v-else>
+                <el-tag v-for="(name, index) in selectedModel.models_classes" :key="index" style="margin-right: 5px;">
+                  {{ name.name }}
+                </el-tag>
+              </div>
+            </div>
+          </el-descriptions-item>
         </el-descriptions>
         
         <h3 class="mt-4">模型参数</h3>
@@ -168,6 +184,36 @@
         <el-empty v-else description="暂无参数信息"></el-empty>
       </div>
     </el-dialog>
+
+<!-- 查看所有类别对话框 -->
+<el-dialog v-model="allClassesDialogVisible" title="所有检测类别" width="700px" draggable>
+  <div style="max-height: 500px; overflow-y: auto;">
+    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;">
+      <div v-for="(item, index) in selectedModel.models_classes" :key="index" 
+           :style="{
+             display: 'flex',
+             justifyContent: 'space-between',
+             border: hoveredIndex === index ? '1px solid #409EFF' : '1px solid #dcdfe6',
+             padding: '10px',
+             borderRadius: '4px',
+             transition: 'all 0.3s',
+             cursor: 'pointer'
+           }"
+           @mouseover="hoveredIndex = index" @mouseleave="hoveredIndex = null">
+        <span :style="{ borderRight: '1px solid #dcdfe6', paddingRight: '10px', color: hoveredIndex === index ? '#409EFF' : 'inherit' }">
+          {{ item.id }}
+        </span>
+        <span :style="{ color: hoveredIndex === index ? '#409EFF' : 'inherit' }">{{ item.name }}</span>
+      </div>
+    </div>
+  </div>
+  <template #footer>
+    <span class="dialog-footer">
+      <el-button @click="allClassesDialogVisible = false">关闭</el-button>
+    </span>
+  </template>
+</el-dialog>
+
   </div>
 </template>
 
@@ -187,6 +233,7 @@ const models = ref([])
 // 对话框显示状态
 const uploadDialogVisible = ref(false)
 const detailsDialogVisible = ref(false)
+const allClassesDialogVisible = ref(false);
 
 // 选中的模型
 const selectedModel = ref(null)
@@ -214,6 +261,13 @@ const uploadRules = {
   modelFile: [
     { required: true, message: '请上传模型文件', trigger: 'change' }
   ]
+}
+
+// 新增的 hoveredIndex 变量
+const hoveredIndex = ref(null);
+
+const isChinese = (str) => {
+  return /[\u4e00-\u9fa5]/.test(str); // 正则表达式检查是否包含中文字符
 }
 
 // 按模型类型分组
@@ -337,8 +391,24 @@ const uploadModel = async () => {
 
 // 查看模型详情
 const viewModelDetails = (model) => {
-  selectedModel.value = model
-  detailsDialogVisible.value = true
+  // 深拷贝模型数据，避免直接引用
+  const modelCopy = JSON.parse(JSON.stringify(model));
+
+  // 将 models_classes 转换为数组（仅在不是数组时进行转换）
+  if (modelCopy.models_classes && typeof modelCopy.models_classes === 'object' && !Array.isArray(modelCopy.models_classes)) {
+    modelCopy.models_classes = Object.entries(modelCopy.models_classes).map(([key, value]) => ({
+      id: key,
+      name: value
+    })); // 转换为数组格式
+  }
+
+  selectedModel.value = modelCopy; // 使用深拷贝的模型数据
+  detailsDialogVisible.value = true;
+}
+
+// 显示所有类别对话框
+const showAllClasses = () => {
+  allClassesDialogVisible.value = true;
 }
 
 // 切换模型激活状态
