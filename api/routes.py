@@ -8,6 +8,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from api.auth import authenticate_user, create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES, get_current_user, check_admin_permission, get_password_hash, verify_password
 from api.logger import log_action
 from passlib.context import CryptContext
+from fastapi.responses import FileResponse
 
 import os
 import shutil
@@ -709,6 +710,7 @@ class DetectionEventResponse(DetectionEventBase):
     viewed_by: Optional[str] = None
     notes: Optional[str] = None
     created_at: datetime
+    save_mode: str = None
 
     class Config:
         from_attributes = True
@@ -991,8 +993,7 @@ async def get_detection_events(
     """
     获取检测事件列表，支持多种筛选条件
     """
-    query = db.query(DetectionEvent)
-    
+    query = db.query(DetectionEvent).join(DetectionConfig)
     # 应用筛选条件
     if device_id:
         query = query.filter(DetectionEvent.device_id == device_id)
@@ -1055,7 +1056,8 @@ async def get_detection_events(
             "viewed_at": event.viewed_at,
             "viewed_by": event.viewed_by,
             "notes": event.notes,
-            "created_at": event.created_at
+            "created_at": event.created_at,
+            "save_mode": event.config.save_mode.value if hasattr(event.config.save_mode, "value") else event.config.save_mode
         }
         result.append(event_dict)
     
@@ -1457,3 +1459,15 @@ def update_detection_stats(db: Session, device_id: str, event_type: str):
             stat.peak_hour_count = hourly_events
     
     db.commit() 
+
+@router.get("/files/{file_path:path}")
+async def get_file(file_path: str):
+    # 构建完整的文件路径
+    full_path = os.path.join(file_path)
+
+    # 检查文件是否存在
+    if not os.path.isfile(full_path):
+        raise HTTPException(status_code=404, detail="File not found")
+
+    # 返回文件
+    return FileResponse(full_path)

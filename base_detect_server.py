@@ -21,6 +21,7 @@ from ultralytics import YOLO
 import torch
 from sqlalchemy.orm import Session
 import concurrent.futures
+from threading import Lock  # 导入锁
 
 from models.database import (
     SessionLocal, DetectionConfig, DetectionEvent, Device, 
@@ -36,17 +37,19 @@ class DetectionTask:
     """检测任务类，管理单个摄像机的检测过程"""
     
     def __init__(self, device_id: str, config_id: str, model_path: str, 
-                 confidence: float, save_mode: SaveMode, region_of_interest: Optional[List] = None):
+                 confidence: float, target_class: List[str], save_mode: SaveMode, region_of_interest: Optional[List] = None):
         self.device_id = device_id
         self.config_id = config_id
         self.model_path = model_path
         self.confidence = confidence
+        self.target_class = target_class
         self.save_mode = save_mode
         self.region_of_interest = region_of_interest
         self.stop_event = threading.Event()
         self.model = None
         self.cap = None
         self.thread = None
+        self.lock = Lock()  # 初始化锁
         self.frame_buffer = deque(maxlen=5)  # 存储最近的帧
         self.last_detection_time = time.time()
         self.connected = False
@@ -62,6 +65,17 @@ class DetectionTask:
         try:
             logger.info(f"加载模型: {self.model_path}")
             self.model = YOLO(self.model_path)
+            # 使用GPU并进行优化
+            device = 'cuda' if torch.cuda.is_available() else 'cpu'
+            self.device = torch.device(device)
+            self.model.to(self.device)
+            
+            if device == 'cuda': 
+                # 使用半精度浮点数以提高性能
+                if hasattr(self.model, 'model'):
+                    self.model.model.half()
+                logger.info("Using half precision on GPU")
+
             return True
         except Exception as e:
             logger.error(f"模型加载失败: {e}")
@@ -77,8 +91,8 @@ class DetectionTask:
             if not device:
                 logger.error(f"未找到设备: {self.device_id}")
                 return False
-            
-            rtsp_url = f"rtsp://{device.username}:{device.password}@{device.ip_address}:{device.port}/cam/realmonitor?channel=1&subtype=1"
+
+            rtsp_url = f"rtsp://{device.username}:{device.password}@{device.ip_address}:{device.port}/cam/realmonitor?channel=1&subtype=0"
             logger.info(f"连接到摄像机: {rtsp_url}")
             
             # 设置OpenCV连接参数
@@ -86,6 +100,7 @@ class DetectionTask:
             self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # 设置缓冲区大小为1，减少延迟
             
             if self.cap.isOpened():
+                self.fps = self.cap.get(cv2.CAP_PROP_FPS)
                 self.connected = True
                 self.reconnect_attempts = 0
                 logger.info(f"成功连接到摄像机: {self.device_id}")
@@ -97,34 +112,14 @@ class DetectionTask:
         except Exception as e:
             logger.error(f"连接摄像机时出错: {e}")
             return False
-    
-    def run_detection(self):
-        """执行检测的主循环"""
-        # 为检测线程创建和设置事件循环
-        try:
-            new_loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(new_loop)
-            self.loop = new_loop
-            logger.info(f"为检测任务 {self.config_id} 创建了新的事件循环")
-        except Exception as e:
-            logger.error(f"为检测线程创建事件循环失败: {e}")
-            
-        if not self.load_model():
-            logger.error(f"无法启动检测任务 {self.config_id}，模型加载失败")
-            return
-        
+
+    def read_frame(self):
         if not self.connect_to_camera():
             logger.error(f"无法启动检测任务 {self.config_id}，摄像机连接失败")
             return
-        
-        logger.info(f"开始检测任务: {self.config_id} 设备: {self.device_id}")
-        
-        frame_count = 0
         error_count = 0
-        cooldown_period = 10  # 检测事件的冷却时间（秒）
         last_reconnect_time = time.time()
-        skip_frame_count = 5  # 每隔多少帧进行一次检测
-        
+        """从摄像机读取帧的线程函数"""
         while not self.stop_event.is_set():
             try:
                 # 改进重连逻辑，添加退避策略
@@ -147,26 +142,110 @@ class DetectionTask:
                     else:
                         time.sleep(0.5)  # 短暂等待
                         continue
-                
                 ret, frame = self.cap.read()
+                
                 if not ret:
                     error_count += 1
                     logger.warning(f"从摄像机 {self.device_id} 获取帧失败 ({error_count}/5)")
                     time.sleep(0.1)  # 短暂暂停后重试
                     continue
-                
                 # 重置错误计数
                 if error_count > 0:
                     error_count = 0
+
+                # 使用锁来确保线程安全
+                with self.lock:
+                    # frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    self.frame_buffer.append(frame)  # 将帧添加到缓冲区
+            
+            except Exception as e:
+                logger.error(f"读取帧时出错: {e}")
+                error_count += 1
+                time.sleep(0.1)  # 短暂暂停后重试
+
+    def run_detection(self):
+        """执行检测的主循环"""
+        # 为检测线程创建和设置事件循环
+        try:
+            new_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(new_loop)
+            self.loop = new_loop
+            logger.info(f"为检测任务 {self.config_id} 创建了新的事件循环")
+        except Exception as e:
+            logger.error(f"为检测线程创建事件循环失败: {e}")
+            
+        if not self.load_model():
+            logger.error(f"无法启动检测任务 {self.config_id}，模型加载失败")
+            return
+        
+        # if not self.connect_to_camera():
+        #     logger.error(f"无法启动检测任务 {self.config_id}，摄像机连接失败")
+        #     return         
+        
+        # 启动读取帧的线程
+        self.thread = threading.Thread(target=self.read_frame)
+        self.thread.daemon = True
+        self.thread.start()
+
+        logger.info(f"开始检测任务: {self.config_id} 设备: {self.device_id}")
+
+        frame_count = 0
+        # error_count = 0
+        cooldown_period = 10  # 检测事件的冷却时间（秒）
+        # last_reconnect_time = time.time()
+        skip_frame_count = 5  # 每隔多少帧进行一次检测
+        
+        while not self.stop_event.is_set():
+            try:
+                # 改进重连逻辑，添加退避策略
+                # if not self.connected or error_count > 5:
+                #     current_time = time.time()
+                #     # 添加最小间隔时间，防止频繁重试
+                #     if current_time - last_reconnect_time > self.reconnect_attempts * 2:
+                #         if self.reconnect_attempts < self.max_reconnect_attempts:
+                #             logger.info(f"尝试重新连接摄像机: {self.device_id} (尝试 {self.reconnect_attempts + 1}/{self.max_reconnect_attempts})")
+                #             last_reconnect_time = current_time
+                #             self.reconnect_attempts += 1
+                #             if self.connect_to_camera():
+                #                 error_count = 0
+                #             else:
+                #                 time.sleep(min(2 * self.reconnect_attempts, 10))  # 指数退避策略，最长等待10秒
+                #                 continue
+                #         else:
+                #             logger.error(f"重连摄像机 {self.device_id} 失败，停止检测任务")
+                #             break
+                #     else:
+                #         time.sleep(0.5)  # 短暂等待
+                #         continue
+            
+                # 使用锁来安全地访问帧缓存
+                with self.lock:
+                    if self.frame_buffer:
+                        frame_rgb = self.frame_buffer[-1]  # 获取最新的帧
+                    else:
+                        continue  # 如果没有帧，跳过
+
+                # ret, frame = self.cap.read()
+                # if not ret:
+                #     error_count += 1
+                #     logger.warning(f"从摄像机 {self.device_id} 获取帧失败 ({error_count}/5)")
+                #     time.sleep(0.1)  # 短暂暂停后重试
+                #     continue
                 
+                # # 重置错误计数
+                # if error_count > 0:
+                #     error_count = 0
+                
+                # frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                # self.frame_buffer.append(frame_rgb)
                 # 将帧添加到缓冲区，使用深拷贝防止引用问题
-                self.frame_buffer.append(frame.copy())
+                # self.frame_buffer.append(frame.copy())
                 
                 # 优化：每skip_frame_count帧执行一次检测，减少计算负担
                 frame_count += 1
                 if frame_count % skip_frame_count == 0:
                     # 如果设置了感兴趣区域，裁剪帧
-                    detect_frame = frame
+                    detect_frame = frame_rgb.copy()
                     if self.region_of_interest and isinstance(self.region_of_interest, list) and len(self.region_of_interest) == 4:
                         try:
                             x1, y1, x2, y2 = map(int, self.region_of_interest)
@@ -183,10 +262,11 @@ class DetectionTask:
                     current_time = time.time()
                     # 使用 try-except 捕获模型推理过程中的错误
                     try:
-                        results = self.model(detect_frame, conf=self.confidence, verbose=False)
-                    
+                        results = self.model(detect_frame, conf=self.confidence,iou=0.45,max_det=300,device=self.device)
+
                         # 处理检测结果
                         detections = []
+                        detection = []
                         for r in results:
                             boxes = r.boxes
                             for box in boxes:
@@ -201,14 +281,15 @@ class DetectionTask:
                                     "class_id": class_id,
                                     "class_name": class_name
                                 })
-                        
+                        if detections and self.target_class and len(self.target_class) > 0:
+                            detection = [d for d in detections if str(d["class_id"]) in self.target_class]
                         # 判断是否需要创建检测事件
-                        if detections and (current_time - self.last_detection_time) > cooldown_period:
+                        if detection and (current_time - self.last_detection_time) > cooldown_period:
                             self.last_detection_time = current_time
-                            self.save_detection_event(frame, detections)
+                            self.save_detection_event(detect_frame, detections)
                         
                         # 向WebSocket客户端推送检测结果
-                        self.broadcast_detection_result(frame, detections)
+                        self.broadcast_detection_result(detect_frame, detections)
                     except Exception as e:
                         logger.error(f"模型推理过程中出错: {e}")
                         # 不终止整个检测循环，仅记录错误
@@ -216,7 +297,7 @@ class DetectionTask:
                 # 动态调整检测频率，根据是否有客户端连接来决定
                 if self.clients:
                     # 有客户端连接时，更频繁地检测
-                    skip_frame_count = 3
+                    skip_frame_count = 1
                     sleep_time = 0.01  # 短暂休眠防止CPU过载
                 else:
                     # 无客户端连接时，减少检测频率以节省资源
@@ -228,7 +309,7 @@ class DetectionTask:
                 
             except Exception as e:
                 logger.error(f"检测过程中出错: {e}")
-                error_count += 1
+                # error_count += 1
                 time.sleep(0.1)
         
         # 清理资源
@@ -357,9 +438,9 @@ class DetectionTask:
         annotated_frame = frame.copy()
         
         # 在图像上绘制时间戳
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        cv2.putText(annotated_frame, timestamp, (10, 30), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+        # timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        # cv2.putText(annotated_frame, timestamp, (10, 30), 
+        #             cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
         
         # 绘制每个检测框
         for detection in detections:
@@ -389,24 +470,25 @@ class DetectionTask:
             color = colors[color_id]
             
             # 绘制边界框
-            cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), color, 2)
+            # cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), color, 2)
+            cv2.rectangle(annotated_frame, (int(x1), int(y1)), (int(x2), int(y2)), color, 2)
             
             # 准备标签文本
             label = f"{class_name}: {confidence:.2f}"
             
             # 绘制背景和文本
             # 获取文本大小
-            (text_width, text_height), baseline = cv2.getTextSize(
-                label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+            # (text_width, text_height), baseline = cv2.getTextSize(
+            #     label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
             
-            # 绘制标签背景
-            cv2.rectangle(
-                annotated_frame, 
-                (x1, y1 - text_height - 5), 
-                (x1 + text_width, y1), 
-                color, 
-                -1  # 填充矩形
-            )
+            # # 绘制标签背景
+            # cv2.rectangle(
+            #     annotated_frame, 
+            #     (x1, y1 - text_height - 5), 
+            #     (x1 + text_width, y1), 
+            #     color, 
+            #     -1  # 填充矩形
+            # )
             
             # 绘制文本
             cv2.putText(
@@ -415,7 +497,7 @@ class DetectionTask:
                 (x1, y1 - 5), 
                 cv2.FONT_HERSHEY_SIMPLEX, 
                 0.5, 
-                (255, 255, 255), 
+                color, 
                 1
             )
         
@@ -587,7 +669,8 @@ class DetectionServer:
                 device_id=config.device_id,
                 config_id=config_id,
                 model_path=model.file_path,
-                confidence=config.sensitivity,
+                confidence=config.sensitivity,  
+                target_class=config.target_classes,
                 save_mode=config.save_mode,
                 region_of_interest=None  # 暂时不使用区域参数，避免类型不匹配问题
             )

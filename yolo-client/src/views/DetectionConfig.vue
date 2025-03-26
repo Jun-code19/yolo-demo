@@ -365,7 +365,8 @@ export default defineComponent({
       });
 
       if (formRef.value) {
-        formRef.value.resetFields();
+        formRef.value.clearValidate();
+        // formRef.value.resetFields();
       }
     };
 
@@ -385,7 +386,7 @@ export default defineComponent({
         save_duration: record.save_duration,
         max_storage_days: record.max_storage_days
       });
-
+      updateTargetClasses(record.models_id);
       modalVisible.value = true;
     };
 

@@ -295,15 +295,18 @@
     <!-- 图片预览 -->
     <el-dialog
       v-model="imagePreviewVisible"
-      width="auto"
       center
       destroy-on-close
+      :modal="true"
+      :style="{ maxWidth: '90vw', maxHeight: '90vh' }"
     >
+    <div style="display: flex; justify-content: center; align-items: center; max-height: 80vh;">
       <img
         :src="previewImageUrl"
         alt="预览图片"
-        style="max-width: 100%; max-height: 80vh;"
+        style="max-width: 100%; max-height: 80vh; object-fit: contain;"
       />
+    </div>
     </el-dialog>
   </div>
 </template>
@@ -598,7 +601,7 @@ export default defineComponent({
     const getImageUrl = (thumbnailPath) => {
       if (!thumbnailPath) return '';
         // 假设后端服务的基础URL
-      const baseUrl = 'http://localhost:8001'; // 替换为您的后端服务地址
+      const baseUrl = 'http://localhost:8001/api/v1/files'; // 替换为您的后端服务地址
   
       // 返回完整的图片URL
       return `${baseUrl}/${thumbnailPath.replace(/\\/g, '/')}`; // 替换反斜杠为正斜杠
