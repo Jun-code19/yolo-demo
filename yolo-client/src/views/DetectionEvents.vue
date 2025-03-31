@@ -207,7 +207,7 @@
         <div class="event-detail">
           <div class="event-image">
             <img
-              :src="getImageUrl(selectedEvent.thumbnail_path)"
+              :src="selectedEventThumbnail"
               alt="事件图片"
               class="main-image"
               @click="showImagePreview(selectedEvent.thumbnail_path)"
@@ -263,7 +263,7 @@
               <el-space>
                 <el-button
                   type="primary"
-                  @click="showImagePreview(selectedEvent.thumbnail_path)"
+                  @click="showImagePreview(selectedEvent.event_id)"
                 >
                   查看原图
                 </el-button>
@@ -295,16 +295,20 @@
     <!-- 图片预览 -->
     <el-dialog
       v-model="imagePreviewVisible"
-      center
+      fullscreen
       destroy-on-close
       :modal="true"
-      :style="{ maxWidth: '90vw', maxHeight: '90vh' }"
     >
-    <div style="display: flex; justify-content: center; align-items: center; max-height: 80vh;">
+    <div style="display: flex; justify-content: center; align-items: center; max-height: 90vh; overflow: hidden;" 
+      @wheel="handleWheel"
+      @mousedown="startDrag"
+      @mouseup="stopDrag"
+      @mousemove="drag"
+    >
       <img
         :src="previewImageUrl"
         alt="预览图片"
-        style="max-width: 100%; max-height: 80vh; object-fit: contain;"
+        :style="imageStyle"
       />
     </div>
     </el-dialog>
@@ -312,12 +316,12 @@
 </template>
 
 <script>
-import { defineComponent, ref, reactive, onMounted } from 'vue';
-import { ElMessage, ElMessageBox } from 'element-plus';
-import { Search, Delete, View, Star, Download, StarFilled, ArrowDown } from '@element-plus/icons-vue';
-import dayjs from 'dayjs';
-import { detectionEventApi } from '@/api/detection';
-import deviceApi from '@/api/device';
+  import { defineComponent, ref, reactive, onMounted } from 'vue';
+  import { ElMessage, ElMessageBox } from 'element-plus';
+  import { Search, Delete, View, Star, Download, StarFilled, ArrowDown } from '@element-plus/icons-vue';
+  import dayjs from 'dayjs';
+  import { detectionEventApi } from '@/api/detection';
+  import deviceApi from '@/api/device';
 
 export default defineComponent({
   name: 'DetectionEvents',
@@ -362,9 +366,55 @@ export default defineComponent({
     const eventNotes = ref('');
     
     // 图片预览
+    const selectedEventThumbnail = ref('');
     const imagePreviewVisible = ref(false);
     const previewImageUrl = ref('');
     
+    const scale = ref(0.75);  // 用于缩放
+    const imageStyle = ref({ transform: `scale(${scale.value}) translate(0px, 0px)` });  // 动态样式
+    const isDragging = ref(false);  // 拖动状态
+    const startX = ref(0);  // 鼠标起始位置
+    const startY = ref(0);
+    const translateX = ref(0);  // 图片位移
+    const translateY = ref(0);
+
+    // 鼠标滚轮事件处理
+    const handleWheel = (event) => {
+      event.preventDefault();  // 阻止默认滚动行为
+      const delta = event.deltaY < 0 ? 0.1 : -0.1;  // 根据滚轮方向调整缩放
+      scale.value = Math.min(Math.max(scale.value + delta, 0.5), 3);  // 限制缩放范围
+      imageStyle.value.transform = `scale(${scale.value}) translate(${translateX.value}px, ${translateY.value}px)`;  // 更新样式
+    };
+
+    // 鼠标按下事件
+    const startDrag = (event) => {
+      isDragging.value = true;
+      startX.value = event.clientX - translateX.value;  // 记录起始位置
+      startY.value = event.clientY - translateY.value;
+
+      // 添加鼠标抬起事件监听
+      window.addEventListener('mouseup', stopDrag);
+      window.addEventListener('mousemove', drag);
+    };
+
+    // 鼠标抬起事件
+    const stopDrag = () => {
+      isDragging.value = false;
+
+      // 移除鼠标抬起和移动事件监听
+      window.removeEventListener('mouseup', stopDrag);
+      window.removeEventListener('mousemove', drag);
+    };
+
+    // 鼠标移动事件
+    const drag = (event) => {
+      if (isDragging.value) {
+        translateX.value = event.clientX - startX.value;  // 更新位移
+        translateY.value = event.clientY - startY.value;
+        imageStyle.value.transform = `scale(${scale.value}) translate(${translateX.value}px, ${translateY.value}px)`;  // 更新样式
+      }
+    };
+
     // 获取设备名称
     const getDeviceName = (deviceId) => {
       const device = deviceList.value.find(d => d.device_id === deviceId);
@@ -428,7 +478,7 @@ export default defineComponent({
     // 加载设备列表
     const loadDeviceList = async () => {
       try {
-        const response = await deviceApi.getDevices();
+        const response = await deviceApi.getDevices();        
         deviceList.value = response.data;
       } catch (error) {
         ElMessage.error('获取设备列表失败: ' + error.message);
@@ -469,7 +519,7 @@ export default defineComponent({
         
         const response = await detectionEventApi.getEvents(params);
         eventList.value = response.data;
-        
+        console.log(response.data)
         // 暂时假设总数为当前数据长度的10倍
         // 实际应用中应该从API获取总数
         total.value = response.data.length;
@@ -517,6 +567,9 @@ export default defineComponent({
       eventNotes.value = event.notes || '';
       eventModalVisible.value = true;
       
+      // 加载缩略图
+      selectedEventThumbnail.value = await loadThumbnail(event.event_id);
+
       // 如果状态是新事件，自动更新为已查看
       if (event.status === 'new') {
         await updateEventStatus(event, 'viewed', false);
@@ -597,6 +650,15 @@ export default defineComponent({
       }).catch(() => {});
     };
     
+    const loadThumbnail = async (eventId) => {
+      try {
+          const thumbnailUrl = await detectionEventApi.fetchThumbnail(eventId);            
+          return thumbnailUrl; // 返回图像 URL         
+      } catch (error) {
+          console.error('加载缩略图失败:', error);
+      }
+    };
+
     // 获取事件图片URL
     const getImageUrl = (thumbnailPath) => {
       if (!thumbnailPath) return '';
@@ -609,9 +671,20 @@ export default defineComponent({
     
     // 显示图片预览
     const showImagePreview = (thumbnailPath) => {
-      previewImageUrl.value = getImageUrl(thumbnailPath);
+      const result = getImageUrl(thumbnailPath);
+      if(result)
+        previewImageUrl.value = result;
+      else
+        previewImageUrl.value = selectedEventThumbnail.value
+      
       imagePreviewVisible.value = true;
     };
+    
+    // // 显示图片预览
+    // const showImagePreview = (eventId) => {
+    //   previewImageUrl.value = selectedEventThumbnail.value
+    //   imagePreviewVisible.value = true;
+    // };
     
     // 检查是否有视频
     const hasVideo = (event) => {
@@ -651,6 +724,12 @@ export default defineComponent({
       eventNotes,
       imagePreviewVisible,
       previewImageUrl,
+      imageStyle,
+      selectedEventThumbnail,
+      handleWheel,
+      startDrag,
+      stopDrag,
+      drag,
       getDeviceName,
       getEventTypeColor,
       getEventTypeName,
@@ -666,7 +745,7 @@ export default defineComponent({
       updateEventStatus,
       saveEventNotes,
       deleteEvent,
-      getImageUrl,
+      loadThumbnail,
       showImagePreview,
       hasVideo,
       playVideo,

@@ -264,13 +264,35 @@ const loadData = async () => {
   }
 }
 
+// 刷新状态
+const refreshStatus = async () => {
+  try {
+    // 获取设备在线状态
+    const response = await deviceApi.getDevicesStatus()
+    if (response.status === 200) {      
+      loadData()  // 刷新数据
+    } else {
+      ElMessage.error('获取设备在线状态失败')
+    }   
+  } catch (error) {
+    ElMessage.error('获取设备在线状态失败')
+  }
+}
+
+// 定时刷新
+let refreshInterval
 // 初始化
 onMounted(() => {
   loadData()
+  refreshStatus()
+  // refreshInterval = setInterval(refreshStatus, 60000)
 })
 
 onUnmounted(() => {
   stopPreview()
+  // if (refreshInterval) {
+  //   clearInterval(refreshInterval)
+  // }
 })
 
 // 分页处理
@@ -373,7 +395,7 @@ const handlePreview = (row) => {
   previewError.value = null
   previewStream.value = null
   currentFrame.value = null
-  showFallbackImage.value = false
+  showFallbackImage.value = true
   streamResolution.value = ''
   
   // 清除之前的预览状态

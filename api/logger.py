@@ -18,7 +18,7 @@ def log_action(db: Session, user_id: str, action_type: str, target_id: str = Non
         action_type=action_type,
         target_id=target_id,
         detail=detail,
-        log_time=datetime.utcnow()
+        log_time=datetime.now()
     )
     
     try:

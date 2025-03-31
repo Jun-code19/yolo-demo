@@ -103,6 +103,11 @@ export default {
     return apiClient.get('/devices/', { params });
   },
   
+  // 获取设备在线状态
+  getDevicesStatus() {
+    return apiClient.get('/alldevices/status');
+  },
+
   // 获取单个设备详情
   getDevice(deviceId) {
     return apiClient.get(`/devices/${deviceId}`);

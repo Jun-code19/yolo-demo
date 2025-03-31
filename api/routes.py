@@ -8,7 +8,9 @@ from fastapi.security import OAuth2PasswordRequestForm
 from api.auth import authenticate_user, create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES, get_current_user, check_admin_permission, get_password_hash, verify_password
 from api.logger import log_action
 from passlib.context import CryptContext
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse,Response
+import requests
+import zlib
 
 import os
 import shutil
@@ -85,14 +87,43 @@ def get_device(device_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Device not found")
     return device
 
-@router.put("/devices/{device_id}/status")
-def update_device_status(device_id: str, device_name: str, status: bool, db: Session = Depends(get_db)):
-    device = db.query(Device).filter(Device.device_id == device_id).first()
-    if not device:
-        raise HTTPException(status_code=404, detail="Device not found")
-    device.device_name = device_name
-    device.status = status
-    device.last_heartbeat = datetime.utcnow()
+@router.get("/alldevices/status")
+def update_device_status(db: Session = Depends(get_db)):
+    devices = db.query(Device).all()
+    for device in devices:
+        try:
+            # 构建HTTP请求URL
+            api_url = f"http://{device.ip_address}/cgi-bin/api/tcpConnect/tcpTest"
+            # 发送HTTP请求
+            headers = {
+                "Content-Type": "application/json",
+                "User-Agent": "DeviceMonitor/1.0"
+            }           
+            # 按照文档格式构造请求体
+            payload = {
+                "Ip": device.ip_address,  # 根据文档示例，这里应为服务器IP
+                "Port": 80
+            }
+            # 发送POST请求（文档要求POST方法）
+            response = requests.post(
+                url=api_url,
+                data=json.dumps(payload),  # 确保JSON序列化
+                headers=headers,
+                timeout=3
+            )
+            # 严格的状态码检查
+            print(f"异常状态码: {response.status_code}, 响应内容: {response.text}")
+            if response.status_code == 200 or response.status_code == 401:
+                # 解析响应体               
+                device.status = True
+                device.last_heartbeat = datetime.now()
+            else:
+                device.status = False
+        except requests.exceptions.RequestException as e:
+            device.status = False            
+        except json.JSONDecodeError:
+            device.status = False
+
     db.commit()
     return {"message": "Status updated successfully"}
 
@@ -548,7 +579,7 @@ async def upload_model(
         format=file_ext[1:],  # 去掉点号
         description=description,
         parameters=models_params,
-        upload_time=datetime.utcnow(),
+        upload_time=datetime.now(),
         is_active=True,
         models_classes=classes  # 将类别信息存储到数据库
     )
@@ -1116,6 +1147,31 @@ async def get_detection_event(
     
     return event_dict
 
+@router.get("/detection/events/{event_id}/thumbnail")
+async def get_thumbnail(event_id: str, db: Session = Depends(get_db)):
+    """获取缩略图数据"""
+    event = db.query(DetectionEvent).filter(DetectionEvent.event_id == event_id).first() 
+
+    if not event or not event.thumbnail_data:
+        raise HTTPException(status_code=404, detail="未找到图像数据")
+    
+    # 添加缓存控制头
+    headers = {
+        "Content-Type": "image/jpeg",
+        "Cache-Control": "public, max-age=86400",
+        "Content-Disposition": f"inline; filename={event_id}.jpg"
+    }
+    
+    # 验证二进制数据有效性
+    if not isinstance(event.thumbnail_data, bytes):
+        raise HTTPException(status_code=500, detail="数据格式错误")
+    
+    return Response(
+        content=event.thumbnail_data,
+        media_type="image/jpeg",
+        headers=headers
+    )
+
 # 创建检测事件
 @router.post("/detection/events", response_model=DetectionEventResponse, tags=["检测事件"])
 async def create_detection_event(
@@ -1152,7 +1208,7 @@ async def create_detection_event(
     
     try:
         event_id = str(uuid.uuid4())
-        current_time = datetime.utcnow()
+        current_time = datetime.now()
         db_event = DetectionEvent(
             event_id=event_id,
             device_id=event.device_id,
@@ -1246,7 +1302,7 @@ async def update_detection_event(
         if not user:
             raise HTTPException(status_code=404, detail="用户不存在")
         db_event.viewed_by = event_update.viewed_by
-        db_event.viewed_at = datetime.utcnow()
+        db_event.viewed_at = datetime.now()
     
     try:
         db.commit()
@@ -1403,7 +1459,7 @@ async def create_detection_schedule(
             end_time=schedule.end_time,
             weekdays=schedule.weekdays,
             is_active=schedule.is_active,
-            created_at=datetime.utcnow()
+            created_at=datetime.now()
         )
         db.add(db_schedule)
         db.commit()
@@ -1416,7 +1472,7 @@ async def create_detection_schedule(
 # 辅助函数：更新检测统计数据
 def update_detection_stats(db: Session, device_id: str, event_type: str):
     # 获取今天的日期（不包含时间）
-    today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
     
     # 查找今天的统计记录
     stat = db.query(DetectionStat).filter(
@@ -1432,9 +1488,9 @@ def update_detection_stats(db: Session, device_id: str, event_type: str):
             date=today,
             total_events=1,
             by_class={event_type: 1},
-            peak_hour=datetime.utcnow().hour,
+            peak_hour=datetime.now().hour,
             peak_hour_count=1,
-            created_at=datetime.utcnow()
+            created_at=datetime.now()
         )
         db.add(stat)
     else:
@@ -1447,7 +1503,7 @@ def update_detection_stats(db: Session, device_id: str, event_type: str):
         stat.by_class = by_class
         
         # 更新峰值小时
-        current_hour = datetime.utcnow().hour
+        current_hour = datetime.now().hour
         hourly_events = db.query(func.count(DetectionEvent.event_id)).filter(
             DetectionEvent.device_id == device_id,
             func.date(DetectionEvent.created_at) == func.date(today),

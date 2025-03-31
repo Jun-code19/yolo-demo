@@ -291,7 +291,7 @@ class DetectionManager:
                             performance_id=str(uuid.uuid4()),
                             device_id=device_id,
                             config_id=config.config_id,
-                            timestamp=datetime.utcnow(),
+                            timestamp=datetime.now(),
                             detection_time=detection_time,
                             preprocessing_time=preprocess_time,
                             postprocessing_time=postprocess_time,
@@ -393,14 +393,14 @@ class DetectionManager:
                         event_id=str(uuid.uuid4()),
                         device_id=device_id,
                         config_id=config.config_id,
-                        timestamp=datetime.utcnow(),
+                        timestamp=datetime.now(),
                         event_type=cls,
                         confidence=conf,
                         bounding_box={"xyxy": box},
                         snippet_path=str(event_dir),
                         thumbnail_path=str(thumbnail_path),
                         status=EventStatus.new,
-                        created_at=datetime.utcnow()
+                        created_at=datetime.now()
                     )
                     db.add(event)
                 

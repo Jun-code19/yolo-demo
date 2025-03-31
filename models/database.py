@@ -5,6 +5,7 @@ from sqlalchemy.orm import sessionmaker, relationship
 import enum
 from datetime import datetime
 import uuid
+from sqlalchemy import LargeBinary
 
 Base = declarative_base()
 
@@ -79,7 +80,7 @@ class Alarm(Base):
     
     alarm_id = Column(String(64), primary_key=True)
     event_type = Column(String(50), nullable=False)
-    trigger_time = Column(DateTime, default=datetime.utcnow)
+    trigger_time = Column(DateTime, default=datetime.now)
     device_id = Column(String(64), ForeignKey('device.device_id'))
     video_id = Column(String(64), ForeignKey('video.video_id'))
     status = Column(Enum(AlarmStatus), default=AlarmStatus.pending)
@@ -102,7 +103,7 @@ class SysLog(Base):
     action_type = Column(String(50), nullable=False)
     target_id = Column(String(64))
     detail = Column(Text)
-    log_time = Column(DateTime, default=datetime.utcnow)
+    log_time = Column(DateTime, default=datetime.now)
 
 class DetectionModel(Base):
     __tablename__ = "detection_model"
@@ -115,7 +116,7 @@ class DetectionModel(Base):
     format = Column(String(20), nullable=False)
     description = Column(Text)
     parameters = Column(JSONB)
-    upload_time = Column(DateTime, default=datetime.utcnow)
+    upload_time = Column(DateTime, default=datetime.now)
     last_used = Column(DateTime)
     is_active = Column(Boolean, default=True)
     models_classes = Column(JSONB, nullable=True)  # 新增字段，用于存储类别信息
@@ -135,8 +136,8 @@ class DetectionConfig(Base):
     save_mode = Column(Enum(SaveMode), default=SaveMode.screenshot)
     save_duration = Column(Integer, default=10)
     max_storage_days = Column(Integer, default=30)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
     created_by = Column(String(64), ForeignKey('users.user_id'))
     
     device = relationship("Device", back_populates="detection_configs")
@@ -153,7 +154,7 @@ class DetectionSchedule(Base):
     end_time = Column(DateTime, nullable=False)
     weekdays = Column(ARRAY(Integer))
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
     
     config = relationship("DetectionConfig", back_populates="schedules")
 
@@ -163,10 +164,15 @@ class DetectionEvent(Base):
     event_id = Column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
     device_id = Column(String(64), ForeignKey('device.device_id'), nullable=False)
     config_id = Column(String(64), ForeignKey('detection_config.config_id'), nullable=False)
-    timestamp = Column(DateTime, default=datetime.utcnow)
+    timestamp = Column(DateTime, default=datetime.now)
     event_type = Column(String(50))
     confidence = Column(Float)
     bounding_box = Column(JSONB)
+    # 新增以下两个二进制字段
+    thumbnail_data = Column(LargeBinary)  # 存储JPEG图像数据
+    is_compressed = Column(Boolean, default=False)  # 添加压缩标记
+    # video_data = Column(LargeBinary)     # 存储MP4视频数据（可选）
+    # 删除原来的路径字段（如果存在）
     snippet_path = Column(Text)
     thumbnail_path = Column(Text)
     meta_data = Column(JSONB)
@@ -175,7 +181,7 @@ class DetectionEvent(Base):
     viewed_by = Column(String(64), ForeignKey('users.user_id'))
     notes = Column(Text)
     location = Column(Text)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
     
     device = relationship("Device", back_populates="detection_events")
     config = relationship("DetectionConfig", back_populates="events")
@@ -186,12 +192,12 @@ class DetectionStat(Base):
     
     stat_id = Column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
     device_id = Column(String(64), ForeignKey('device.device_id'))
-    date = Column(DateTime, default=datetime.utcnow)
+    date = Column(DateTime, default=datetime.now)
     total_events = Column(Integer, default=0)
     by_class = Column(JSONB)
     peak_hour = Column(Integer)
     peak_hour_count = Column(Integer)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
     
     device = relationship("Device")
 
@@ -201,7 +207,7 @@ class DetectionPerformance(Base):
     performance_id = Column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
     device_id = Column(String(64), ForeignKey('device.device_id'))
     config_id = Column(String(64), ForeignKey('detection_config.config_id'))
-    timestamp = Column(DateTime, default=datetime.utcnow)
+    timestamp = Column(DateTime, default=datetime.now)
     detection_time = Column(Float)
     preprocessing_time = Column(Float)
     postprocessing_time = Column(Float)

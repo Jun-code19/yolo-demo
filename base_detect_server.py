@@ -167,155 +167,128 @@ class DetectionTask:
         """执行检测的主循环"""
         # 为检测线程创建和设置事件循环
         try:
-            new_loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(new_loop)
-            self.loop = new_loop
-            logger.info(f"为检测任务 {self.config_id} 创建了新的事件循环")
+            self.loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(self.loop)
+            # new_loop = asyncio.new_event_loop()
+            # asyncio.set_event_loop(new_loop)
+            # self.loop = new_loop
+            # logger.info(f"为检测任务 {self.config_id} 创建了新的事件循环")
         except Exception as e:
             logger.error(f"为检测线程创建事件循环失败: {e}")
+        
+        try:
+            if not self.load_model():
+                logger.error(f"无法启动检测任务 {self.config_id}，模型加载失败")
+                return
             
-        if not self.load_model():
-            logger.error(f"无法启动检测任务 {self.config_id}，模型加载失败")
-            return
-        
-        # if not self.connect_to_camera():
-        #     logger.error(f"无法启动检测任务 {self.config_id}，摄像机连接失败")
-        #     return         
-        
-        # 启动读取帧的线程
-        self.thread = threading.Thread(target=self.read_frame)
-        self.thread.daemon = True
-        self.thread.start()
-
-        logger.info(f"开始检测任务: {self.config_id} 设备: {self.device_id}")
-
-        frame_count = 0
-        # error_count = 0
-        cooldown_period = 10  # 检测事件的冷却时间（秒）
-        # last_reconnect_time = time.time()
-        skip_frame_count = 5  # 每隔多少帧进行一次检测
-        
-        while not self.stop_event.is_set():
-            try:
-                # 改进重连逻辑，添加退避策略
-                # if not self.connected or error_count > 5:
-                #     current_time = time.time()
-                #     # 添加最小间隔时间，防止频繁重试
-                #     if current_time - last_reconnect_time > self.reconnect_attempts * 2:
-                #         if self.reconnect_attempts < self.max_reconnect_attempts:
-                #             logger.info(f"尝试重新连接摄像机: {self.device_id} (尝试 {self.reconnect_attempts + 1}/{self.max_reconnect_attempts})")
-                #             last_reconnect_time = current_time
-                #             self.reconnect_attempts += 1
-                #             if self.connect_to_camera():
-                #                 error_count = 0
-                #             else:
-                #                 time.sleep(min(2 * self.reconnect_attempts, 10))  # 指数退避策略，最长等待10秒
-                #                 continue
-                #         else:
-                #             logger.error(f"重连摄像机 {self.device_id} 失败，停止检测任务")
-                #             break
-                #     else:
-                #         time.sleep(0.5)  # 短暂等待
-                #         continue
+            # if not self.connect_to_camera():
+            #     logger.error(f"无法启动检测任务 {self.config_id}，摄像机连接失败")
+            #     return         
             
-                # 使用锁来安全地访问帧缓存
-                with self.lock:
-                    if self.frame_buffer:
-                        frame_rgb = self.frame_buffer[-1]  # 获取最新的帧
-                    else:
-                        continue  # 如果没有帧，跳过
+            # 启动读取帧的线程
+            self.thread = threading.Thread(target=self.read_frame)
+            self.thread.daemon = True
+            self.thread.start()
 
-                # ret, frame = self.cap.read()
-                # if not ret:
-                #     error_count += 1
-                #     logger.warning(f"从摄像机 {self.device_id} 获取帧失败 ({error_count}/5)")
-                #     time.sleep(0.1)  # 短暂暂停后重试
-                #     continue
-                
-                # # 重置错误计数
-                # if error_count > 0:
-                #     error_count = 0
-                
-                # frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                # self.frame_buffer.append(frame_rgb)
-                # 将帧添加到缓冲区，使用深拷贝防止引用问题
-                # self.frame_buffer.append(frame.copy())
-                
-                # 优化：每skip_frame_count帧执行一次检测，减少计算负担
-                frame_count += 1
-                if frame_count % skip_frame_count == 0:
-                    # 如果设置了感兴趣区域，裁剪帧
-                    detect_frame = frame_rgb.copy()
-                    if self.region_of_interest and isinstance(self.region_of_interest, list) and len(self.region_of_interest) == 4:
-                        try:
-                            x1, y1, x2, y2 = map(int, self.region_of_interest)
-                            # 添加边界检查
-                            h, w = frame.shape[:2]
-                            x1, y1 = max(0, x1), max(0, y1)
-                            x2, y2 = min(w, x2), min(h, y2)
-                            if x1 < x2 and y1 < y2:  # 确保有效的区域
-                                detect_frame = frame[y1:y2, x1:x2]
-                        except Exception as e:
-                            logger.warning(f"裁剪感兴趣区域失败: {e}，使用完整帧")
-                    
-                    # 执行检测
-                    current_time = time.time()
-                    # 使用 try-except 捕获模型推理过程中的错误
-                    try:
-                        results = self.model(detect_frame, conf=self.confidence,iou=0.45,max_det=300,device=self.device)
+            logger.info(f"开始检测任务: {self.config_id} 设备: {self.device_id}")
 
-                        # 处理检测结果
-                        detections = []
-                        detection = []
-                        for r in results:
-                            boxes = r.boxes
-                            for box in boxes:
-                                x1, y1, x2, y2 = box.xyxy[0].tolist()
-                                confidence = box.conf.item()
-                                class_id = int(box.cls.item())
-                                class_name = r.names[class_id]
-                                
-                                detections.append({
-                                    "bbox": [x1, y1, x2, y2],
-                                    "confidence": confidence,
-                                    "class_id": class_id,
-                                    "class_name": class_name
-                                })
-                        if detections and self.target_class and len(self.target_class) > 0:
-                            detection = [d for d in detections if str(d["class_id"]) in self.target_class]
-                        # 判断是否需要创建检测事件
-                        if detection and (current_time - self.last_detection_time) > cooldown_period:
-                            self.last_detection_time = current_time
-                            self.save_detection_event(detect_frame, detections)
+            frame_count = 0
+            # error_count = 0
+            cooldown_period = 5  # 检测事件的冷却时间（秒）
+            # last_reconnect_time = time.time()
+            skip_frame_count = 5  # 每隔多少帧进行一次检测
+            
+            while not self.stop_event.is_set():
+                try:                                  
+                    # 使用锁来安全地访问帧缓存
+                    with self.lock:
+                        if self.frame_buffer:
+                            frame_rgb = self.frame_buffer[-1]  # 获取最新的帧
+                        else:
+                            continue  # 如果没有帧，跳过
+
+                    # 优化：每skip_frame_count帧执行一次检测，减少计算负担
+                    frame_count += 1
+                    if frame_count % skip_frame_count == 0:
+                        # 如果设置了感兴趣区域，裁剪帧
+                        detect_frame = frame_rgb.copy()
+                        if self.region_of_interest and isinstance(self.region_of_interest, list) and len(self.region_of_interest) == 4:
+                            try:
+                                x1, y1, x2, y2 = map(int, self.region_of_interest)
+                                # 添加边界检查
+                                h, w = detect_frame.shape[:2]
+                                x1, y1 = max(0, x1), max(0, y1)
+                                x2, y2 = min(w, x2), min(h, y2)
+                                if x1 < x2 and y1 < y2:  # 确保有效的区域
+                                    detect_frame = detect_frame[y1:y2, x1:x2]
+                            except Exception as e:
+                                logger.warning(f"裁剪感兴趣区域失败: {e}，使用完整帧")
                         
-                        # 向WebSocket客户端推送检测结果
-                        self.broadcast_detection_result(detect_frame, detections)
-                    except Exception as e:
-                        logger.error(f"模型推理过程中出错: {e}")
-                        # 不终止整个检测循环，仅记录错误
-                
-                # 动态调整检测频率，根据是否有客户端连接来决定
-                if self.clients:
-                    # 有客户端连接时，更频繁地检测
-                    skip_frame_count = 1
-                    sleep_time = 0.01  # 短暂休眠防止CPU过载
-                else:
-                    # 无客户端连接时，减少检测频率以节省资源
-                    skip_frame_count = 10
-                    sleep_time = 0.05  # 更长的休眠时间
-                
-                # 防止CPU过载
-                time.sleep(sleep_time)
-                
-            except Exception as e:
-                logger.error(f"检测过程中出错: {e}")
-                # error_count += 1
-                time.sleep(0.1)
-        
-        # 清理资源
-        if self.cap:
-            self.cap.release()
-        logger.info(f"检测任务已停止: {self.config_id}")
+                        # 执行检测
+                        current_time = time.time()
+                        # 使用 try-except 捕获模型推理过程中的错误
+                        try:
+                            results = self.model(detect_frame, conf=self.confidence,iou=0.45,max_det=300,device=self.device)
+
+                            # 处理检测结果
+                            detections = []
+                            detection = []
+                            for r in results:
+                                boxes = r.boxes
+                                for box in boxes:
+                                    x1, y1, x2, y2 = box.xyxy[0].tolist()
+                                    confidence = box.conf.item()
+                                    class_id = int(box.cls.item())
+                                    class_name = r.names[class_id]
+                                    
+                                    detections.append({
+                                        "bbox": [x1, y1, x2, y2],
+                                        "confidence": confidence,
+                                        "class_id": class_id,
+                                        "class_name": class_name
+                                    })
+                                    
+                            if detections and self.target_class and len(self.target_class) > 0:
+                                detection = [d for d in detections if str(d["class_id"]) in self.target_class]
+                            # 判断是否需要创建检测事件
+                            if detection and (current_time - self.last_detection_time) > cooldown_period:
+                                self.last_detection_time = current_time
+                                self.save_detection_event(detect_frame, detections)
+                            
+                            # 向WebSocket客户端推送检测结果
+                            self.broadcast_detection_result(detect_frame, detections)
+                        except Exception as e:
+                            logger.error(f"模型推理过程中出错: {e}")
+                            # 不终止整个检测循环，仅记录错误
+                    
+                    # 动态调整检测频率，根据是否有客户端连接来决定
+                    if self.clients:
+                        # 有客户端连接时，更频繁地检测
+                        skip_frame_count = 1
+                        sleep_time = 0.01  # 短暂休眠防止CPU过载
+                    else:
+                        # 无客户端连接时，减少检测频率以节省资源
+                        skip_frame_count = 10
+                        sleep_time = 0.05  # 更长的休眠时间
+                    
+                    # 防止CPU过载
+                    time.sleep(sleep_time)
+                    
+                except Exception as e:
+                    logger.error(f"检测过程中出错: {e}")
+                    # error_count += 1
+                    time.sleep(0.1)
+
+        except Exception as e:
+            logger.error(f"检测任务异常: {e}")
+        finally:
+            # 关闭事件循环（在子线程内执行）
+            try:
+                # 关闭异步生成器
+                self.loop.run_until_complete(self.loop.shutdown_asyncgens())
+            finally:
+                self.loop.close()
+                logger.info(f"事件循环已关闭: {self.config_id}")
     
     def start(self):
         """启动检测任务线程"""
@@ -328,40 +301,57 @@ class DetectionTask:
         self.thread.daemon = True
         self.thread.start()
     
-    def stop(self):
+    async def stop(self):
         """停止检测任务"""
         logger.info(f"正在停止检测任务: {self.config_id}")
         self.stop_event.set()
         
         # 停止广播任务
-        if self.broadcast_task and not self.broadcast_task.done():
+        if self.broadcast_task:
             self.broadcast_task.cancel()
-            self.broadcast_task = None
+            try:
+                await self.broadcast_task
+            except asyncio.CancelledError:
+                logger.info(f"广播任务已取消: {self.config_id}")
+        # if self.broadcast_task and not self.broadcast_task.done():
+        #     self.broadcast_task.cancel()
+        #     self.broadcast_task = None
         
         # 发送停止信号到消息队列
-        if self.loop and self.loop.is_running():
-            try:
-                asyncio.run_coroutine_threadsafe(
-                    self.message_queue.put(None),
-                    self.loop
-                )
-            except Exception as e:
-                logger.error(f"发送停止信号到消息队列失败: {e}")
+        # 发送停止信号到消息队列
+        try:
+            if self.loop and not self.message_queue.empty():
+                await self.message_queue.put(None)
+        except Exception as e:
+            logger.error(f"发送停止信号到消息队列失败: {e}")
+        # if self.loop and self.loop.is_running():
+        #     try:
+        #         asyncio.run_coroutine_threadsafe(
+        #             self.message_queue.put(None),
+        #             self.loop
+        #         )
+        #     except Exception as e:
+        #         logger.error(f"发送停止信号到消息队列失败: {e}")
         
         if self.thread:
             self.thread.join(timeout=5)
+            if self.thread.is_alive():
+                logger.warning(f"检测线程未能及时停止: {self.config_id}")
+
+        # 释放摄像头资源
+        if self.cap:
+            self.cap.release()
+            logger.info(f"摄像头资源已释放: {self.config_id}")
             
         # 清理事件循环
-        if self.loop and hasattr(self.loop, 'close'):
-            try:
-                if self.loop.is_running():
-                    # 停止事件循环
-                    self.loop.call_soon_threadsafe(self.loop.stop)
-                    logger.info(f"事件循环已停止: {self.config_id}")
-            except Exception as e:
-                logger.error(f"停止事件循环失败: {e}")
-            
-        logger.info(f"检测任务已完全停止: {self.config_id}")
+        # if self.loop and hasattr(self.loop, 'close'):
+        #     try:
+        #         if self.loop.is_running():
+        #             # 停止事件循环
+        #             self.loop.call_soon_threadsafe(self.loop.stop)
+        #             logger.info(f"事件循环已停止: {self.config_id}")
+        #     except Exception as e:
+        #         logger.error(f"停止事件循环失败: {e}")
     
     def save_detection_event(self, frame, detections):
         """保存检测事件到数据库并存储图像/视频"""
@@ -398,12 +388,26 @@ class DetectionTask:
             
             if self.save_mode in [SaveMode.screenshot, SaveMode.both]:
                 # 绘制检测框和标签
-                annotated_frame = self.draw_detections(frame, detections)
-                
-                # 保存带检测框的截图
+                annotated_frame = self.draw_detections(frame, detections)    
+                # 保存带检测框的截图（原图）
                 thumbnail_path = save_dir / f"{event_id}.jpg"
                 cv2.imwrite(str(thumbnail_path), annotated_frame)
                 event.thumbnail_path = str(thumbnail_path)
+
+                # 保存带检测框的截图 (缩略图)
+                success, buffer = cv2.imencode('.jpg', annotated_frame, [cv2.IMWRITE_JPEG_QUALITY, 10])
+                height, width = frame.shape[:2]
+                if success:
+                    event.thumbnail_data = buffer.tobytes()
+                    event.is_compressed = True  # 设置压缩标记
+                    event.meta_data = {
+                        "resolution": f"{width}x{height}",
+                        "size": len(buffer.tobytes()),  # 存储图像大小
+                        # 其他元数据...
+                    }
+                else:
+                    logger.error("JPEG编码失败")
+                
             
             if self.save_mode in [SaveMode.video, SaveMode.both]:
                 # 从帧缓冲区创建短视频
@@ -538,7 +542,7 @@ class DetectionTask:
             annotated_frame = self.draw_detections(frame_resized, adjusted_detections)
             
             # 将帧转换为JPEG，增加质量参数
-            _, buffer = cv2.imencode('.jpg', annotated_frame, [cv2.IMWRITE_JPEG_QUALITY, 90])  # 提高JPEG质量
+            _, buffer = cv2.imencode('.jpg', annotated_frame, [cv2.IMWRITE_JPEG_QUALITY, 85])  # 提高JPEG质量
             jpg_bytes = buffer.tobytes()
             base64_image = base64.b64encode(jpg_bytes).decode('utf-8')
             
@@ -551,17 +555,22 @@ class DetectionTask:
                 "detections": adjusted_detections
             }
             
-            # 使用消息队列方式，避免直接调用异步方法
+            # 将消息放入队列（线程安全）
             if self.loop and self.loop.is_running():
-                try:
-                    # 将消息放入队列而不是直接发送
-                    asyncio.run_coroutine_threadsafe(
-                        self.message_queue.put(message),
-                        self.loop
-                    )
-                    # 不等待结果，避免阻塞
-                except Exception as e:
-                    logger.error(f"将消息加入队列失败: {e}")
+                self.loop.call_soon_threadsafe(
+                    lambda: self.message_queue.put_nowait(message)
+                )
+            # 使用消息队列方式，避免直接调用异步方法
+            # if self.loop and self.loop.is_running():
+            #     try:
+            #         # 将消息放入队列而不是直接发送
+            #         asyncio.run_coroutine_threadsafe(
+            #             self.message_queue.put(message),
+            #             self.loop
+            #         )
+            #         # 不等待结果，避免阻塞
+            #     except Exception as e:
+            #         logger.error(f"将消息加入队列失败: {e}")
         
         except Exception as e:
             logger.error(f"广播检测结果失败: {e}")
@@ -569,40 +578,43 @@ class DetectionTask:
     async def broadcast_worker(self):
         """处理消息广播的工作协程"""
         logger.info(f"广播工作协程已启动: {self.config_id}")
-        while not self.stop_event.is_set():
-            try:
-                # 设置超时，避免永久阻塞
-                message = await asyncio.wait_for(self.message_queue.get(), timeout=1.0)
-                
-                if message is None:  # 停止信号
-                    break
-                
-                # 调试日志
-                logger.debug(f"准备向 {len(self.clients)} 个客户端广播消息")
-                
-                # 获取当前活跃的客户端列表
-                clients = list(self.clients)
-                for client in clients:
-                    try:
-                        await client.send_json(message)
-                        # 可选：添加成功发送日志
-                        # logger.debug(f"成功向客户端 {id(client)} 发送消息")
-                    except Exception as e:
-                        logger.error(f"向客户端 {id(client)} 发送消息失败: {e}")
-                        # 移除断开连接的客户端
-                        if client in self.clients:
-                            self.clients.remove(client)
-                            logger.info(f"客户端已断开连接，检测任务 {self.config_id}, 当前客户端数: {len(self.clients)}")
-                
-                self.message_queue.task_done()
-            except asyncio.TimeoutError:
-                # 超时但不影响循环继续
-                continue
-            except Exception as e:
-                logger.error(f"广播工作协程错误: {e}")
-                await asyncio.sleep(0.1)
-        
-        logger.info(f"广播工作协程已停止: {self.config_id}")
+        try:
+            while not self.stop_event.is_set():
+                try:
+                    # 设置超时，避免永久阻塞
+                    message = await asyncio.wait_for(self.message_queue.get(), timeout=1.0)
+                    
+                    if message is None:  # 停止信号
+                        break
+                    
+                    # 调试日志
+                    logger.debug(f"准备向 {len(self.clients)} 个客户端广播消息")
+                    
+                    # 获取当前活跃的客户端列表
+                    clients = list(self.clients)
+                    for client in clients:
+                        try:
+                            await client.send_json(message)
+                            # 可选：添加成功发送日志
+                            # logger.debug(f"成功向客户端 {id(client)} 发送消息")
+                        except Exception as e:
+                            logger.error(f"向客户端 {id(client)} 发送消息失败: {e}")
+                            # 移除断开连接的客户端
+                            if client in self.clients:
+                                self.clients.remove(client)
+                                logger.info(f"客户端已断开连接，检测任务 {self.config_id}, 当前客户端数: {len(self.clients)}")
+                    
+                    self.message_queue.task_done()
+                except asyncio.TimeoutError:
+                    # 超时但不影响循环继续
+                    continue
+                except Exception as e:
+                    logger.error(f"广播工作协程错误: {e}")
+                    # await asyncio.sleep(0.1)
+        except asyncio.CancelledError:
+            logger.info(f"广播任务被取消: {self.config_id}")
+        finally:
+            logger.info(f"广播工作协程已停止: {self.config_id}")
     
     def add_client(self, websocket):
         """添加WebSocket客户端到广播列表"""
@@ -705,7 +717,7 @@ class DetectionServer:
         
         try:
             # 停止任务
-            self.tasks[config_id].stop()
+            await self.tasks[config_id].stop()
             
             # 更新数据库中的任务状态
             config = db.query(DetectionConfig).filter(DetectionConfig.config_id == config_id).first()
