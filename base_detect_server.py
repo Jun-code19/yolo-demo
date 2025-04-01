@@ -37,11 +37,12 @@ class DetectionTask:
     """检测任务类，管理单个摄像机的检测过程"""
     
     def __init__(self, device_id: str, config_id: str, model_path: str, 
-                 confidence: float, target_class: List[str], save_mode: SaveMode, region_of_interest: Optional[List] = None):
+                 confidence: float, models_type: str, target_class: List[str], save_mode: SaveMode, region_of_interest: Optional[List] = None):
         self.device_id = device_id
         self.config_id = config_id
         self.model_path = model_path
         self.confidence = confidence
+        self.models_type = models_type
         self.target_class = target_class
         self.save_mode = save_mode
         self.region_of_interest = region_of_interest
@@ -50,7 +51,7 @@ class DetectionTask:
         self.cap = None
         self.thread = None
         self.lock = Lock()  # 初始化锁
-        self.frame_buffer = deque(maxlen=5)  # 存储最近的帧
+        self.frame_buffer = deque(maxlen=1)  # 存储最近的帧
         self.last_detection_time = time.time()
         self.connected = False
         self.reconnect_attempts = 0
@@ -168,34 +169,22 @@ class DetectionTask:
         # 为检测线程创建和设置事件循环
         try:
             self.loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(self.loop)
-            # new_loop = asyncio.new_event_loop()
-            # asyncio.set_event_loop(new_loop)
-            # self.loop = new_loop
-            # logger.info(f"为检测任务 {self.config_id} 创建了新的事件循环")
+            asyncio.set_event_loop(self.loop)          
         except Exception as e:
             logger.error(f"为检测线程创建事件循环失败: {e}")
         
         try:
             if not self.load_model():
                 logger.error(f"无法启动检测任务 {self.config_id}，模型加载失败")
-                return
-            
-            # if not self.connect_to_camera():
-            #     logger.error(f"无法启动检测任务 {self.config_id}，摄像机连接失败")
-            #     return         
+                return       
             
             # 启动读取帧的线程
             self.thread = threading.Thread(target=self.read_frame)
             self.thread.daemon = True
             self.thread.start()
 
-            logger.info(f"开始检测任务: {self.config_id} 设备: {self.device_id}")
-
             frame_count = 0
-            # error_count = 0
-            cooldown_period = 5  # 检测事件的冷却时间（秒）
-            # last_reconnect_time = time.time()
+            cooldown_period = 6  # 检测事件的冷却时间（秒）
             skip_frame_count = 5  # 每隔多少帧进行一次检测
             
             while not self.stop_event.is_set():
@@ -253,10 +242,16 @@ class DetectionTask:
                             # 判断是否需要创建检测事件
                             if detection and (current_time - self.last_detection_time) > cooldown_period:
                                 self.last_detection_time = current_time
-                                self.save_detection_event(detect_frame, detections)
+                                # self.save_detection_event(detect_frame, detections)
                             
-                            # 向WebSocket客户端推送检测结果
-                            self.broadcast_detection_result(detect_frame, detections)
+                            if self.models_type == 'pose':
+                                # 向WebSocket客户端推送检测结果
+                                self.broadcast_pose_result(self.display_pose_results(detect_frame, results[0]))
+                            else:
+                                # 向WebSocket客户端推送检测结果
+                                self.broadcast_detection_result(detect_frame, detections)
+
+                            
                         except Exception as e:
                             logger.error(f"模型推理过程中出错: {e}")
                             # 不终止整个检测循环，仅记录错误
@@ -272,7 +267,7 @@ class DetectionTask:
                         sleep_time = 0.05  # 更长的休眠时间
                     
                     # 防止CPU过载
-                    time.sleep(sleep_time)
+                    # time.sleep(sleep_time)
                     
                 except Exception as e:
                     logger.error(f"检测过程中出错: {e}")
@@ -290,6 +285,69 @@ class DetectionTask:
                 self.loop.close()
                 logger.info(f"事件循环已关闭: {self.config_id}")
     
+    def display_detection_results(self, img, results):
+        if not hasattr(results, 'boxes') or results.boxes is None:
+            return img
+
+        boxes = results.boxes
+        for box in boxes:
+            x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+            conf = box.conf.cpu().numpy()[0]
+            cls = int(box.cls.cpu().numpy()[0])
+            
+            color = self.get_class_color(cls)
+            # 只在复选框选中时绘制边界框
+            if self.show_boxes_checkbox.isChecked():
+                cv2.rectangle(img, (int(x1), int(y1)), (int(x2), int(y2)), color, 2)
+                class_name = self.class_names[cls] if self.class_names else f"Class {cls}"
+                label = f"{class_name}: {conf:.2f}"
+                cv2.putText(img, label, (int(x1), int(y1) - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+
+        return img
+
+    def display_pose_results(self, img, results):
+        if not hasattr(results, 'keypoints') or results.keypoints is None:
+            print("No keypoints found in pose results")
+            return img
+
+        keypoints = results.keypoints
+        boxes = results.boxes
+
+        # 定义不同身体部位的颜色
+        colors = {
+            'head': (255, 0, 0),    # 蓝色
+            'body': (0, 255, 0),    # 绿色
+            'arms': (255, 165, 0),  # 橙色
+            'legs': (255, 0, 255)   # 紫色
+        }
+
+        for person_keypoints, box in zip(keypoints, boxes):
+            kpts = person_keypoints.data[0]
+            for kpt in kpts:
+                x, y, conf = kpt
+                if conf > 0.5:
+                    cv2.circle(img, (int(x), int(y)), 5, (0, 255, 0), -1)
+
+            connections = [
+                ((0, 1), 'head'), ((0, 2), 'head'), ((1, 3), 'head'), ((2, 4), 'head'),
+                ((0, 5), 'body'), ((0, 6), 'body'),
+                ((5, 6), 'body'), ((5, 11), 'body'), ((6, 12), 'body'), ((11, 12), 'body'),
+                ((5, 7), 'arms'), ((7, 9), 'arms'), ((6, 8), 'arms'), ((8, 10), 'arms'),
+                ((11, 13), 'legs'), ((13, 15), 'legs'), ((12, 14), 'legs'), ((14, 16), 'legs')
+            ]
+            for (connection, body_part) in connections:
+                pt1, pt2 = kpts[connection[0]], kpts[connection[1]]
+                if pt1[2] > 0.5 and pt2[2] > 0.5:
+                    cv2.line(img, (int(pt1[0]), int(pt1[1])), (int(pt2[0]), int(pt2[1])), colors[body_part], 2)
+
+            x1, y1, x2, y2 = box.xyxy[0]
+            conf = box.conf[0]
+            cv2.rectangle(img, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
+            label = f"Person: {conf:.2f}"
+            cv2.putText(img, label, (int(x1), int(y1) - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+
+        return img
+
     def start(self):
         """启动检测任务线程"""
         if self.thread and self.thread.is_alive():
@@ -441,11 +499,6 @@ class DetectionTask:
         """在图像上绘制检测框和标签"""
         annotated_frame = frame.copy()
         
-        # 在图像上绘制时间戳
-        # timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        # cv2.putText(annotated_frame, timestamp, (10, 30), 
-        #             cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-        
         # 绘制每个检测框
         for detection in detections:
             # 获取边界框坐标
@@ -507,6 +560,38 @@ class DetectionTask:
         
         return annotated_frame
     
+    def broadcast_pose_result(self, pose_frame):
+        """向所有WebSocket客户端广播检测结果"""
+        if not self.clients:
+            return  # 没有客户端连接，跳过
+        
+        try:           
+            # 调整检测框坐标
+            adjusted_detections = []
+            
+            # 将帧转换为JPEG，增加质量参数
+            _, buffer = cv2.imencode('.jpg', pose_frame, [cv2.IMWRITE_JPEG_QUALITY, 90])  # 提高JPEG质量
+            jpg_bytes = buffer.tobytes()
+            base64_image = base64.b64encode(jpg_bytes).decode('utf-8')
+            
+            # 创建消息
+            message = {
+                "device_id": self.device_id,
+                "config_id": self.config_id,
+                "timestamp": time.time(),
+                "image": base64_image,
+                "detections": adjusted_detections
+            }
+            
+            # 将消息放入队列（线程安全）
+            if self.loop and self.loop.is_running():
+                self.loop.call_soon_threadsafe(
+                    lambda: self.message_queue.put_nowait(message)
+                )
+       
+        except Exception as e:
+            logger.error(f"广播检测结果失败: {e}")
+
     def broadcast_detection_result(self, frame, detections):
         """向所有WebSocket客户端广播检测结果"""
         if not self.clients:
@@ -542,7 +627,7 @@ class DetectionTask:
             annotated_frame = self.draw_detections(frame_resized, adjusted_detections)
             
             # 将帧转换为JPEG，增加质量参数
-            _, buffer = cv2.imencode('.jpg', annotated_frame, [cv2.IMWRITE_JPEG_QUALITY, 85])  # 提高JPEG质量
+            _, buffer = cv2.imencode('.jpg', annotated_frame, [cv2.IMWRITE_JPEG_QUALITY, 90])  # 提高JPEG质量
             jpg_bytes = buffer.tobytes()
             base64_image = base64.b64encode(jpg_bytes).decode('utf-8')
             
@@ -682,6 +767,7 @@ class DetectionServer:
                 config_id=config_id,
                 model_path=model.file_path,
                 confidence=config.sensitivity,  
+                models_type=model.models_type,  # 从模型表中获取模型类型
                 target_class=config.target_classes,
                 save_mode=config.save_mode,
                 region_of_interest=None  # 暂时不使用区域参数，避免类型不匹配问题

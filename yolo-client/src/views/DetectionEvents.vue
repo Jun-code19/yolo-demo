@@ -519,7 +519,6 @@ export default defineComponent({
         
         const response = await detectionEventApi.getEvents(params);
         eventList.value = response.data;
-        console.log(response.data)
         // 暂时假设总数为当前数据长度的10倍
         // 实际应用中应该从API获取总数
         total.value = response.data.length;
