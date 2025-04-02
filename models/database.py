@@ -21,6 +21,7 @@ class AnalysisTarget(enum.Enum):
     helmet = "helmet"
 
 class SaveMode(enum.Enum):
+    none="none"
     screenshot = "screenshot"
     video = "video"
     both = "both"

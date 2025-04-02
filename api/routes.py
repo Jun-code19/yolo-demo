@@ -10,7 +10,6 @@ from api.logger import log_action
 from passlib.context import CryptContext
 from fastapi.responses import FileResponse,Response
 import requests
-import zlib
 
 import os
 import shutil
@@ -349,8 +348,7 @@ def get_syslogs(
     limit: int = 100,
     user_id: Optional[str] = None,
     action_type: Optional[str] = None,
-    db: Session = Depends(get_db)
-):
+    db: Session = Depends(get_db)):
     query = db.query(SysLog)
     if user_id:
         query = query.filter(SysLog.user_id == user_id)
@@ -528,8 +526,7 @@ async def upload_model(
     description: Optional[str] = Form(None),
     parameters: Optional[str] = Form(None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
+    current_user: User = Depends(get_current_user)):
     """上传新模型文件"""
     # 检查权限（只有管理员可以上传模型）
     check_admin_permission(current_user)
@@ -652,7 +649,7 @@ class DetectionConfigBase(BaseModel):
     sensitivity: float = 0.5
     target_classes: Optional[List[str]] = []
     frequency: Optional[str] = "realtime"
-    save_mode: Optional[str] = "screenshot"
+    save_mode: Optional[str] = "none"
     save_duration: int = 10
     max_storage_days: int = 30
 
@@ -753,8 +750,7 @@ async def get_detection_configs(
     enabled: Optional[bool] = None,
     skip: int = 0,
     limit: int = 100,
-    db: Session = Depends(get_db)
-):
+    db: Session = Depends(get_db)):
     """
     获取检测配置列表，可按设备ID和启用状态筛选
     """
@@ -796,8 +792,7 @@ async def get_detection_configs(
 @router.get("/detection/configs/{config_id}", response_model=DetectionConfigInfoResponse, tags=["检测配置"])
 async def get_detection_config(
     config_id: str,
-    db: Session = Depends(get_db)
-):
+    db: Session = Depends(get_db)):
     """
     获取单个检测配置详情
     """
@@ -897,8 +892,7 @@ async def create_detection_config(
 async def update_detection_config(
     config_id: str,
     config_update: DetectionConfigUpdate,
-    db: Session = Depends(get_db)
-):
+    db: Session = Depends(get_db)):
     """
     更新检测配置
     """
@@ -990,8 +984,7 @@ def toggle_detection_active(config_id: str, enabled: bool, db: Session = Depends
 @router.delete("/detection/configs/{config_id}", tags=["检测配置"])
 async def delete_detection_config(
     config_id: str,
-    db: Session = Depends(get_db)
-):
+    db: Session = Depends(get_db)):
     """
     删除检测配置
     """
@@ -1019,8 +1012,7 @@ async def get_detection_events(
     min_confidence: Optional[float] = None,
     skip: int = 0,
     limit: int = 100,
-    db: Session = Depends(get_db)
-):
+    db: Session = Depends(get_db)):
     """
     获取检测事件列表，支持多种筛选条件
     """
@@ -1098,8 +1090,7 @@ async def get_detection_events(
 @router.get("/detection/events/{event_id}", response_model=DetectionEventResponse, tags=["检测事件"])
 async def get_detection_event(
     event_id: str,
-    db: Session = Depends(get_db)
-):
+    db: Session = Depends(get_db)):
     """
     通过事件ID获取检测事件详情
     """
@@ -1176,8 +1167,7 @@ async def get_thumbnail(event_id: str, db: Session = Depends(get_db)):
 @router.post("/detection/events", response_model=DetectionEventResponse, tags=["检测事件"])
 async def create_detection_event(
     event: DetectionEventCreate,
-    db: Session = Depends(get_db)
-):
+    db: Session = Depends(get_db)):
     """
     创建新的检测事件
     """
@@ -1277,8 +1267,7 @@ async def create_detection_event(
 async def update_detection_event(
     event_id: str,
     event_update: DetectionEventUpdate,
-    db: Session = Depends(get_db)
-):
+    db: Session = Depends(get_db)):
     """
     更新检测事件状态、备注等信息
     """
@@ -1355,8 +1344,7 @@ async def update_detection_event(
 @router.delete("/detection/events/{event_id}", tags=["检测事件"])
 async def delete_detection_event(
     event_id: str,
-    db: Session = Depends(get_db)
-):
+    db: Session = Depends(get_db)):
     """
     删除检测事件
     """
@@ -1378,8 +1366,7 @@ async def get_detection_stats(
     device_id: Optional[str] = None,
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
-    db: Session = Depends(get_db)
-):
+    db: Session = Depends(get_db)):
     """
     获取设备的检测统计数据
     """
@@ -1413,8 +1400,7 @@ async def get_detection_stats(
 async def get_detection_schedules(
     config_id: Optional[str] = None,
     active_only: bool = False,
-    db: Session = Depends(get_db)
-):
+    db: Session = Depends(get_db)):
     """
     获取检测计划列表
     """
@@ -1431,8 +1417,7 @@ async def get_detection_schedules(
 @router.post("/detection/schedules", response_model=DetectionScheduleResponse, tags=["检测计划"])
 async def create_detection_schedule(
     schedule: DetectionScheduleCreate,
-    db: Session = Depends(get_db)
-):
+    db: Session = Depends(get_db)):
     """
     创建新的检测计划
     """

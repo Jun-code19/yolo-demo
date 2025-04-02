@@ -137,6 +137,7 @@
         <!-- 保存模式 -->
         <el-form-item label="保存模式" prop="save_mode">
           <el-radio-group v-model="formState.save_mode">
+            <el-radio value="none">暂无</el-radio>
             <el-radio value="screenshot">仅截图</el-radio>
             <el-radio value="video">仅视频</el-radio>
             <el-radio value="both">截图和视频</el-radio>
@@ -209,7 +210,7 @@ export default defineComponent({
       sensitivity: 0.5,
       target_classes: [],
       frequency: 'realtime',
-      save_mode: 'screenshot',
+      save_mode: 'none',
       save_duration: 10,
       max_storage_days: 30
     });
@@ -285,6 +286,7 @@ export default defineComponent({
     // 获取保存模式标签
     const getSaveModeLabel = (saveMode) => {
       const map = {
+        'none':'暂无',
         'screenshot': '截图',
         'video': '视频',
         'both': '截图+视频'
@@ -295,6 +297,7 @@ export default defineComponent({
     // 获取保存模式标签类型
     const getSaveModeType = (saveMode) => {
       const map = {
+        'none':'warning',
         'screenshot': 'success',
         'video': 'primary',
         'both': 'info'
@@ -359,7 +362,7 @@ export default defineComponent({
         sensitivity: 0.5,
         target_classes: [],
         frequency: 'realtime',
-        save_mode: 'screenshot',
+        save_mode: 'none',
         save_duration: 10,
         max_storage_days: 30
       });
@@ -402,7 +405,7 @@ export default defineComponent({
                 // 更新配置
                 await detectionConfigApi.updateConfig(formState.config_id, {
                   models_id: formState.models_id,
-                  enabled: formState.enabled,
+                  enabled: false,
                   sensitivity: formState.sensitivity,
                   target_classes: formState.target_classes,
                   frequency: formState.frequency,

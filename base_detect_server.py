@@ -22,6 +22,7 @@ import torch
 from sqlalchemy.orm import Session
 import concurrent.futures
 from threading import Lock  # 导入锁
+from src.tracker import ObjectTracker
 
 from models.database import (
     SessionLocal, DetectionConfig, DetectionEvent, Device, 
@@ -60,6 +61,15 @@ class DetectionTask:
         self.loop = None  # 添加事件循环引用
         self.message_queue = asyncio.Queue()  # 添加消息队列
         self.broadcast_task = None  # 添加广播任务引用
+
+        # 初始化目标追踪参数
+        self.max_trajectory_length = 30
+        self.max_age = 10
+        self.min_hits = 3
+        self.iou_threshold = 0.3
+
+        # 初始化 ObjectTracker
+        self.object_tracker = ObjectTracker(max_age=self.max_age, min_hits=self.min_hits, iou_threshold=self.iou_threshold)
     
     def load_model(self):
         """加载YOLO模型"""
@@ -239,18 +249,32 @@ class DetectionTask:
                                     
                             if detections and self.target_class and len(self.target_class) > 0:
                                 detection = [d for d in detections if str(d["class_id"]) in self.target_class]
-                            # 判断是否需要创建检测事件
-                            if detection and (current_time - self.last_detection_time) > cooldown_period:
-                                self.last_detection_time = current_time
-                                # self.save_detection_event(detect_frame, detections)
+                            # # 判断是否需要创建检测事件
+                            if self.save_mode.value != 'none':
+                                if detection and (current_time - self.last_detection_time) > cooldown_period:
+                                    self.last_detection_time = current_time
+                                    self.save_detection_event(detect_frame, detections)
                             
-                            if self.models_type == 'pose':
-                                # 向WebSocket客户端推送检测结果
-                                self.broadcast_pose_result(self.display_pose_results(detect_frame, results[0]))
+                            #没检测的目标发送原图
+                            if detection:
+                                if self.models_type == 'pose':
+                                    # 向WebSocket客户端推送检测结果
+                                    self.broadcast_pose_result(self.display_pose_results(detect_frame, results[0]))
+                                else:
+                                    # 开启目标追踪功能
+                                    # self.object_tracker.update(detections)
+                                    #     # 传递显示框的状态到draw_tracks方法
+                                    # tracked_frame = self.object_tracker.draw_tracks(
+                                    #     detect_frame.copy(), 
+                                    #     max_trajectory_length=self.max_trajectory_length,
+                                    #     show_boxes=True,  # 传递显示框的状态
+                                    # )
+                                    tracked_frame = detect_frame.copy()
+                                    # 向WebSocket客户端推送检测结果
+                                    self.broadcast_detection_result(tracked_frame, detections)
                             else:
-                                # 向WebSocket客户端推送检测结果
-                                self.broadcast_detection_result(detect_frame, detections)
-
+                                orgain_frame = detect_frame.copy()
+                                self.broadcast_pose_result(orgain_frame)
                             
                         except Exception as e:
                             logger.error(f"模型推理过程中出错: {e}")
