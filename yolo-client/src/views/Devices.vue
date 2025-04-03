@@ -492,7 +492,7 @@ const connectToWebSocket = async (streamUrl) => {
 const handleWsMessage = (event) => {
   try {
     const message = JSON.parse(event.data)
-    console.log('接收到WebSocket消息:', message.type)
+    // console.log('接收到WebSocket消息:', message.type)
     
     // 根据消息类型处理
     switch (message.type) {

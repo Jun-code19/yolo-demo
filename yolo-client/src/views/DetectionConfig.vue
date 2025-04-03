@@ -15,21 +15,21 @@
       <!-- 配置列表 -->
       <el-table :data="configList" v-loading="loading" style="width: 100%">
         <!-- 设备名称列 -->
-        <el-table-column label="设备" prop="device_id">
+        <el-table-column label="设备" prop="device_id" min-width="80">
           <template #default="scope">
             {{ getDeviceName(scope.row.device_id) }}
           </template>
         </el-table-column>
 
         <!-- 模型名称列 -->
-        <el-table-column label="模型" prop="models_id">
+        <el-table-column label="模型" prop="models_id" min-width="80">
           <template #default="scope">
             {{ getModelName(scope.row.models_id) }}
           </template>
         </el-table-column>
 
         <!-- 状态列 -->
-        <el-table-column label="状态" prop="enabled">
+        <el-table-column label="状态" prop="enabled" min-width="80">
           <template #default="scope">
             <el-tag :type="scope.row.enabled ? 'success' : 'danger'">
               {{ scope.row.enabled ? '启用' : '禁用' }}
@@ -38,11 +38,11 @@
         </el-table-column>
 
         <!-- 灵敏度列 -->
-        <el-table-column label="灵敏度" prop="sensitivity">
+        <el-table-column label="灵敏度" prop="sensitivity" min-width="80">
         </el-table-column>
 
         <!-- 检测频率列 -->
-        <el-table-column label="检测频率" prop="frequency">
+        <el-table-column label="检测频率" prop="frequency" min-width="80">
           <template #default="scope">
             <el-tag :type="getFrequencyType(scope.row.frequency)">
               {{ getFrequencyLabel(scope.row.frequency) }}
@@ -51,7 +51,7 @@
         </el-table-column>
 
         <!-- 保存模式列 -->
-        <el-table-column label="保存模式" prop="save_mode">
+        <el-table-column label="保存模式" prop="save_mode" min-width="80">
           <template #default="scope">
             <el-tag :type="getSaveModeType(scope.row.save_mode)">
               {{ getSaveModeLabel(scope.row.save_mode) }}
@@ -60,9 +60,13 @@
         </el-table-column>
 
         <!-- 操作列 -->
-        <el-table-column label="操作">
+        <el-table-column label="操作" min-width="120">
           <template #default="scope">
             <el-space>
+              <el-button type="warning" size="small" @click="scope.row.enabled? null : setInterestArea(scope.row)"
+              :disabled="scope.row.enabled"> <!-- 禁用按钮 -->
+                区域
+              </el-button><!-- 设置感兴趣区域按钮 -->
               <el-button type="primary" size="small" @click="scope.row.enabled ? null : editConfig(scope.row)"
               :disabled="scope.row.enabled"> <!-- 禁用按钮 -->
                 编辑
@@ -169,6 +173,72 @@
         </span>
       </template>
     </el-dialog>
+
+    <!-- 区域设置对话框 -->
+    <el-dialog v-model="areaModalVisible" title="感兴趣区域设置" width="800px" destroy-on-close
+    @close="stopPreview">
+      <el-form :model="areaForm" label-position="top">
+        <!-- 配置类型 -->
+        <el-form-item label="配置类型">
+          <el-radio-group v-model="areaForm.config_type">
+            <el-radio value="area">区域设置</el-radio>
+            <el-radio value="line">拌线设置</el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <!-- 视频预览和绘制区域 -->
+        <div class="video-preview-container">
+          <div v-if="previewLoading" class="loading-wrapper">
+            <el-skeleton animated :rows="8" />
+            <div class="loading-text">正在连接设备，请稍候...</div>
+          </div>
+          <div v-else-if="previewError" class="error-wrapper">
+            <el-icon :size="64"><CircleClose /></el-icon>
+            <p>{{ previewError }}</p>
+            <el-button @click="retryPreview">重试</el-button>
+          </div>
+          <div v-else-if="!previewStream" class="video-placeholder">
+            <el-icon :size="64"><VideoCamera /></el-icon>
+            <p>等待视频流连接...</p>
+          </div>
+          <div v-else class="video-wrapper">
+            <video ref="videoRef" class="preview-video" autoplay muted @loadedmetadata="onVideoLoaded">              
+            </video>
+            <!-- 备用图像显示 -->
+            <img 
+              v-if="currentFrame" 
+              :src="currentFrame" 
+              class="fallback-image" 
+              :style="{ display: showFallbackImage ? 'block' : 'none' }"
+            />
+            <canvas ref="drawingCanvas" class="drawing-canvas" 
+              @mousedown="handleMouseDown"
+              @mousemove="handleMouseMove"
+              @contextmenu.prevent="handleRightClick">
+            </canvas>
+            <div class="drawing-controls">
+              <el-button type="primary" @click="startDrawing">开始绘制</el-button>
+              <el-button @click="clearDrawing">清除</el-button>
+            </div>
+          </div>
+        </div>
+        
+        <el-form-item label="区域坐标">
+          <el-input 
+            v-model="areaForm.coordinates"
+            placeholder="绘制完成后自动生成坐标"
+            readonly
+          />
+        </el-form-item>
+        <div class="coordinate-hint">提示：左键添加顶点，右键完成绘制</div>
+      </el-form>
+      
+      <template #footer>
+        <span class="dialog-footer">
+          <el-button @click="areaModalVisible = false">取消</el-button>
+          <el-button type="primary" @click="saveAreaConfig">保存</el-button>
+        </span>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -201,6 +271,514 @@ export default defineComponent({
     const isEdit = ref(false);
     const formRef = ref(null);
 
+    // 区域对话框状态
+    const areaModalVisible = ref(false);
+    const currentConfigId = ref(null);
+
+    // 区域表单数据
+    const areaForm = reactive({
+      config_type: 'area',
+      coordinates: ''
+    });
+    
+    // 绘制相关状态
+    const isDrawing = ref(false);
+    const points = ref([]);
+    const drawingCanvas = ref(null);
+
+    // 预览相关
+    const previewLoading = ref(false)
+    const previewError = ref(null)
+    const previewStream = ref(null)
+    const currentDevice = ref(null)
+    const videoRef = ref(null)
+    const currentFrame = ref(null)
+    const streamResolution = ref('')
+    const ws = ref(null)
+    const showFallbackImage = ref(false)
+
+    // 视频加载完成
+    const onVideoLoaded = () => {
+      if (!videoRef.value) return
+      
+      const { videoWidth, videoHeight } = videoRef.value
+      streamResolution.value = `${videoWidth}x${videoHeight}`
+    }
+    // 重试预览
+    const retryPreview = () => {
+      previewError.value = null
+      previewLoading.value = true
+      startPreview()
+    }
+    // 停止预览
+    const stopPreview = () => {
+      // 关闭WebSocket连接
+      if (ws.value) {
+        if (ws.value.readyState === WebSocket.OPEN) {
+          ws.value.send(JSON.stringify({ type: 'stop' }))
+        }
+        ws.value.close()
+        ws.value = null
+      }
+      
+      // 停止视频流
+      if (videoRef.value && videoRef.value.srcObject) {
+        const tracks = videoRef.value.srcObject.getTracks()
+        tracks.forEach(track => track.stop())
+        videoRef.value.srcObject = null
+      }
+      
+      // 重置状态
+      previewStream.value = null
+      streamResolution.value = ''
+    }
+    // 设置感兴趣区域方法
+    const setInterestArea = (config) => {
+      currentConfigId.value = config.config_id;
+      areaForm.coordinates = config.area_coordinates?.join(',') || '';
+      areaModalVisible.value = true;
+
+      currentDevice.value = config
+      previewLoading.value = true
+      previewError.value = null
+      previewStream.value = null
+      currentFrame.value = null
+      showFallbackImage.value = true
+      streamResolution.value = ''
+      
+      // 清除之前的预览状态
+      if (videoRef.value && videoRef.value.srcObject) {
+        const tracks = videoRef.value.srcObject.getTracks()
+        tracks.forEach(track => track.stop())
+        videoRef.value.srcObject = null
+      }
+      
+      // 延迟一帧，确保DOM加载完成再开始预览
+      setTimeout(() => {
+        startPreview()
+      }, 0)
+    };
+    // 开始预览
+    const startPreview = async () => {
+      try {
+        if (!currentDevice.value) {
+          throw new Error('设备信息不完整')
+        }
+        
+        // 构建流地址
+        const { device_type, ip_address, port, username, password } = currentDevice.value
+        
+        if (device_type === 'camera') {
+          // 构建RTSP URL（根据摄像头类型可能需要调整URL格式）
+          const rtspUrl = `rtsp://${username}:${password}@${ip_address}:${port}/cam/realmonitor?channel=1&subtype=0`
+          
+          // 使用WebSocket连接服务器请求代理流
+          await connectToWebSocket(rtspUrl)
+        } else {
+          throw new Error('不支持的设备类型')
+        }
+        
+        previewLoading.value = false
+      } catch (error) {
+        // console.error('预览失败:', error)
+        previewLoading.value = false
+        previewError.value = `连接设备失败: ${error.message}`
+      }
+    }
+    // 连接WebSocket服务器
+    const connectToWebSocket = async (streamUrl) => {
+      return new Promise((resolve, reject) => {
+        try {
+          // 关闭已有的连接
+          if (ws.value && ws.value.readyState === WebSocket.OPEN) {
+            ws.value.close()
+          }
+          
+          // 创建新的WebSocket连接
+          ws.value = new WebSocket('ws://localhost:8765/ws')
+          
+          // 连接超时
+          const connectionTimeout = setTimeout(() => {
+            reject(new Error('连接超时'))
+          }, 10000)
+          
+          ws.value.onopen = () => {
+            clearTimeout(connectionTimeout)
+            // console.log('WebSocket已连接，正在发送连接请求...')
+            
+            // 发送连接请求
+            ws.value.send(JSON.stringify({
+              type: 'connect',
+              client_type: 'preview_client'
+            }))
+          }
+          
+          ws.value.onmessage = handleWsMessage
+          
+          ws.value.onerror = (error) => {
+            clearTimeout(connectionTimeout)
+            // console.error('WebSocket错误:', error)
+            reject(new Error('WebSocket连接错误'))
+          }
+          
+          ws.value.onclose = () => {
+            // console.log('WebSocket已关闭')
+            if (areaModalVisible.value && !previewError.value) {
+              previewError.value = '视频流连接已断开'
+            }
+          }
+        } catch (error) {
+          // console.error('创建WebSocket连接失败:', error)
+          reject(error)
+        }
+      })
+    }
+    // 处理WebSocket消息
+    const handleWsMessage = (event) => {
+      try {
+        const message = JSON.parse(event.data)
+        // console.log('接收到WebSocket消息:', message.type)
+        
+        // 根据消息类型处理
+        switch (message.type) {
+          case 'connect_confirm':
+            // console.log('WebSocket连接确认')
+            
+            // 发送预览请求
+            if (ws.value && ws.value.readyState === WebSocket.OPEN && currentDevice.value) {
+              // console.log('发送预览请求')
+              ws.value.send(
+                JSON.stringify({
+                  type: 'preview_request',
+                  device_id: currentDevice.value.device_id,
+                  stream_url: buildRtspUrl()
+                })
+              )
+            }
+            break
+            
+          case 'preview_start':
+            // console.log('预览流已开始', message)
+            previewLoading.value = false
+            
+            // 如果预览流还未开始，则启动
+            if (!previewStream.value) {
+              // 确保状态被正确设置
+              startVideoStream()
+            }
+            break
+            
+          case 'stream_data':
+            // 处理流数据
+            handleStreamData(message)
+            break
+            
+          case 'error':
+            // console.error('服务器错误:', message.message)
+            previewLoading.value = false
+            previewError.value = `服务器错误: ${message.message}`
+            break
+            
+          default:
+            break
+            // console.log('未处理的消息类型:', message.type)
+        }
+      } catch (error) {
+        // console.error('处理WebSocket消息错误:', error)
+      }
+    }
+    // 开始视频流播放
+    const startVideoStream = () => {
+      // console.log('开始初始化视频流播放...');
+      
+      try {
+        // 无论videoRef是否存在，都先将预览状态设置为true
+        previewLoading.value = false;
+        previewStream.value = true;
+        // console.log('视频预览状态已更新: previewStream =', previewStream.value);
+        
+        // 检查浏览器支持
+        if (!window.MediaSource) {
+          // console.warn('浏览器不支持MediaSource API，将使用备用显示模式');
+          showFallbackImage.value = true;
+        }
+        
+        // 如果videoRef已存在，可以进行其他初始化
+        // if (videoRef.value) {
+        //   console.log('videoRef已存在，可以初始化视频元素');
+        // } else {
+        //   console.log('videoRef尚未就绪，将在收到第一帧时初始化');
+        // }
+      } catch (error) {
+        // console.error('启动视频流失败:', error);
+        previewError.value = `启动视频流失败: ${error.message}`;
+      }
+    }
+    // 处理流数据
+    const handleStreamData = (data) => {
+      // console.log('收到流数据:', data.type, data.format || '(无格式信息)');
+      
+      // 确保预览状态已初始化（双重保险）
+      if (!previewStream.value) {
+        // console.log('预览流状态未初始化，自动初始化');
+        previewLoading.value = false;
+        previewStream.value = true;
+      }
+      
+      try {
+        // 检查数据格式
+        if (data.format === 'jpeg' && data.data) {
+          // console.log(`处理JPEG图像数据: ${data.width}x${data.height}, 帧ID:${data.frame_id}`);
+          
+          // 基于Base64图像创建图像URL
+          const imageData = `data:image/jpeg;base64,${data.data}`;
+          
+          // 更新当前帧，用于备用显示方式
+          currentFrame.value = imageData;
+          
+          // 更新分辨率信息（无论显示模式如何）
+          if (!streamResolution.value && data.width && data.height) {
+            streamResolution.value = `${data.width}x${data.height}`;
+          }
+          
+          // 默认使用备用图像显示方式，简单可靠
+          if (!videoRef.value || !videoRef.value.parentElement) {
+            // console.log('使用备用图像显示模式 - videoRef不可用');
+            showFallbackImage.value = true;
+            return;
+          }
+          
+          // 如果明确使用备用图像显示方式，则直接返回
+          if (showFallbackImage.value) {
+            return;
+          }
+          
+          // 使用IMG元素更新视频帧
+          const img = new Image();
+          img.onload = () => {
+            // 确保videoRef仍然存在
+            if (!videoRef.value) {
+              // console.warn('videoRef在图像加载过程中消失，切换到备用模式');
+              showFallbackImage.value = true;
+              return;
+            }
+            
+            try {
+              // 使用Canvas绘制图像
+              const canvas = document.createElement('canvas');
+              canvas.width = data.width;
+              canvas.height = data.height;
+              const ctx = canvas.getContext('2d');
+              ctx.drawImage(img, 0, 0);
+              
+              // 直接将canvas内容显示在video元素上
+              if (!videoRef.value.srcObject) {
+                // 首次创建流
+                // console.log('创建新的Canvas流');
+                try {
+                  const canvasStream = canvas.captureStream(15); // 15fps
+                  videoRef.value.srcObject = canvasStream;
+                  // console.log('视频流已连接到video元素');
+                } catch (e) {
+                  // console.error('创建Canvas流失败，切换到备用模式:', e);
+                  showFallbackImage.value = true;
+                }
+              } else {
+                // 更新现有流的图像 - 使用简化的方法
+                try {
+                  const newStream = canvas.captureStream(15);
+                  const oldStream = videoRef.value.srcObject;
+                  videoRef.value.srcObject = newStream;
+                  
+                  // 停止旧流的轨道
+                  if (oldStream && oldStream.getTracks) {
+                    oldStream.getTracks().forEach(track => track.stop());
+                  }
+                } catch (e) {
+                  // console.warn('更新Canvas流失败，切换到备用模式:', e);
+                  showFallbackImage.value = true;
+                }
+              }
+            } catch (e) {
+              // console.error('Canvas操作失败，切换到备用模式:', e);
+              showFallbackImage.value = true;
+            }
+          };
+          
+          img.onerror = (err) => {
+            // console.error('图像加载失败:', err);
+            previewError.value = '图像加载失败，请检查网络连接';
+          };
+          
+          img.src = imageData;
+        } else if (data.data && !data.format) {
+          // console.log('收到二进制数据，尝试作为MP4片段处理');
+          // 二进制数据处理 (PyAV版本的后端)
+          if (window.appendVideoData) {
+            try {
+              const videoData = new Uint8Array(data.data);
+              window.appendVideoData(videoData);
+              // console.log('成功处理视频数据片段');
+            } catch (e) {
+              // console.error('处理视频片段失败:', e);
+              previewError.value = '视频解码失败';
+            }
+          } else {
+            // console.warn('window.appendVideoData未定义，无法处理MP4片段，切换到备用模式');
+            showFallbackImage.value = true;
+          }
+        } else {
+          // console.warn('收到未知格式的数据:', data);
+        }
+      } catch (error) {
+        // console.error('处理视频数据错误:', error);
+        previewError.value = `视频处理错误: ${error.message}`;
+        showFallbackImage.value = true;  // 出错时默认使用备用模式
+      }
+    }
+    // 构建RTSP URL
+    const buildRtspUrl = () => {
+      if (!currentDevice.value) return '';
+      
+      return `rtsp://${currentDevice.value.username}:${currentDevice.value.password}@${currentDevice.value.ip_address}:${currentDevice.value.port}/cam/realmonitor?channel=1&subtype=0`
+    }
+    // 绘制相关方法
+    const startDrawing = () => {
+      isDrawing.value = true;
+      points.value = [];
+      areaForm.coordinates = '';
+    };
+    
+    const clearDrawing = () => {
+      const canvas = drawingCanvas.value;
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      points.value = [];
+      areaForm.coordinates = '';
+    };
+    
+    const handleMouseDown = (e) => {
+      if (!isDrawing.value) return;
+      
+      const canvas = drawingCanvas.value;
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = canvas.width / rect.width;
+      const scaleY = canvas.height / rect.height;
+      
+      const x = (e.clientX - rect.left) * scaleX;
+      const y = (e.clientY - rect.top) * scaleY;
+      
+      points.value.push({x, y});
+      
+      // 绘制点
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#00FF00';
+      ctx.beginPath();
+      ctx.arc(x, y, 1, 0, Math.PI * 2);
+      ctx.fill();
+      
+      // 绘制连线
+      if (points.value.length > 1) {
+        ctx.strokeStyle = '#00FF00';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(points.value[points.value.length-2].x, points.value[points.value.length-2].y);
+        ctx.lineTo(x, y);
+        ctx.stroke();
+      }
+    };
+    
+    const handleMouseMove = (e) => {
+      if (!isDrawing.value || points.value.length === 0) return;
+      
+      const canvas = drawingCanvas.value;
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = canvas.width / rect.width;
+      const scaleY = canvas.height / rect.height;
+      
+      const x = (e.clientX - rect.left) * scaleX;
+      const y = (e.clientY - rect.top) * scaleY;
+      
+      // 绘制临时线
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      
+      // 重绘所有点
+      points.value.forEach(point => {
+        ctx.fillStyle = '#00FF00';
+        ctx.beginPath();
+        ctx.arc(point.x, point.y, 1, 0, Math.PI * 2);
+        ctx.fill();
+      });
+      
+      // 重绘所有线
+      if (points.value.length > 1) {
+        ctx.strokeStyle = '#00FF00';
+        ctx.lineWidth = 1;
+        for (let i = 1; i < points.value.length; i++) {
+          ctx.beginPath();
+          ctx.moveTo(points.value[i-1].x, points.value[i-1].y);
+          ctx.lineTo(points.value[i].x, points.value[i].y);
+          ctx.stroke();
+        }
+      }
+      
+      // 绘制临时线
+      if (points.value.length > 0) {
+        ctx.strokeStyle = '#00FF00';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(points.value[points.value.length-1].x, points.value[points.value.length-1].y);
+        ctx.lineTo(x, y);
+        ctx.stroke();
+      }
+    };
+    
+    const handleRightClick = () => {
+      if (!isDrawing.value || points.value.length < (areaForm.config_type === 'area' ? 3 : 2)) return;
+      
+      const ctx = drawingCanvas.value.getContext('2d');
+      ctx.strokeStyle = '#00FF00';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(points.value[0].x, points.value[0].y);
+      for (let i = 1; i < points.value.length; i++) {
+        ctx.lineTo(points.value[i].x, points.value[i].y);
+      }
+      if (areaForm.config_type === 'area') {
+        ctx.closePath();
+      }
+      ctx.stroke();
+      
+      // 生成坐标字符串
+      const coords = points.value.flatMap(p => [p.x, p.y]);
+      areaForm.coordinates = coords.join(',');
+      
+      isDrawing.value = false;
+    };
+    
+    // 保存区域配置
+    const saveAreaConfig = async () => {
+      try {
+        // 验证坐标格式
+        const coords = areaForm.coordinates.split(',').map(Number);
+        if (coords.length < 6 || coords.some(isNaN)) {
+          ElMessage.error('请绘制有效的多边形区域');
+          return;
+        }
+        // 调用API保存区域配置
+        console.log('coords', coords);
+        // await detectionConfigApi.updateConfig(currentConfigId.value, {
+        //   area_coordinates: coords
+        // });
+        
+        ElMessage.success('区域配置保存成功');
+        areaModalVisible.value = false;
+        // loadConfigList();
+      } catch (error) {
+        ElMessage.error('保存失败: ' + error.message);
+      }
+    };
     // 表单状态
     const formState = reactive({
       config_id: null,
@@ -487,6 +1065,25 @@ export default defineComponent({
       formState,
       rules,
       targetClasses,
+      areaModalVisible,
+      areaForm,
+      previewLoading,
+      previewError,
+      previewStream,
+      currentFrame,
+      showFallbackImage,
+      onVideoLoaded,
+      retryPreview,
+      stopPreview,
+      saveAreaConfig,
+      setInterestArea,
+      startDrawing,
+      clearDrawing,
+      handleMouseDown,
+      handleMouseMove,
+      handleRightClick,
+      videoRef,
+      drawingCanvas,
       updateTargetClasses,
       getModelTypeName,
       getDeviceName,
@@ -525,4 +1122,89 @@ export default defineComponent({
   display: flex;
   justify-content: flex-end;
 }
-</style> 
+
+.video-preview-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 400px;
+  background-color: #f5f7fa;
+  border-radius: 4px;
+}
+
+.video-placeholder {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  color: #909399;
+}
+
+.loading-wrapper {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+}
+
+.loading-text {
+  margin-top: 10px;
+  color: #909399;
+}
+
+.error-wrapper {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  color: #f56c6c;
+  gap: 10px;
+}
+
+.video-wrapper {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border-radius: 4px;
+}
+
+.preview-video, .drawing-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.drawing-canvas {
+  z-index: 1;
+  cursor: crosshair;
+}
+
+.drawing-controls {
+  position: absolute;
+  bottom: 10px;
+  left: 10px;
+  z-index: 2;
+}
+
+.coordinate-hint {
+  font-size: 12px;
+  color: #909399;
+  margin-top: -10px;
+  margin-bottom: 10px;
+}
+
+.fallback-image {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background-color: #000;
+  display: none;
+}
+</style>

@@ -674,6 +674,22 @@ class DetectionConfigResponse(DetectionConfigBase):
 
     class Config:
         from_attributes = True
+class DetectionConfigDetailResponse(DetectionConfigBase):
+    config_id: str
+    device_name: str
+    device_type: str
+    ip_address: str
+    port: int
+    username: str
+    password: str
+    models_name: str
+    models_type: str
+    created_at: datetime
+    updated_at: datetime
+    created_by: Optional[str] = None
+
+    class Config:
+        from_attributes = True
 
 class DetectionConfigInfoResponse(DetectionConfigBase):
     config_id: str
@@ -744,7 +760,7 @@ class DetectionEventResponse(DetectionEventBase):
         from_attributes = True
 
 # 获取检测配置列表
-@router.get("/detection/configs", response_model=List[DetectionConfigInfoResponse])
+@router.get("/detection/configs", response_model=List[DetectionConfigDetailResponse])
 async def get_detection_configs(
     device_id: Optional[str] = None,
     enabled: Optional[bool] = None,
@@ -770,6 +786,11 @@ async def get_detection_configs(
             "config_id": config.config_id,
             "device_id": config.device_id,
             "device_name": config.device.device_name,
+            "device_type": config.device.device_type,
+            "ip_address": config.device.ip_address,
+            "port": config.device.port,
+            "username": config.device.username,
+            "password": config.device.password,
             "models_id": config.models_id,
             "models_name": config.model.models_name,
             "models_type": config.model.models_type,
@@ -826,8 +847,7 @@ async def get_detection_config(
 @router.post("/detection/configs", response_model=DetectionConfigResponse, tags=["检测配置"])
 async def create_detection_config(
     config: DetectionConfigCreate,
-    db: Session = Depends(get_db)
-):
+    db: Session = Depends(get_db)):
     """
     创建新的检测配置
     """
