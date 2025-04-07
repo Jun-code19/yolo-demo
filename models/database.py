@@ -137,6 +137,8 @@ class DetectionConfig(Base):
     save_mode = Column(Enum(SaveMode), default=SaveMode.screenshot)
     save_duration = Column(Integer, default=10)
     max_storage_days = Column(Integer, default=30)
+    area_coordinates = Column(JSONB)  # 新增字段，用于存储区域坐标
+    area_type = Column(Text, default="none")  # 新增字段，用于存储区域类型(拌线/区域)
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
     created_by = Column(String(64), ForeignKey('users.user_id'))

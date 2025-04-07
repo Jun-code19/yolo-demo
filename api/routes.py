@@ -641,6 +641,13 @@ def toggle_models_active(models_id: str, active: bool, db: Session = Depends(get
     
     return {"message": f"Model {'activated' if active else 'deactivated'} successfully"}
 
+class Point(BaseModel):
+    x: float
+    y: float
+
+class AreaCoordinates(BaseModel):
+    type: str
+    points: List[Point]  # 使用 Point 模型来表示坐标点
 # 添加检测配置的Pydantic模型
 class DetectionConfigBase(BaseModel):
     device_id: str
@@ -665,6 +672,8 @@ class DetectionConfigUpdate(BaseModel):
     save_mode: Optional[str] = None
     save_duration: Optional[int] = None
     max_storage_days: Optional[int] = None
+    area_type:Optional[str] = None
+    area_coordinates:Optional[AreaCoordinates] = None
 
 class DetectionConfigResponse(DetectionConfigBase):
     config_id: str
@@ -674,6 +683,7 @@ class DetectionConfigResponse(DetectionConfigBase):
 
     class Config:
         from_attributes = True
+
 class DetectionConfigDetailResponse(DetectionConfigBase):
     config_id: str
     device_name: str
@@ -684,6 +694,8 @@ class DetectionConfigDetailResponse(DetectionConfigBase):
     password: str
     models_name: str
     models_type: str
+    area_type: Optional[str] = None
+    area_coordinates: dict # 定义为列表，包含坐标对
     created_at: datetime
     updated_at: datetime
     created_by: Optional[str] = None
@@ -782,6 +794,9 @@ async def get_detection_configs(
     # 数据转换，确保枚举值被正确处理
     result = []
     for config in configs:
+
+        area_coordinates = config.area_coordinates or {}  # 确保不为 None
+
         config_dict = {
             "config_id": config.config_id,
             "device_id": config.device_id,
@@ -801,6 +816,8 @@ async def get_detection_configs(
             "save_mode": config.save_mode.value if hasattr(config.save_mode, "value") else config.save_mode,
             "save_duration": config.save_duration,
             "max_storage_days": config.max_storage_days,
+            "area_type": config.area_type,
+            "area_coordinates": area_coordinates,
             "created_at": config.created_at,
             "updated_at": config.updated_at,
             "created_by": config.created_by
@@ -955,7 +972,19 @@ async def update_detection_config(
     
     if config_update.max_storage_days is not None:
         db_config.max_storage_days = config_update.max_storage_days
+
+    if config_update.area_type is not None:  
+        db_config.area_type = config_update.area_type
+
+    if config_update.area_coordinates is not None:  
+        # area_coordinates = config_update.area_coordinates
+        # if area_coordinates and isinstance(area_coordinates, dict) and "points" in area_coordinates and len(area_coordinates["points"]) > 0:
+        #     db_config.area_coordinates = area_coordinates
+        # else:
+        #     raise HTTPException(status_code=422, detail="Invalid area coordinates")
+        db_config.area_coordinates = config_update.area_coordinates.dict()
     
+
     # 更新时间戳
     db_config.updated_at = datetime.now()
     
@@ -977,7 +1006,8 @@ async def update_detection_config(
         "max_storage_days": db_config.max_storage_days,
         "created_at": db_config.created_at,
         "updated_at": db_config.updated_at,
-        "created_by": db_config.created_by
+        "created_by": db_config.created_by,
+        "area_type": db_config.area_type
     }
     
     return config_dict

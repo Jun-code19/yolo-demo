@@ -63,12 +63,12 @@
         <el-table-column label="操作" min-width="120">
           <template #default="scope">
             <el-space>
-              <el-button type="warning" size="small" @click="scope.row.enabled? null : setInterestArea(scope.row)"
-              :disabled="scope.row.enabled"> <!-- 禁用按钮 -->
+              <el-button type="warning" size="small" @click="scope.row.enabled ? null : setInterestArea(scope.row)"
+                :disabled="scope.row.enabled"> <!-- 禁用按钮 -->
                 区域
               </el-button><!-- 设置感兴趣区域按钮 -->
               <el-button type="primary" size="small" @click="scope.row.enabled ? null : editConfig(scope.row)"
-              :disabled="scope.row.enabled"> <!-- 禁用按钮 -->
+                :disabled="scope.row.enabled"> <!-- 禁用按钮 -->
                 编辑
               </el-button>
               <el-button :type="scope.row.enabled ? 'danger' : 'success'" size="small"
@@ -101,7 +101,8 @@
 
         <!-- 模型选择 -->
         <el-form-item label="检测模型" prop="models_id">
-          <el-select v-model="formState.models_id" placeholder="请选择检测模型" @change="updateTargetClasses" style="width: 100%">
+          <el-select v-model="formState.models_id" placeholder="请选择检测模型" @change="updateTargetClasses"
+            style="width: 100%">
             <el-option v-for="model in modelList" :key="model.models_id"
               :label="`${model.models_name} (${getModelTypeName(model.models_type)})`" :value="model.models_id" />
           </el-select>
@@ -124,8 +125,9 @@
         <!-- 目标类别 -->
         <el-form-item label="目标类别" prop="target_classes">
           <el-select v-model="formState.target_classes" multiple placeholder="请选择要检测的目标类别" style="width: 100%"
-            collapse-tags collapse-tags-tooltip  :max-collapse-tags="4">
-            <el-option v-for="(classItem, index) in targetClasses" :key="classItem.value" :label="classItem.label" :value="classItem.value" />
+            collapse-tags collapse-tags-tooltip :max-collapse-tags="4">
+            <el-option v-for="(classItem, index) in targetClasses" :key="classItem.value" :label="classItem.label"
+              :value="classItem.value" />
           </el-select>
         </el-form-item>
 
@@ -175,8 +177,7 @@
     </el-dialog>
 
     <!-- 区域设置对话框 -->
-    <el-dialog v-model="areaModalVisible" title="感兴趣区域设置" width="800px" destroy-on-close
-    @close="stopPreview">
+    <el-dialog v-model="areaModalVisible" title="感兴趣区域设置" width="800px" destroy-on-close @close="stopPreview">
       <el-form :model="areaForm" label-position="top">
         <!-- 配置类型 -->
         <el-form-item label="配置类型">
@@ -192,27 +193,25 @@
             <div class="loading-text">正在连接设备，请稍候...</div>
           </div>
           <div v-else-if="previewError" class="error-wrapper">
-            <el-icon :size="64"><CircleClose /></el-icon>
+            <el-icon :size="64">
+              <CircleClose />
+            </el-icon>
             <p>{{ previewError }}</p>
             <el-button @click="retryPreview">重试</el-button>
           </div>
           <div v-else-if="!previewStream" class="video-placeholder">
-            <el-icon :size="64"><VideoCamera /></el-icon>
+            <el-icon :size="64">
+              <VideoCamera />
+            </el-icon>
             <p>等待视频流连接...</p>
           </div>
           <div v-else class="video-wrapper">
-            <video ref="videoRef" class="preview-video" autoplay muted @loadedmetadata="onVideoLoaded">              
+            <video ref="videoRef" class="preview-video" autoplay muted @loadedmetadata="onVideoLoaded">
             </video>
             <!-- 备用图像显示 -->
-            <img 
-              v-if="currentFrame" 
-              :src="currentFrame" 
-              class="fallback-image" 
-              :style="{ display: showFallbackImage ? 'block' : 'none' }"
-            />
-            <canvas ref="drawingCanvas" class="drawing-canvas" 
-              @mousedown="handleMouseDown"
-              @mousemove="handleMouseMove"
+            <img v-if="currentFrame" :src="currentFrame" class="fallback-image"
+              :style="{ display: showFallbackImage ? 'block' : 'none' }" />
+            <canvas ref="drawingCanvas" class="drawing-canvas" @mousedown="handleMouseDown" @mousemove="handleMouseMove"
               @contextmenu.prevent="handleRightClick">
             </canvas>
             <div class="drawing-controls">
@@ -221,19 +220,16 @@
             </div>
           </div>
         </div>
-        
+
         <el-form-item label="区域坐标">
-          <el-input 
-            v-model="areaForm.coordinates"
-            placeholder="绘制完成后自动生成坐标"
-            readonly
-          />
+          <el-input v-model="coordinatesDisplay" placeholder="绘制完成后自动生成坐标" readonly />
         </el-form-item>
         <div class="coordinate-hint">提示：左键添加顶点，右键完成绘制</div>
       </el-form>
-      
+
       <template #footer>
         <span class="dialog-footer">
+          <el-button type="primary" @click="loadArea">查看</el-button>
           <el-button @click="areaModalVisible = false">取消</el-button>
           <el-button type="primary" @click="saveAreaConfig">保存</el-button>
         </span>
@@ -243,7 +239,7 @@
 </template>
 
 <script>
-import { defineComponent, ref, reactive, onMounted } from 'vue';
+import { defineComponent, ref, reactive, onMounted, computed } from 'vue';
 import { ElMessage } from 'element-plus';
 import { Plus } from '@element-plus/icons-vue';
 import deviceApi from '@/api/device'
@@ -278,13 +274,31 @@ export default defineComponent({
     // 区域表单数据
     const areaForm = reactive({
       config_type: 'area',
-      coordinates: ''
+      coordinates: {
+        type: 'polygon',
+        points: []
+      }
     });
-    
+
+    // 坐标显示计算属性
+    const coordinatesDisplay = computed(() => {
+      if (!areaForm.coordinates || !areaForm.coordinates.points) return '';
+      return JSON.stringify(areaForm.coordinates.points.map(p => [p.x, p.y]));
+    });
+
     // 绘制相关状态
     const isDrawing = ref(false);
     const points = ref([]);
     const drawingCanvas = ref(null);
+
+    // 坐标转换工具函数
+    // const getCanvasCoordinates = (event) => {
+    //   const rect = drawingCanvas.value.getBoundingClientRect();
+    //   return {
+    //     x: event.clientX - rect.left,
+    //     y: event.clientY - rect.top
+    //   };
+    // };
 
     // 预览相关
     const previewLoading = ref(false)
@@ -300,7 +314,7 @@ export default defineComponent({
     // 视频加载完成
     const onVideoLoaded = () => {
       if (!videoRef.value) return
-      
+
       const { videoWidth, videoHeight } = videoRef.value
       streamResolution.value = `${videoWidth}x${videoHeight}`
     }
@@ -320,14 +334,14 @@ export default defineComponent({
         ws.value.close()
         ws.value = null
       }
-      
+
       // 停止视频流
       if (videoRef.value && videoRef.value.srcObject) {
         const tracks = videoRef.value.srcObject.getTracks()
         tracks.forEach(track => track.stop())
         videoRef.value.srcObject = null
       }
-      
+
       // 重置状态
       previewStream.value = null
       streamResolution.value = ''
@@ -335,7 +349,18 @@ export default defineComponent({
     // 设置感兴趣区域方法
     const setInterestArea = (config) => {
       currentConfigId.value = config.config_id;
-      areaForm.coordinates = config.area_coordinates?.join(',') || '';
+      // areaForm.coordinates = config.area_coordinates?.join(',') || '';
+      // 检查 area_coordinates 是否有效
+      if (config.area_coordinates && Object.keys(config.area_coordinates).length > 0) {
+        areaForm.coordinates = config.area_coordinates; // 直接使用对象
+        if (drawingCanvas.value) {
+          drawPolygon(areaForm.coordinates.points);
+        }
+      } else {
+        areaForm.coordinates = { type: 'polygon', points: [] }; // 设置默认值
+      }
+      areaForm.config_type = config.area_type;
+
       areaModalVisible.value = true;
 
       currentDevice.value = config
@@ -345,39 +370,60 @@ export default defineComponent({
       currentFrame.value = null
       showFallbackImage.value = true
       streamResolution.value = ''
-      
+
       // 清除之前的预览状态
       if (videoRef.value && videoRef.value.srcObject) {
         const tracks = videoRef.value.srcObject.getTracks()
         tracks.forEach(track => track.stop())
         videoRef.value.srcObject = null
       }
-      
+
       // 延迟一帧，确保DOM加载完成再开始预览
       setTimeout(() => {
         startPreview()
       }, 0)
     };
+
+    const drawPolygon = (points) => {
+      if (!drawingCanvas.value) {
+        console.error('Canvas 未初始化')
+        return
+      }
+      try{
+        // 使用 Canvas 或其他绘图库绘制多边形
+        const canvas = drawingCanvas.value;
+        const ctx = canvas.getContext('2d');
+        ctx.beginPath();
+        ctx.moveTo(points[0].x * drawingCanvas.value.offsetWidth, points[0].y * drawingCanvas.value.offsetHeight);
+        points.forEach(point => {
+          ctx.lineTo(point.x * drawingCanvas.value.offsetWidth, point.y * drawingCanvas.value.offsetHeight);
+        });
+        ctx.closePath();
+        ctx.strokeStyle = '#00ff00';
+        ctx.stroke();
+      }catch{}
+    };
+
     // 开始预览
     const startPreview = async () => {
       try {
         if (!currentDevice.value) {
           throw new Error('设备信息不完整')
         }
-        
+
         // 构建流地址
         const { device_type, ip_address, port, username, password } = currentDevice.value
-        
+
         if (device_type === 'camera') {
           // 构建RTSP URL（根据摄像头类型可能需要调整URL格式）
           const rtspUrl = `rtsp://${username}:${password}@${ip_address}:${port}/cam/realmonitor?channel=1&subtype=0`
-          
+
           // 使用WebSocket连接服务器请求代理流
           await connectToWebSocket(rtspUrl)
         } else {
           throw new Error('不支持的设备类型')
         }
-        
+
         previewLoading.value = false
       } catch (error) {
         // console.error('预览失败:', error)
@@ -393,34 +439,34 @@ export default defineComponent({
           if (ws.value && ws.value.readyState === WebSocket.OPEN) {
             ws.value.close()
           }
-          
+
           // 创建新的WebSocket连接
           ws.value = new WebSocket('ws://localhost:8765/ws')
-          
+
           // 连接超时
           const connectionTimeout = setTimeout(() => {
             reject(new Error('连接超时'))
           }, 10000)
-          
+
           ws.value.onopen = () => {
             clearTimeout(connectionTimeout)
             // console.log('WebSocket已连接，正在发送连接请求...')
-            
+
             // 发送连接请求
             ws.value.send(JSON.stringify({
               type: 'connect',
               client_type: 'preview_client'
             }))
           }
-          
+
           ws.value.onmessage = handleWsMessage
-          
+
           ws.value.onerror = (error) => {
             clearTimeout(connectionTimeout)
             // console.error('WebSocket错误:', error)
             reject(new Error('WebSocket连接错误'))
           }
-          
+
           ws.value.onclose = () => {
             // console.log('WebSocket已关闭')
             if (areaModalVisible.value && !previewError.value) {
@@ -438,12 +484,12 @@ export default defineComponent({
       try {
         const message = JSON.parse(event.data)
         // console.log('接收到WebSocket消息:', message.type)
-        
+
         // 根据消息类型处理
         switch (message.type) {
           case 'connect_confirm':
             // console.log('WebSocket连接确认')
-            
+
             // 发送预览请求
             if (ws.value && ws.value.readyState === WebSocket.OPEN && currentDevice.value) {
               // console.log('发送预览请求')
@@ -456,32 +502,32 @@ export default defineComponent({
               )
             }
             break
-            
+
           case 'preview_start':
             // console.log('预览流已开始', message)
             previewLoading.value = false
-            
+
             // 如果预览流还未开始，则启动
             if (!previewStream.value) {
               // 确保状态被正确设置
               startVideoStream()
             }
             break
-            
+
           case 'stream_data':
             // 处理流数据
             handleStreamData(message)
             break
-            
+
           case 'error':
             // console.error('服务器错误:', message.message)
             previewLoading.value = false
             previewError.value = `服务器错误: ${message.message}`
             break
-            
+
           default:
             break
-            // console.log('未处理的消息类型:', message.type)
+          // console.log('未处理的消息类型:', message.type)
         }
       } catch (error) {
         // console.error('处理WebSocket消息错误:', error)
@@ -490,19 +536,19 @@ export default defineComponent({
     // 开始视频流播放
     const startVideoStream = () => {
       // console.log('开始初始化视频流播放...');
-      
+
       try {
         // 无论videoRef是否存在，都先将预览状态设置为true
         previewLoading.value = false;
         previewStream.value = true;
         // console.log('视频预览状态已更新: previewStream =', previewStream.value);
-        
+
         // 检查浏览器支持
         if (!window.MediaSource) {
           // console.warn('浏览器不支持MediaSource API，将使用备用显示模式');
           showFallbackImage.value = true;
         }
-        
+
         // 如果videoRef已存在，可以进行其他初始化
         // if (videoRef.value) {
         //   console.log('videoRef已存在，可以初始化视频元素');
@@ -517,42 +563,42 @@ export default defineComponent({
     // 处理流数据
     const handleStreamData = (data) => {
       // console.log('收到流数据:', data.type, data.format || '(无格式信息)');
-      
+
       // 确保预览状态已初始化（双重保险）
       if (!previewStream.value) {
         // console.log('预览流状态未初始化，自动初始化');
         previewLoading.value = false;
         previewStream.value = true;
       }
-      
+
       try {
         // 检查数据格式
         if (data.format === 'jpeg' && data.data) {
           // console.log(`处理JPEG图像数据: ${data.width}x${data.height}, 帧ID:${data.frame_id}`);
-          
+
           // 基于Base64图像创建图像URL
           const imageData = `data:image/jpeg;base64,${data.data}`;
-          
+
           // 更新当前帧，用于备用显示方式
           currentFrame.value = imageData;
-          
+
           // 更新分辨率信息（无论显示模式如何）
           if (!streamResolution.value && data.width && data.height) {
             streamResolution.value = `${data.width}x${data.height}`;
           }
-          
+
           // 默认使用备用图像显示方式，简单可靠
           if (!videoRef.value || !videoRef.value.parentElement) {
             // console.log('使用备用图像显示模式 - videoRef不可用');
             showFallbackImage.value = true;
             return;
           }
-          
+
           // 如果明确使用备用图像显示方式，则直接返回
           if (showFallbackImage.value) {
             return;
           }
-          
+
           // 使用IMG元素更新视频帧
           const img = new Image();
           img.onload = () => {
@@ -562,7 +608,7 @@ export default defineComponent({
               showFallbackImage.value = true;
               return;
             }
-            
+
             try {
               // 使用Canvas绘制图像
               const canvas = document.createElement('canvas');
@@ -570,7 +616,7 @@ export default defineComponent({
               canvas.height = data.height;
               const ctx = canvas.getContext('2d');
               ctx.drawImage(img, 0, 0);
-              
+
               // 直接将canvas内容显示在video元素上
               if (!videoRef.value.srcObject) {
                 // 首次创建流
@@ -589,7 +635,7 @@ export default defineComponent({
                   const newStream = canvas.captureStream(15);
                   const oldStream = videoRef.value.srcObject;
                   videoRef.value.srcObject = newStream;
-                  
+
                   // 停止旧流的轨道
                   if (oldStream && oldStream.getTracks) {
                     oldStream.getTracks().forEach(track => track.stop());
@@ -604,12 +650,12 @@ export default defineComponent({
               showFallbackImage.value = true;
             }
           };
-          
+
           img.onerror = (err) => {
             // console.error('图像加载失败:', err);
             previewError.value = '图像加载失败，请检查网络连接';
           };
-          
+
           img.src = imageData;
         } else if (data.data && !data.format) {
           // console.log('收到二进制数据，尝试作为MP4片段处理');
@@ -639,16 +685,21 @@ export default defineComponent({
     // 构建RTSP URL
     const buildRtspUrl = () => {
       if (!currentDevice.value) return '';
-      
+
       return `rtsp://${currentDevice.value.username}:${currentDevice.value.password}@${currentDevice.value.ip_address}:${currentDevice.value.port}/cam/realmonitor?channel=1&subtype=0`
     }
     // 绘制相关方法
     const startDrawing = () => {
-      isDrawing.value = true;
-      points.value = [];
-      areaForm.coordinates = '';
+      if(areaForm.config_type){
+        isDrawing.value = true;
+        points.value = [];
+        areaForm.coordinates = '';
+      }else{
+        ElMessage.info('请选择画线类型');
+      }
+      
     };
-    
+
     const clearDrawing = () => {
       const canvas = drawingCanvas.value;
       const ctx = canvas.getContext('2d');
@@ -656,53 +707,53 @@ export default defineComponent({
       points.value = [];
       areaForm.coordinates = '';
     };
-    
+
     const handleMouseDown = (e) => {
       if (!isDrawing.value) return;
-      
+
       const canvas = drawingCanvas.value;
       const rect = canvas.getBoundingClientRect();
       const scaleX = canvas.width / rect.width;
       const scaleY = canvas.height / rect.height;
-      
+
       const x = (e.clientX - rect.left) * scaleX;
       const y = (e.clientY - rect.top) * scaleY;
-      
-      points.value.push({x, y});
-      
+
+      points.value.push({ x, y });
+
       // 绘制点
       const ctx = canvas.getContext('2d');
       ctx.fillStyle = '#00FF00';
       ctx.beginPath();
       ctx.arc(x, y, 1, 0, Math.PI * 2);
       ctx.fill();
-      
+
       // 绘制连线
       if (points.value.length > 1) {
         ctx.strokeStyle = '#00FF00';
         ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.moveTo(points.value[points.value.length-2].x, points.value[points.value.length-2].y);
+        ctx.moveTo(points.value[points.value.length - 2].x, points.value[points.value.length - 2].y);
         ctx.lineTo(x, y);
         ctx.stroke();
       }
     };
-    
+
     const handleMouseMove = (e) => {
       if (!isDrawing.value || points.value.length === 0) return;
-      
+
       const canvas = drawingCanvas.value;
       const rect = canvas.getBoundingClientRect();
       const scaleX = canvas.width / rect.width;
       const scaleY = canvas.height / rect.height;
-      
+
       const x = (e.clientX - rect.left) * scaleX;
       const y = (e.clientY - rect.top) * scaleY;
-      
+
       // 绘制临时线
       const ctx = canvas.getContext('2d');
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      
+
       // 重绘所有点
       points.value.forEach(point => {
         ctx.fillStyle = '#00FF00';
@@ -710,73 +761,86 @@ export default defineComponent({
         ctx.arc(point.x, point.y, 1, 0, Math.PI * 2);
         ctx.fill();
       });
-      
+
       // 重绘所有线
       if (points.value.length > 1) {
         ctx.strokeStyle = '#00FF00';
         ctx.lineWidth = 1;
         for (let i = 1; i < points.value.length; i++) {
           ctx.beginPath();
-          ctx.moveTo(points.value[i-1].x, points.value[i-1].y);
+          ctx.moveTo(points.value[i - 1].x, points.value[i - 1].y);
           ctx.lineTo(points.value[i].x, points.value[i].y);
           ctx.stroke();
         }
       }
-      
+
       // 绘制临时线
       if (points.value.length > 0) {
         ctx.strokeStyle = '#00FF00';
         ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.moveTo(points.value[points.value.length-1].x, points.value[points.value.length-1].y);
+        ctx.moveTo(points.value[points.value.length - 1].x, points.value[points.value.length - 1].y);
         ctx.lineTo(x, y);
         ctx.stroke();
       }
     };
-    
+
     const handleRightClick = () => {
       if (!isDrawing.value || points.value.length < (areaForm.config_type === 'area' ? 3 : 2)) return;
-      
+
       const ctx = drawingCanvas.value.getContext('2d');
       ctx.strokeStyle = '#00FF00';
       ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.moveTo(points.value[0].x, points.value[0].y);
-      for (let i = 1; i < points.value.length; i++) {
-        ctx.lineTo(points.value[i].x, points.value[i].y);
-      }
+
+      // 绘制路径
+      points.value.forEach((p, index) => {
+        if (index === 0) ctx.moveTo(p.x, p.y);
+        else ctx.lineTo(p.x, p.y);
+      });
+
+      // 自动闭合多边形
       if (areaForm.config_type === 'area') {
-        ctx.closePath();
+        ctx.lineTo(points.value[0].x, points.value[0].y);
       }
       ctx.stroke();
-      
-      // 生成坐标字符串
-      const coords = points.value.flatMap(p => [p.x, p.y]);
-      areaForm.coordinates = coords.join(',');
-      
+
+      // 生成标准化坐标
+      areaForm.coordinates = {
+        type: 'polygon',
+        points: points.value.map(p => ({
+          x: p.x / drawingCanvas.value.offsetWidth,
+          y: p.y / drawingCanvas.value.offsetHeight
+        }))
+      };
+
       isDrawing.value = false;
     };
-    
+
     // 保存区域配置
     const saveAreaConfig = async () => {
       try {
-        // 验证坐标格式
-        const coords = areaForm.coordinates.split(',').map(Number);
-        if (coords.length < 6 || coords.some(isNaN)) {
+        if (!areaForm.coordinates || !areaForm.coordinates.points) {
+          throw new Error('无效的坐标数据');
+        }
+
+        // 几何有效性验证
+        if (areaForm.coordinates.points.length < (areaForm.config_type === 'area' ? 3 : 2)) {
           ElMessage.error('请绘制有效的多边形区域');
           return;
         }
+        // console.log(JSON.stringify(areaForm.coordinates))
         // 调用API保存区域配置
-        console.log('coords', coords);
-        // await detectionConfigApi.updateConfig(currentConfigId.value, {
-        //   area_coordinates: coords
-        // });
-        
+        await detectionConfigApi.updateConfig(currentConfigId.value, {
+          area_type:areaForm.config_type,
+          area_coordinates: areaForm.coordinates
+        });
+
         ElMessage.success('区域配置保存成功');
         areaModalVisible.value = false;
-        // loadConfigList();
+        loadConfigList();
       } catch (error) {
-        ElMessage.error('保存失败: ' + error.message);
+        ElMessage.error(`保存失败: ${error.message}`);
       }
     };
     // 表单状态
@@ -864,7 +928,7 @@ export default defineComponent({
     // 获取保存模式标签
     const getSaveModeLabel = (saveMode) => {
       const map = {
-        'none':'暂无',
+        'none': '暂无',
         'screenshot': '截图',
         'video': '视频',
         'both': '截图+视频'
@@ -875,7 +939,7 @@ export default defineComponent({
     // 获取保存模式标签类型
     const getSaveModeType = (saveMode) => {
       const map = {
-        'none':'warning',
+        'none': 'warning',
         'screenshot': 'success',
         'video': 'primary',
         'both': 'info'
@@ -889,6 +953,7 @@ export default defineComponent({
       try {
         const response = await detectionConfigApi.getConfigs();
         configList.value = response.data;
+        console.log(response.data)
       } catch (error) {
         ElMessage.error('获取配置列表失败: ' + error.message);
       } finally {
@@ -1052,8 +1117,15 @@ export default defineComponent({
         ElMessage.error('删除失败: ' + error.message);
       }
     };
-    
+
+    const loadArea = () =>{
+      if (drawingCanvas.value) {
+          drawPolygon(areaForm.coordinates.points);
+        }
+    }
+
     return {
+      loadArea,
       loading,
       submitLoading,
       configList,
@@ -1064,6 +1136,7 @@ export default defineComponent({
       formRef,
       formState,
       rules,
+      coordinatesDisplay,
       targetClasses,
       areaModalVisible,
       areaForm,
@@ -1170,7 +1243,8 @@ export default defineComponent({
   border-radius: 4px;
 }
 
-.preview-video, .drawing-canvas {
+.preview-video,
+.drawing-canvas {
   position: absolute;
   top: 0;
   left: 0;
@@ -1200,8 +1274,7 @@ export default defineComponent({
 .fallback-image {
   position: absolute;
   top: 0;
-  left: 0;
-  width: 100%;
+  left: 0; width: 100%;
   height: 100%;
   object-fit: contain;
   background-color: #000;
