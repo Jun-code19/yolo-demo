@@ -646,8 +646,11 @@ class Point(BaseModel):
     y: float
 
 class AreaCoordinates(BaseModel):
-    type: str
-    points: List[Point]  # 使用 Point 模型来表示坐标点
+    type: Optional[str] = None
+    points: Optional[List[Point]] = None  # 使用 Point 模型来表示坐标点
+    subtype: Optional[str] = None  # 可选值：directional（方向检测）、simple（普通检测）
+    direction: Optional[str] = None  # 方向（left_right/right_left/top_bottom/bottom_top）
+    detect_mode: Optional[str] = None  # 检测模式：intersection（相交）、center_cross（中心点过线）、both
 # 添加检测配置的Pydantic模型
 class DetectionConfigBase(BaseModel):
     device_id: str
@@ -672,7 +675,7 @@ class DetectionConfigUpdate(BaseModel):
     save_mode: Optional[str] = None
     save_duration: Optional[int] = None
     max_storage_days: Optional[int] = None
-    area_type:Optional[str] = None
+    # area_type:Optional[str] = None
     area_coordinates:Optional[AreaCoordinates] = None
 
 class DetectionConfigResponse(DetectionConfigBase):
@@ -973,8 +976,8 @@ async def update_detection_config(
     if config_update.max_storage_days is not None:
         db_config.max_storage_days = config_update.max_storage_days
 
-    if config_update.area_type is not None:  
-        db_config.area_type = config_update.area_type
+    # if config_update.area_type is not None:  
+    #     db_config.area_type = config_update.area_type
 
     if config_update.area_coordinates is not None:  
         # area_coordinates = config_update.area_coordinates
@@ -1006,8 +1009,8 @@ async def update_detection_config(
         "max_storage_days": db_config.max_storage_days,
         "created_at": db_config.created_at,
         "updated_at": db_config.updated_at,
-        "created_by": db_config.created_by,
-        "area_type": db_config.area_type
+        "created_by": db_config.created_by
+        # "area_type": db_config.area_type
     }
     
     return config_dict

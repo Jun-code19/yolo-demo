@@ -181,7 +181,7 @@
       <el-form :model="areaForm" label-position="top">
         <!-- 配置类型 -->
         <el-form-item label="配置类型">
-          <el-radio-group v-model="areaForm.config_type">
+          <el-radio-group v-model="areaForm.coordinates.type">
             <el-radio value="area">区域设置</el-radio>
             <el-radio value="line">拌线设置</el-radio>
           </el-radio-group>
@@ -273,10 +273,13 @@ export default defineComponent({
 
     // 区域表单数据
     const areaForm = reactive({
-      config_type: 'area',
+      // config_type: 'area',
       coordinates: {
-        type: 'polygon',
-        points: []
+        type: 'area',           // "line"或 "area"
+        points: [],                // 归一化坐标
+        subtype: "directional",    // 可选值：directional（方向检测）、simple（普通检测）
+        direction: "left_right",   // 方向（left_right/right_left/top_bottom/bottom_top）
+        detect_mode: "both"        // 检测模式：intersection（相交）、center_cross（中心点过线）、both
       }
     });
 
@@ -353,13 +356,14 @@ export default defineComponent({
       // 检查 area_coordinates 是否有效
       if (config.area_coordinates && Object.keys(config.area_coordinates).length > 0) {
         areaForm.coordinates = config.area_coordinates; // 直接使用对象
+        // areaForm.config_type = areaForm.coordinates.type;
         if (drawingCanvas.value) {
           drawPolygon(areaForm.coordinates.points);
         }
       } else {
-        areaForm.coordinates = { type: 'polygon', points: [] }; // 设置默认值
-      }
-      areaForm.config_type = config.area_type;
+        areaForm.coordinates = { type: 'area', points: [] }; // 设置默认值
+        // areaForm.config_type = null;
+      } 
 
       areaModalVisible.value = true;
 
@@ -394,9 +398,10 @@ export default defineComponent({
         const canvas = drawingCanvas.value;
         const ctx = canvas.getContext('2d');
         ctx.beginPath();
-        ctx.moveTo(points[0].x * drawingCanvas.value.offsetWidth, points[0].y * drawingCanvas.value.offsetHeight);
+        ctx.moveTo(points[0].x * drawingCanvas.value.width, points[0].y * drawingCanvas.value.height);
         points.forEach(point => {
-          ctx.lineTo(point.x * drawingCanvas.value.offsetWidth, point.y * drawingCanvas.value.offsetHeight);
+          // console.log(point.x * drawingCanvas.value.offsetWidth, point.y * drawingCanvas.value.offsetHeight)
+          ctx.lineTo(point.x * drawingCanvas.value.width, point.y * drawingCanvas.value.height);
         });
         ctx.closePath();
         ctx.strokeStyle = '#00ff00';
@@ -690,10 +695,10 @@ export default defineComponent({
     }
     // 绘制相关方法
     const startDrawing = () => {
-      if(areaForm.config_type){
+      if(areaForm.coordinates.type){
         isDrawing.value = true;
         points.value = [];
-        areaForm.coordinates = '';
+        areaForm.coordinates.points = [];
       }else{
         ElMessage.info('请选择画线类型');
       }
@@ -705,7 +710,7 @@ export default defineComponent({
       const ctx = canvas.getContext('2d');
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       points.value = [];
-      areaForm.coordinates = '';
+      areaForm.coordinates.points = [];
     };
 
     const handleMouseDown = (e) => {
@@ -786,7 +791,7 @@ export default defineComponent({
     };
 
     const handleRightClick = () => {
-      if (!isDrawing.value || points.value.length < (areaForm.config_type === 'area' ? 3 : 2)) return;
+      if (!isDrawing.value || points.value.length < (areaForm.coordinates.type === 'area' ? 3 : 2)) return;
 
       const ctx = drawingCanvas.value.getContext('2d');
       ctx.strokeStyle = '#00FF00';
@@ -800,41 +805,52 @@ export default defineComponent({
       });
 
       // 自动闭合多边形
-      if (areaForm.config_type === 'area') {
+      if (areaForm.coordinates.type === 'area') {
         ctx.lineTo(points.value[0].x, points.value[0].y);
       }
       ctx.stroke();
 
       // 生成标准化坐标
       areaForm.coordinates = {
-        type: 'polygon',
+        type: areaForm.coordinates.type,
         points: points.value.map(p => ({
-          x: p.x / drawingCanvas.value.offsetWidth,
-          y: p.y / drawingCanvas.value.offsetHeight
-        }))
+          x: p.x / drawingCanvas.value.width,
+          y: p.y / drawingCanvas.value.height
+        })),
+        // subtype: "directional",  
+        // direction: "left_right",  
+        // detect_mode: "both"     
       };
-
+      // console.log(areaForm)
       isDrawing.value = false;
     };
 
     // 保存区域配置
     const saveAreaConfig = async () => {
       try {
-        if (!areaForm.coordinates || !areaForm.coordinates.points) {
+        if (!areaForm.coordinates) { //|| !areaForm.coordinates.points
           throw new Error('无效的坐标数据');
         }
-
+        
         // 几何有效性验证
-        if (areaForm.coordinates.points.length < (areaForm.config_type === 'area' ? 3 : 2)) {
-          ElMessage.error('请绘制有效的多边形区域');
-          return;
+        // if (areaForm.coordinates.points.length < (areaForm.coordinates.type === 'area' ? 3 : 2)) {
+        //   ElMessage.error('请绘制有效的多边形区域');
+        //   return;
+        // }
+
+        if (areaForm.coordinates.points.length == 0){
+          // 调用API保存区域配置
+          await detectionConfigApi.updateConfig(currentConfigId.value, {
+            area_coordinates: {}
+          });
+        }else{
+          // 调用API保存区域配置
+          await detectionConfigApi.updateConfig(currentConfigId.value, {
+            area_coordinates: areaForm.coordinates
+          });
         }
-        // console.log(JSON.stringify(areaForm.coordinates))
-        // 调用API保存区域配置
-        await detectionConfigApi.updateConfig(currentConfigId.value, {
-          area_type:areaForm.config_type,
-          area_coordinates: areaForm.coordinates
-        });
+
+        
 
         ElMessage.success('区域配置保存成功');
         areaModalVisible.value = false;
@@ -953,7 +969,6 @@ export default defineComponent({
       try {
         const response = await detectionConfigApi.getConfigs();
         configList.value = response.data;
-        console.log(response.data)
       } catch (error) {
         ElMessage.error('获取配置列表失败: ' + error.message);
       } finally {
@@ -1120,6 +1135,7 @@ export default defineComponent({
 
     const loadArea = () =>{
       if (drawingCanvas.value) {
+          // areaForm.config_type = areaForm.coordinates.type;
           drawPolygon(areaForm.coordinates.points);
         }
     }

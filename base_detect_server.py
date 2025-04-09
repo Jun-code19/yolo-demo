@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 import concurrent.futures
 from threading import Lock  # 导入锁
 from src.tracker import ObjectTracker
+import colorsys
 
 from models.database import (
     SessionLocal, DetectionConfig, DetectionEvent, Device, 
@@ -38,7 +39,7 @@ class DetectionTask:
     """检测任务类，管理单个摄像机的检测过程"""
     
     def __init__(self, device_id: str, config_id: str, model_path: str, 
-                 confidence: float, models_type: str, target_class: List[str], save_mode: SaveMode, region_of_interest: Optional[List] = None):
+                 confidence: float, models_type: str, target_class: List[str], save_mode: SaveMode, area_coordinates:Optional[dict]=None):
         self.device_id = device_id
         self.config_id = config_id
         self.model_path = model_path
@@ -46,7 +47,13 @@ class DetectionTask:
         self.models_type = models_type
         self.target_class = target_class
         self.save_mode = save_mode
-        self.region_of_interest = region_of_interest
+        # self.region_of_interest = region_of_interest
+        # self.area_type = area_type  #区域或者拌线类型字段
+        self.area_coordinates = area_coordinates  #点坐标值，前端生成的归一化坐标
+        
+        self.class_colors = {}  # 用于存储每个类别的固定颜色
+        self.class_names = None  # 用于存储类别名称
+
         self.stop_event = threading.Event()
         self.model = None
         self.cap = None
@@ -81,6 +88,8 @@ class DetectionTask:
             self.device = torch.device(device)
             self.model.to(self.device)
             
+            self.class_names = self.model.names
+
             if device == 'cuda': 
                 # 使用半精度浮点数以提高性能
                 if hasattr(self.model, 'model'):
@@ -211,17 +220,19 @@ class DetectionTask:
                     if frame_count % skip_frame_count == 0:
                         # 如果设置了感兴趣区域，裁剪帧
                         detect_frame = frame_rgb.copy()
-                        if self.region_of_interest and isinstance(self.region_of_interest, list) and len(self.region_of_interest) == 4:
-                            try:
-                                x1, y1, x2, y2 = map(int, self.region_of_interest)
-                                # 添加边界检查
-                                h, w = detect_frame.shape[:2]
-                                x1, y1 = max(0, x1), max(0, y1)
-                                x2, y2 = min(w, x2), min(h, y2)
-                                if x1 < x2 and y1 < y2:  # 确保有效的区域
-                                    detect_frame = detect_frame[y1:y2, x1:x2]
-                            except Exception as e:
-                                logger.warning(f"裁剪感兴趣区域失败: {e}，使用完整帧")
+
+                        
+                        # if self.region_of_interest and isinstance(self.region_of_interest, list) and len(self.region_of_interest) == 4:
+                        #     try:
+                        #         x1, y1, x2, y2 = map(int, self.region_of_interest)
+                        #         # 添加边界检查
+                        #         h, w = detect_frame.shape[:2]
+                        #         x1, y1 = max(0, x1), max(0, y1)
+                        #         x2, y2 = min(w, x2), min(h, y2)
+                        #         if x1 < x2 and y1 < y2:  # 确保有效的区域
+                        #             detect_frame = detect_frame[y1:y2, x1:x2]
+                        #     except Exception as e:
+                        #         logger.warning(f"裁剪感兴趣区域失败: {e}，使用完整帧")
                         
                         # 执行检测
                         current_time = time.time()
@@ -231,7 +242,6 @@ class DetectionTask:
 
                             # 处理检测结果
                             detections = []
-                            detection = []
                             for r in results:
                                 boxes = r.boxes
                                 for box in boxes:
@@ -239,28 +249,26 @@ class DetectionTask:
                                     confidence = box.conf.item()
                                     class_id = int(box.cls.item())
                                     class_name = r.names[class_id]
-                                    
-                                    detections.append({
-                                        "bbox": [x1, y1, x2, y2],
-                                        "confidence": confidence,
-                                        "class_id": class_id,
-                                        "class_name": class_name
-                                    })
-                                    
-                            if detections and self.target_class and len(self.target_class) > 0:
-                                detection = [d for d in detections if str(d["class_id"]) in self.target_class]
-                            # # 判断是否需要创建检测事件
-                            if self.save_mode.value != 'none':
-                                if detection and (current_time - self.last_detection_time) > cooldown_period:
-                                    self.last_detection_time = current_time
-                                    self.save_detection_event(detect_frame, detections)
+                                    if str(class_id) in self.target_class:
+                                        detections.append({
+                                            "bbox": [x1, y1, x2, y2],
+                                            "confidence": confidence,
+                                            "class_id": class_id,
+                                            "class_name": class_name
+                                        })                          
                             
                             #没检测的目标发送原图
-                            if detection:
+                            if detections:
                                 if self.models_type == 'pose':
                                     # 向WebSocket客户端推送检测结果
-                                    self.broadcast_pose_result(self.display_pose_results(detect_frame, results[0]))
+                                    self.broadcast_img_result(self.display_pose_results(detect_frame, results[0]))
                                 else:
+                                    # 判断是否需要创建检测事件
+                                    if self.save_mode.value != 'none':
+                                        if detections and (current_time - self.last_detection_time) > cooldown_period:
+                                            self.last_detection_time = current_time
+                                            self.save_detection_event(detect_frame, detections)
+
                                     # 开启目标追踪功能
                                     # self.object_tracker.update(detections)
                                     #     # 传递显示框的状态到draw_tracks方法
@@ -270,11 +278,13 @@ class DetectionTask:
                                     #     show_boxes=True,  # 传递显示框的状态
                                     # )
                                     tracked_frame = detect_frame.copy()
+                                    img = self.display_detection_results(tracked_frame,results[0])
+                                    self.broadcast_img_result(img)
                                     # 向WebSocket客户端推送检测结果
-                                    self.broadcast_detection_result(tracked_frame, detections)
+                                    # self.broadcast_detection_result(tracked_frame, detections)
                             else:
                                 orgain_frame = detect_frame.copy()
-                                self.broadcast_pose_result(orgain_frame)
+                                self.broadcast_img_result(orgain_frame)
                             
                         except Exception as e:
                             logger.error(f"模型推理过程中出错: {e}")
@@ -309,7 +319,269 @@ class DetectionTask:
                 self.loop.close()
                 logger.info(f"事件循环已关闭: {self.config_id}")
     
-    def display_detection_results(self, img, results):
+    def detect_events(self, frame, boxes, roi): #检测路由分发
+        """根据ROI类型分发检测逻辑"""
+        if roi["type"] == "line":
+            return self.process_line_detection(frame, boxes, roi)
+        elif roi["type"] == "area":
+            return self.process_area_detection(frame, boxes, roi)
+        
+    def calculate_cross_product(p1, p2, point): #计算点相对于线段的向量叉积
+        """计算点相对于线段的向量叉积"""
+        v1 = (p2[0]-p1[0], p2[1]-p1[1])
+        v2 = (point[0]-p1[0], point[1]-p1[1])
+        return v1[0]*v2[1] - v1[1]*v2[0]
+
+    def determine_direction(cross, direction_vector): #根据叉积和方向向量判断方向
+        """根据叉积和方向向量判断方向"""
+        sign = np.sign(cross)
+        base_dir = "left" if np.dot(direction_vector, (1,0)) > 0 else "top"
+        return f"{base_dir}_{sign}"
+    
+    def normalize_points(self, points, frame_shape): #归一化坐标转换
+        """归一化坐标转换"""
+        h,w = frame_shape[:2]
+        return [(int(p['x']*w), int(p['y']*h)) for p in points]
+    
+    def normalize_polygon(points, frame_shape): #将归一化坐标转换为实际像素坐标
+        """将归一化坐标转换为实际像素坐标"""
+        h, w = frame_shape[:2]
+        return [ (int(p[0]*w), int(p[1]*h)) for p in points ]
+
+    def calculate_direction_vector(line): #计算线段方向向量（标准化）
+        """计算线段方向向量（标准化）"""
+        start, end = line
+        dx = end[0] - start[0]
+        dy = end[1] - start[1]
+        length = np.sqrt(dx**2 + dy**2)
+        if length == 0:
+            return (0, 0)
+        return (dx/length, dy/length)
+    
+    def line_intersection(self, line, rect): #判断线段与矩形是否相交（包含边界接触）
+        """判断线段与矩形是否相交（包含边界接触）"""
+        # 矩形边界坐标
+        x1, y1, x2, y2 = rect
+        
+        # # 线段参数方程：p = start + t*(end-start)
+        # def ccw(A, B, C):
+        #     return (B[0]-A[0])*(C[1]-A[1]) - (B[1]-A[1])*(C[0]-A[0])
+        
+        # 检查线段与矩形四条边的相交
+        edges = [
+            ((x1,y1), (x2,y1)),  # 上边
+            ((x2,y1), (x2,y2)),  # 右边
+            ((x2,y2), (x1,y2)),  # 下边
+            ((x1,y2), (x1,y1))   # 左边
+        ]
+        
+        for edge in edges:
+            A, B = edge
+            if self.segments_intersect(line[0], line[1], A, B):
+                return True
+        
+        # 检查线段是否完全在矩形内
+        return (x1 <= min(line[0][0], line[1][0]) and
+                max(line[0][0], line[1][0]) <= x2 and
+                y1 <= min(line[0][1], line[1][1]) and
+                max(line[0][1], line[1][1]) <= y2)
+
+    def segments_intersect(p1, p2, q1, q2): #改进版线段相交检测（含端点接触）
+        """改进版线段相交检测（含端点接触）"""
+        def on_segment(a, b, c):
+            return min(a[0], b[0]) <= c[0] <= max(a[0], b[0]) and \
+                min(a[1], b[1]) <= c[1] <= max(a[1], b[1])
+        # 线段参数方程：p = start + t*(end-start)
+        def ccw(A, B, C):
+            return (B[0]-A[0])*(C[1]-A[1]) - (B[1]-A[1])*(C[0]-A[0])
+        
+        o1 = ccw(p1, p2, q1)
+        o2 = ccw(p1, p2, q2)
+        o3 = ccw(q1, q2, p1)
+        o4 = ccw(q1, q2, p2)
+        
+        if (o1 * o2 < 0) and (o3 * o4 < 0):
+            return True
+        
+        # 处理端点接触情况
+        if o1 == 0 and on_segment(p1, p2, q1): return True
+        if o2 == 0 and on_segment(p1, p2, q2): return True
+        if o3 == 0 and on_segment(q1, q2, p1): return True
+        if o4 == 0 and on_segment(q1, q2, p2): return True
+        
+        return False
+
+    def is_center_cross(line, center, threshold=5): #判断中心点是否在线段上（带距离阈值）
+        """判断中心点是否在线段上（带距离阈值）"""
+        # 计算点到线段的距离
+        numerator = abs( (line[1][0]-line[0][0])*(line[0][1]-center[1]) - 
+                        (line[0][0]-center[0])*(line[1][1]-line[0][1]) )
+        denominator = np.sqrt( (line[1][0]-line[0][0])**2 + (line[1][1]-line[0][1])**2 )
+        
+        if denominator == 0:
+            return np.linalg.norm(np.array(center) - np.array(line[0])) < threshold
+        
+        distance = numerator / denominator
+        return distance < threshold
+
+    def get_center(self, box): #计算检测框中心点坐标
+        """计算检测框中心点坐标"""
+        x_center = (box[0] + box[2]) / 2
+        y_center = (box[1] + box[3]) / 2
+        return x_center, y_center
+
+    def is_box_in_polygon(self, box, polygon): #判断矩形框是否在多边形内部（含边界）
+        """判断矩形框是否在多边形内部（含边界）"""
+        # 射线法检测四个角点
+        x1, y1, x2, y2 = box
+        corners = [(x1,y1), (x2,y1), (x2,y2), (x1,y2)]
+        
+        for (x,y) in corners:
+            if not self.is_point_in_polygon((x,y), polygon):
+                return False
+        return True
+
+    def is_point_in_polygon(point, polygon): #改进版射线法（处理边界情况）
+        """改进版射线法（处理边界情况）"""
+        x, y = point
+        n = len(polygon)
+        inside = False
+        
+        for i in range(n):
+            p1 = polygon[i]
+            p2 = polygon[(i+1)%n]
+            
+            # 处理水平边
+            if p1[1] == p2[1] and y == p1[1]:
+                if min(p1[0], p2[0]) <= x <= max(p1[0], p2[0]):
+                    return True
+            
+            # 处理垂直边
+            if p1[0] == p2[0] and x == p1[0]:
+                if min(p1[1], p2[1]) <= y <= max(p1[1], p2[1]):
+                    return True
+            
+            # 常规射线检测
+            if ((p1[1]>y) != (p2[1]>y)) and \
+            (x < (p2[0]-p1[0])*(y-p1[1])/(p2[1]-p1[1]) + p1[0]):
+                inside = not inside
+        
+        return inside
+
+    def get_entry_direction(self, box, polygon): #判断矩形框进入多边形的方向
+        """判断矩形框进入多边形的方向"""
+        center = ((box[0]+box[2])//2, (box[1]+box[3])//2)
+        dir_vector = self.calculate_direction_vector(polygon[0], polygon[1])
+        
+        # 计算中心点相对于多边形起点的方向
+        dx = center[0] - polygon[0][0]
+        dy = center[1] - polygon[0][1]
+        
+        angle = np.arctan2(dy, dx)
+        return np.degrees(angle) if angle >=0 else np.degrees(angle)+360
+
+    def process_line_detection(self, frame, boxes, roi): #拌线检测增强版
+        events = []
+        line = self.normalize_points(roi["points"], frame.shape)
+        direction_vector = self.calculate_direction_vector(line)
+        
+        for box in boxes:
+            x1,y1,x2,y2,class_id = box
+            center = self.get_center(box)
+            intersects = self.line_intersection(line, box)
+            center_cross = self.is_center_cross(line, center)
+            
+            # 方向判断
+            cross_product = self.calculate_cross_product(line[0], line[1], center)
+            current_direction = self.determine_direction(cross_product, direction_vector)
+            
+            # 事件触发逻辑
+            # if roi["detect_mode"] in ["intersection", "both"] and intersects:
+                # events.append(create_event("line_intersection", class_id, box, current_direction))
+            # if roi["detect_mode"] in ["center_cross", "both"] and center_cross:
+                # events.append(create_event("line_center_cross", class_id, box, current_direction))
+        
+        # return events
+    
+    def process_area_detection(self, frame, boxes, roi): #区域检测增强版
+        events = []
+        polygon = self.normalize_polygon(roi["points"], frame.shape)
+        
+        for box in boxes:
+            x1,y1,x2,y2,class_id = box
+            if self.is_box_in_polygon(box, polygon):
+                direction = self.get_entry_direction(box, polygon)
+                # events.append(create_event("area_enter", class_id, box, direction))
+        
+        return events
+    
+    def draw_roi(self, frame, roi_type, roi_points, 
+            line_color=(0,255,0), fill_color=(0,0,0,0), 
+            thickness=2, line_type=cv2.LINE_AA):
+        """
+        绘制线段/区域 ROI（支持line/area类型）
+        :param frame: 输入图像
+        :param roi_type: ROI类型（'line'或'area'）
+        :param roi_points: ROI坐标列表 [[x1,y1], [x2,y2],...]
+        :param line_color: 线段/边框颜色 (BGR格式)
+        :param fill_color: 填充颜色 (BGR+Alpha格式)
+        :param thickness: 线宽
+        :param line_type: 线型（默认抗锯齿）
+        """
+        if roi_type not in ['line', 'area']:
+            raise ValueError("Invalid ROI type. Must be 'line' or 'area'")
+        
+        line = self.normalize_points(roi_points, frame.shape)
+
+        # 转换为整数坐标
+        roi_array = np.array(line, np.int32)
+        
+        if roi_type == 'line':
+            # 线段绘制（至少需要2个点）
+            if len(roi_array) < 2:
+                return
+            # 绘制线段轮廓
+            cv2.polylines(frame, [roi_array], False, line_color, thickness, line_type)
+            # 绘制中间点标记（可选）
+            for pt in roi_array:
+                cv2.circle(frame, tuple(pt), 3, (0,255,0), -1)
+                
+        elif roi_type == 'area':
+            # 区域绘制
+            if len(roi_array) < 3:
+                # 最小包围矩形
+                x_coords = [p[0] for p in roi_array]
+                y_coords = [p[1] for p in roi_array]
+                x1, x2 = int(min(x_coords)), int(max(x_coords))
+                y1, y2 = int(min(y_coords)), int(max(y_coords))
+                cv2.rectangle(frame, (x1, y1), (x2, y2), line_color, thickness)
+            else:
+                # 多边形绘制
+                cv2.polylines(frame, [roi_array], True, line_color, thickness, line_type)
+                # 区域填充（支持透明度）
+                if fill_color[3]!= 0:
+                    cv2.fillPoly(frame, [roi_array], fill_color[:3])  # 填充颜色（BGR）
+                    # 绘制半透明覆盖层
+                    overlay = frame.copy()
+                    cv2.fillPoly(overlay, [roi_array], fill_color)
+                    frame = cv2.addWeighted(frame, 0.7, overlay, 0.3, 0)
+
+    def generate_colors(self, num_classes):
+        hsv_tuples = [(x / num_classes, 1., 1.) for x in range(num_classes)]
+        colors = list(map(lambda x: colorsys.hsv_to_rgb(*x), hsv_tuples))
+        colors = list(map(lambda x: (int(x[0] * 255), int(x[1] * 255), int(x[2] * 255)), colors))
+        return colors
+
+    def get_class_color(self, class_id):
+        if class_id not in self.class_colors:
+            if not self.class_colors:
+                colors = self.generate_colors(len(self.class_names))
+                self.class_colors = {i: color for i, color in enumerate(colors)}
+            else:
+                self.class_colors[class_id] = tuple(np.random.randint(0, 255, 3).tolist())
+        return self.class_colors[class_id]
+
+    def display_detection_results(self, img, results):      
         if not hasattr(results, 'boxes') or results.boxes is None:
             return img
 
@@ -319,13 +591,16 @@ class DetectionTask:
             conf = box.conf.cpu().numpy()[0]
             cls = int(box.cls.cpu().numpy()[0])
             
+            if str(cls) not in self.target_class:
+                continue
+
             color = self.get_class_color(cls)
             # 只在复选框选中时绘制边界框
-            if self.show_boxes_checkbox.isChecked():
-                cv2.rectangle(img, (int(x1), int(y1)), (int(x2), int(y2)), color, 2)
-                class_name = self.class_names[cls] if self.class_names else f"Class {cls}"
-                label = f"{class_name}: {conf:.2f}"
-                cv2.putText(img, label, (int(x1), int(y1) - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+            # if self.show_boxes_checkbox.isChecked():
+            cv2.rectangle(img, (int(x1), int(y1)), (int(x2), int(y2)), color, 2)
+            class_name = self.class_names[cls] if self.class_names else f"Class {cls}"
+            label = f"{class_name}: {conf:.2f}"
+            cv2.putText(img, label, (int(x1), int(y1) - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
         return img
 
@@ -584,12 +859,18 @@ class DetectionTask:
         
         return annotated_frame
     
-    def broadcast_pose_result(self, pose_frame):
+    def broadcast_img_result(self, pose_frame):
         """向所有WebSocket客户端广播检测结果"""
         if not self.clients:
             return  # 没有客户端连接，跳过
         
-        try:           
+        try:     
+            if(self.area_coordinates): 
+                roi_type = self.area_coordinates['type']
+                roi_points = self.area_coordinates['points']
+                if roi_type and roi_points:
+                    self.draw_roi(pose_frame, roi_type, roi_points)    
+
             # 调整检测框坐标
             adjusted_detections = []
             
@@ -669,17 +950,6 @@ class DetectionTask:
                 self.loop.call_soon_threadsafe(
                     lambda: self.message_queue.put_nowait(message)
                 )
-            # 使用消息队列方式，避免直接调用异步方法
-            # if self.loop and self.loop.is_running():
-            #     try:
-            #         # 将消息放入队列而不是直接发送
-            #         asyncio.run_coroutine_threadsafe(
-            #             self.message_queue.put(message),
-            #             self.loop
-            #         )
-            #         # 不等待结果，避免阻塞
-            #     except Exception as e:
-            #         logger.error(f"将消息加入队列失败: {e}")
         
         except Exception as e:
             logger.error(f"广播检测结果失败: {e}")
@@ -794,7 +1064,9 @@ class DetectionServer:
                 models_type=model.models_type,  # 从模型表中获取模型类型
                 target_class=config.target_classes,
                 save_mode=config.save_mode,
-                region_of_interest=None  # 暂时不使用区域参数，避免类型不匹配问题
+                # region_of_interest=None,  # 暂时不使用区域参数，避免类型不匹配问题
+                # area_type=config.area_type,
+                area_coordinates=config.area_coordinates
             )
             
             # 设置事件循环
