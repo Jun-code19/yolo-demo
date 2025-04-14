@@ -59,6 +59,15 @@
           </template>
         </el-table-column>
 
+        <!-- 区域设置列 -->
+        <el-table-column label="区域设置" prop="area_coordinates" min-width="80">
+          <template #default="scope">
+            <el-tag>
+              {{ getAreaTypeLabel(scope.row.area_coordinates) }}
+            </el-tag>
+          </template>
+        </el-table-column>
+
         <!-- 操作列 -->
         <el-table-column label="操作" min-width="120">
           <template #default="scope">
@@ -186,6 +195,24 @@
             <el-radio value="line">拌线设置</el-radio>
           </el-radio-group>
         </el-form-item>
+
+        <!-- 新增检测模式选择 -->
+        <el-form-item label="检测模式">
+          <el-radio-group v-model="areaForm.coordinates.subtype" @change="handleSubtypeChange">
+            <el-radio value="simple">普通检测</el-radio>
+            <el-radio value="directional">方向检测</el-radio>
+          </el-radio-group>
+        </el-form-item>
+
+        <!-- 新增方向选择 -->
+        <el-form-item label="检测方向" v-if="areaForm.coordinates.subtype === 'directional'">
+          <el-radio-group v-model="areaForm.coordinates.direction" @change="updateDirectionArrow">
+            <el-radio value="in">入方向</el-radio>
+            <el-radio value="out">出方向</el-radio>
+            <el-radio value="both">双向</el-radio>
+          </el-radio-group>
+        </el-form-item>
+
         <!-- 视频预览和绘制区域 -->
         <div class="video-preview-container">
           <div v-if="previewLoading" class="loading-wrapper">
@@ -273,13 +300,11 @@ export default defineComponent({
 
     // 区域表单数据
     const areaForm = reactive({
-      // config_type: 'area',
       coordinates: {
         type: 'area',           // "line"或 "area"
         points: [],                // 归一化坐标
-        subtype: "directional",    // 可选值：directional（方向检测）、simple（普通检测）
-        direction: "left_right",   // 方向（left_right/right_left/top_bottom/bottom_top）
-        detect_mode: "both"        // 检测模式：intersection（相交）、center_cross（中心点过线）、both
+        subtype: "simple",    // 可选值：directional（方向检测）、simple（普通检测）
+        direction: "in",   // 方向：in(入方向), out(出方向), both(双向)
       }
     });
 
@@ -293,15 +318,6 @@ export default defineComponent({
     const isDrawing = ref(false);
     const points = ref([]);
     const drawingCanvas = ref(null);
-
-    // 坐标转换工具函数
-    // const getCanvasCoordinates = (event) => {
-    //   const rect = drawingCanvas.value.getBoundingClientRect();
-    //   return {
-    //     x: event.clientX - rect.left,
-    //     y: event.clientY - rect.top
-    //   };
-    // };
 
     // 预览相关
     const previewLoading = ref(false)
@@ -352,18 +368,20 @@ export default defineComponent({
     // 设置感兴趣区域方法
     const setInterestArea = (config) => {
       currentConfigId.value = config.config_id;
-      // areaForm.coordinates = config.area_coordinates?.join(',') || '';
       // 检查 area_coordinates 是否有效
       if (config.area_coordinates && Object.keys(config.area_coordinates).length > 0) {
         areaForm.coordinates = config.area_coordinates; // 直接使用对象
-        // areaForm.config_type = areaForm.coordinates.type;
         if (drawingCanvas.value) {
           drawPolygon(areaForm.coordinates.points);
         }
       } else {
-        areaForm.coordinates = { type: 'area', points: [] }; // 设置默认值
-        // areaForm.config_type = null;
-      } 
+        areaForm.coordinates = {
+          type: 'area',
+          points: [],
+          subtype: "simple",
+          direction: "in"
+        };
+      }
 
       areaModalVisible.value = true;
 
@@ -393,10 +411,13 @@ export default defineComponent({
         console.error('Canvas 未初始化')
         return
       }
-      try{
+      try {
         // 使用 Canvas 或其他绘图库绘制多边形
         const canvas = drawingCanvas.value;
         const ctx = canvas.getContext('2d');
+        // 先清除画布，然后重新绘制所有内容
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
         ctx.beginPath();
         ctx.moveTo(points[0].x * drawingCanvas.value.width, points[0].y * drawingCanvas.value.height);
         points.forEach(point => {
@@ -406,7 +427,7 @@ export default defineComponent({
         ctx.closePath();
         ctx.strokeStyle = '#00ff00';
         ctx.stroke();
-      }catch{}
+      } catch { }
     };
 
     // 开始预览
@@ -695,14 +716,14 @@ export default defineComponent({
     }
     // 绘制相关方法
     const startDrawing = () => {
-      if(areaForm.coordinates.type){
+      if (areaForm.coordinates.type) {
         isDrawing.value = true;
         points.value = [];
         areaForm.coordinates.points = [];
-      }else{
+      } else {
         ElMessage.info('请选择画线类型');
       }
-      
+
     };
 
     const clearDrawing = () => {
@@ -817,11 +838,15 @@ export default defineComponent({
           x: p.x / drawingCanvas.value.width,
           y: p.y / drawingCanvas.value.height
         })),
-        // subtype: "directional",  
-        // direction: "left_right",  
-        // detect_mode: "both"     
+        subtype: areaForm.coordinates.subtype || "simple",
+        direction: areaForm.coordinates.direction || "in",
       };
-      // console.log(areaForm)
+
+      // 如果是方向检测，绘制箭头
+      if (areaForm.coordinates.subtype === 'directional') {
+        updateDirectionArrow();
+      }
+
       isDrawing.value = false;
     };
 
@@ -831,26 +856,31 @@ export default defineComponent({
         if (!areaForm.coordinates) { //|| !areaForm.coordinates.points
           throw new Error('无效的坐标数据');
         }
-        
+
+        if (areaForm.coordinates.subtype === 'directional' && !areaForm.coordinates.direction) {
+          ElMessage.error('请选择有效的检测方向');
+          return;
+        }
         // 几何有效性验证
         // if (areaForm.coordinates.points.length < (areaForm.coordinates.type === 'area' ? 3 : 2)) {
         //   ElMessage.error('请绘制有效的多边形区域');
         //   return;
         // }
+        console.log(areaForm.coordinates);
 
-        if (areaForm.coordinates.points.length == 0){
+        if (areaForm.coordinates.points.length == 0) {
           // 调用API保存区域配置
           await detectionConfigApi.updateConfig(currentConfigId.value, {
             area_coordinates: {}
           });
-        }else{
+        } else {
           // 调用API保存区域配置
           await detectionConfigApi.updateConfig(currentConfigId.value, {
             area_coordinates: areaForm.coordinates
           });
         }
 
-        
+
 
         ElMessage.success('区域配置保存成功');
         areaModalVisible.value = false;
@@ -907,6 +937,22 @@ export default defineComponent({
         'other': '其他类型'
       }
       return typeMap[type] || type
+    }
+
+    const getAreaTypeLabel = (areaType) => {
+      const typeMap = {
+        'area': '区域',
+        'line': '拌线'
+      }
+      if (typeMap[areaType.type]) {
+        if (areaType.subtype === 'directional') {
+          return typeMap[areaType.type] + '(方向检测:' + (areaType.direction === 'in' ? '进入' : areaType.direction === 'out' ? '离开' : '双向') + ')'
+        } else {
+          return typeMap[areaType.type] + '(普通检测)'
+        }
+      } else {
+        return '未设置'
+      }
     }
 
     // 获取设备名称
@@ -1133,14 +1179,106 @@ export default defineComponent({
       }
     };
 
-    const loadArea = () =>{
+    const loadArea = () => {
       if (drawingCanvas.value) {
-          // areaForm.config_type = areaForm.coordinates.type;
-          drawPolygon(areaForm.coordinates.points);
-        }
+        // areaForm.config_type = areaForm.coordinates.type;
+        drawPolygon(areaForm.coordinates.points);
+      }
     }
 
+    // 检查是否已绘制内容
+    const handleSubtypeChange = (value) => {
+      if (value === 'directional' && (!areaForm.coordinates.points || areaForm.coordinates.points.length < 2)) {
+        ElMessage.warning('请先绘制区域再选择方向检测模式');
+        areaForm.coordinates.subtype = 'simple';
+      } else if (value === 'directional') {
+        updateDirectionArrow();
+      } else if (value === 'simple') {
+        areaForm.coordinates.direction = null;
+        loadArea();
+      }
+    };
+
+    // 更新方向箭头
+    const updateDirectionArrow = () => {
+      if (!areaForm.coordinates.points || areaForm.coordinates.points.length < 2) return;
+
+      // 在线段上绘制箭头
+      const canvas = drawingCanvas.value;
+      if (!canvas) return;
+
+      // 重绘所有点和线
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#00FF00';
+      ctx.strokeStyle = '#00FF00';
+      ctx.lineWidth = 1;
+
+      // 先清除画布，然后重新绘制所有内容
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      const points = areaForm.coordinates.points;
+
+      // 绘制多边形
+      ctx.beginPath();
+      ctx.moveTo(points[0].x * drawingCanvas.value.width, points[0].y * drawingCanvas.value.height);
+      points.forEach(point => {
+        ctx.lineTo(point.x * drawingCanvas.value.width, point.y * drawingCanvas.value.height);
+      });
+      if (areaForm.coordinates.type === 'area' && points.length > 2) {
+        ctx.closePath();
+      }
+      ctx.stroke();
+
+      // 如果是方向检测，在第一个和第二个点之间绘制箭头
+      if (areaForm.coordinates.subtype === 'directional' && points.length >= 2) {
+        const p1 = points[0];
+        const p2 = points[1];
+
+        // 计算线段中点
+        const midX = (p1.x + p2.x) / 2 * drawingCanvas.value.width;
+        const midY = (p1.y + p2.y) / 2 * drawingCanvas.value.height;
+
+        // 计算线段角度
+        const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
+
+        // 根据方向绘制不同的箭头
+        if (areaForm.coordinates.direction === 'in' || areaForm.coordinates.direction === 'both') {
+          drawArrow(ctx, midX, midY, angle + Math.PI / 2, '#00FF00');
+        }
+
+        if (areaForm.coordinates.direction === 'out' || areaForm.coordinates.direction === 'both') {
+          drawArrow(ctx, midX, midY, angle - Math.PI / 2, '#00FF00');
+        }
+      }
+    };
+
+    // 绘制箭头函数
+    const drawArrow = (ctx, x, y, angle, color) => {
+      const arrowSize = 10;
+
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(angle);
+
+      ctx.fillStyle = color;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(-arrowSize / 2, -arrowSize);
+      ctx.lineTo(arrowSize / 2, -arrowSize);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.stroke();
+
+      ctx.restore();
+    };
+
     return {
+      getAreaTypeLabel,
+      updateDirectionArrow,
+      handleSubtypeChange,
       loadArea,
       loading,
       submitLoading,
@@ -1290,10 +1428,10 @@ export default defineComponent({
 .fallback-image {
   position: absolute;
   top: 0;
-  left: 0; width: 100%;
+  left: 0;
+  width: 100%;
   height: 100%;
   object-fit: contain;
   background-color: #000;
-  display: none;
-}
+  display: none;}
 </style>

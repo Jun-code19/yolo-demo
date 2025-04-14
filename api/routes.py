@@ -650,7 +650,6 @@ class AreaCoordinates(BaseModel):
     points: Optional[List[Point]] = None  # 使用 Point 模型来表示坐标点
     subtype: Optional[str] = None  # 可选值：directional（方向检测）、simple（普通检测）
     direction: Optional[str] = None  # 方向（left_right/right_left/top_bottom/bottom_top）
-    detect_mode: Optional[str] = None  # 检测模式：intersection（相交）、center_cross（中心点过线）、both
 # 添加检测配置的Pydantic模型
 class DetectionConfigBase(BaseModel):
     device_id: str

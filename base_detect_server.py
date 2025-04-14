@@ -218,24 +218,10 @@ class DetectionTask:
                     # 优化：每skip_frame_count帧执行一次检测，减少计算负担
                     frame_count += 1
                     if frame_count % skip_frame_count == 0:
-                        # 如果设置了感兴趣区域，裁剪帧
+                         # 执行检测
                         detect_frame = frame_rgb.copy()
-
-                        
-                        # if self.region_of_interest and isinstance(self.region_of_interest, list) and len(self.region_of_interest) == 4:
-                        #     try:
-                        #         x1, y1, x2, y2 = map(int, self.region_of_interest)
-                        #         # 添加边界检查
-                        #         h, w = detect_frame.shape[:2]
-                        #         x1, y1 = max(0, x1), max(0, y1)
-                        #         x2, y2 = min(w, x2), min(h, y2)
-                        #         if x1 < x2 and y1 < y2:  # 确保有效的区域
-                        #             detect_frame = detect_frame[y1:y2, x1:x2]
-                        #     except Exception as e:
-                        #         logger.warning(f"裁剪感兴趣区域失败: {e}，使用完整帧")
-                        
-                        # 执行检测
-                        current_time = time.time()
+                        img_result = frame_rgb.copy()
+                        current_time = time.time()                        
                         # 使用 try-except 捕获模型推理过程中的错误
                         try:
                             results = self.model(detect_frame, conf=self.confidence,iou=0.45,max_det=300,device=self.device)
@@ -257,34 +243,35 @@ class DetectionTask:
                                             "class_name": class_name
                                         })                          
                             
-                            #没检测的目标发送原图
+
+
                             if detections:
                                 if self.models_type == 'pose':
                                     # 向WebSocket客户端推送检测结果
-                                    self.broadcast_img_result(self.display_pose_results(detect_frame, results[0]))
+                                    img_result = self.display_pose_results(detect_frame, results[0])
                                 else:
-                                    # 判断是否需要创建检测事件
-                                    if self.save_mode.value != 'none':
-                                        if detections and (current_time - self.last_detection_time) > cooldown_period:
-                                            self.last_detection_time = current_time
-                                            self.save_detection_event(detect_frame, detections)
+                                    if self.area_coordinates and self.area_coordinates['subtype'] == 'directional':
+                                        # 开启目标追踪功能
+                                        self.object_tracker.update(detections)
+                                            # 传递显示框的状态到draw_tracks方法
+                                        img_result = self.object_tracker.draw_tracks(
+                                            detect_frame.copy(), 
+                                            max_trajectory_length=self.max_trajectory_length,
+                                            show_boxes=True,  # 传递显示框的状态
+                                        )
+                                    else:
+                                        img_result = self.display_detection_results(detect_frame,results[0])
 
-                                    # 开启目标追踪功能
-                                    # self.object_tracker.update(detections)
-                                    #     # 传递显示框的状态到draw_tracks方法
-                                    # tracked_frame = self.object_tracker.draw_tracks(
-                                    #     detect_frame.copy(), 
-                                    #     max_trajectory_length=self.max_trajectory_length,
-                                    #     show_boxes=True,  # 传递显示框的状态
-                                    # )
-                                    tracked_frame = detect_frame.copy()
-                                    img = self.display_detection_results(tracked_frame,results[0])
-                                    self.broadcast_img_result(img)
-                                    # 向WebSocket客户端推送检测结果
-                                    # self.broadcast_detection_result(tracked_frame, detections)
+                            # 判断是否需要创建检测事件
+                            if self.save_mode.value != 'none':
+                                if detections and (current_time - self.last_detection_time) > cooldown_period:
+                                    self.last_detection_time = current_time
+                                    self.save_detection_event(img_result, detections)
+
+                            if not self.clients:
+                                continue  # 没有客户端连接，跳过下面步骤
                             else:
-                                orgain_frame = detect_frame.copy()
-                                self.broadcast_img_result(orgain_frame)
+                                self.broadcast_img_result(img_result, detections) # 向WebSocket客户端推送检测结果                                                               
                             
                         except Exception as e:
                             logger.error(f"模型推理过程中出错: {e}")
@@ -317,204 +304,13 @@ class DetectionTask:
                 self.loop.run_until_complete(self.loop.shutdown_asyncgens())
             finally:
                 self.loop.close()
-                logger.info(f"事件循环已关闭: {self.config_id}")
-    
-    def detect_events(self, frame, boxes, roi): #检测路由分发
-        """根据ROI类型分发检测逻辑"""
-        if roi["type"] == "line":
-            return self.process_line_detection(frame, boxes, roi)
-        elif roi["type"] == "area":
-            return self.process_area_detection(frame, boxes, roi)
-        
-    def calculate_cross_product(p1, p2, point): #计算点相对于线段的向量叉积
-        """计算点相对于线段的向量叉积"""
-        v1 = (p2[0]-p1[0], p2[1]-p1[1])
-        v2 = (point[0]-p1[0], point[1]-p1[1])
-        return v1[0]*v2[1] - v1[1]*v2[0]
-
-    def determine_direction(cross, direction_vector): #根据叉积和方向向量判断方向
-        """根据叉积和方向向量判断方向"""
-        sign = np.sign(cross)
-        base_dir = "left" if np.dot(direction_vector, (1,0)) > 0 else "top"
-        return f"{base_dir}_{sign}"
+                logger.info(f"事件循环已关闭: {self.config_id}")  
     
     def normalize_points(self, points, frame_shape): #归一化坐标转换
         """归一化坐标转换"""
         h,w = frame_shape[:2]
         return [(int(p['x']*w), int(p['y']*h)) for p in points]
-    
-    def normalize_polygon(points, frame_shape): #将归一化坐标转换为实际像素坐标
-        """将归一化坐标转换为实际像素坐标"""
-        h, w = frame_shape[:2]
-        return [ (int(p[0]*w), int(p[1]*h)) for p in points ]
 
-    def calculate_direction_vector(line): #计算线段方向向量（标准化）
-        """计算线段方向向量（标准化）"""
-        start, end = line
-        dx = end[0] - start[0]
-        dy = end[1] - start[1]
-        length = np.sqrt(dx**2 + dy**2)
-        if length == 0:
-            return (0, 0)
-        return (dx/length, dy/length)
-    
-    def line_intersection(self, line, rect): #判断线段与矩形是否相交（包含边界接触）
-        """判断线段与矩形是否相交（包含边界接触）"""
-        # 矩形边界坐标
-        x1, y1, x2, y2 = rect
-        
-        # # 线段参数方程：p = start + t*(end-start)
-        # def ccw(A, B, C):
-        #     return (B[0]-A[0])*(C[1]-A[1]) - (B[1]-A[1])*(C[0]-A[0])
-        
-        # 检查线段与矩形四条边的相交
-        edges = [
-            ((x1,y1), (x2,y1)),  # 上边
-            ((x2,y1), (x2,y2)),  # 右边
-            ((x2,y2), (x1,y2)),  # 下边
-            ((x1,y2), (x1,y1))   # 左边
-        ]
-        
-        for edge in edges:
-            A, B = edge
-            if self.segments_intersect(line[0], line[1], A, B):
-                return True
-        
-        # 检查线段是否完全在矩形内
-        return (x1 <= min(line[0][0], line[1][0]) and
-                max(line[0][0], line[1][0]) <= x2 and
-                y1 <= min(line[0][1], line[1][1]) and
-                max(line[0][1], line[1][1]) <= y2)
-
-    def segments_intersect(p1, p2, q1, q2): #改进版线段相交检测（含端点接触）
-        """改进版线段相交检测（含端点接触）"""
-        def on_segment(a, b, c):
-            return min(a[0], b[0]) <= c[0] <= max(a[0], b[0]) and \
-                min(a[1], b[1]) <= c[1] <= max(a[1], b[1])
-        # 线段参数方程：p = start + t*(end-start)
-        def ccw(A, B, C):
-            return (B[0]-A[0])*(C[1]-A[1]) - (B[1]-A[1])*(C[0]-A[0])
-        
-        o1 = ccw(p1, p2, q1)
-        o2 = ccw(p1, p2, q2)
-        o3 = ccw(q1, q2, p1)
-        o4 = ccw(q1, q2, p2)
-        
-        if (o1 * o2 < 0) and (o3 * o4 < 0):
-            return True
-        
-        # 处理端点接触情况
-        if o1 == 0 and on_segment(p1, p2, q1): return True
-        if o2 == 0 and on_segment(p1, p2, q2): return True
-        if o3 == 0 and on_segment(q1, q2, p1): return True
-        if o4 == 0 and on_segment(q1, q2, p2): return True
-        
-        return False
-
-    def is_center_cross(line, center, threshold=5): #判断中心点是否在线段上（带距离阈值）
-        """判断中心点是否在线段上（带距离阈值）"""
-        # 计算点到线段的距离
-        numerator = abs( (line[1][0]-line[0][0])*(line[0][1]-center[1]) - 
-                        (line[0][0]-center[0])*(line[1][1]-line[0][1]) )
-        denominator = np.sqrt( (line[1][0]-line[0][0])**2 + (line[1][1]-line[0][1])**2 )
-        
-        if denominator == 0:
-            return np.linalg.norm(np.array(center) - np.array(line[0])) < threshold
-        
-        distance = numerator / denominator
-        return distance < threshold
-
-    def get_center(self, box): #计算检测框中心点坐标
-        """计算检测框中心点坐标"""
-        x_center = (box[0] + box[2]) / 2
-        y_center = (box[1] + box[3]) / 2
-        return x_center, y_center
-
-    def is_box_in_polygon(self, box, polygon): #判断矩形框是否在多边形内部（含边界）
-        """判断矩形框是否在多边形内部（含边界）"""
-        # 射线法检测四个角点
-        x1, y1, x2, y2 = box
-        corners = [(x1,y1), (x2,y1), (x2,y2), (x1,y2)]
-        
-        for (x,y) in corners:
-            if not self.is_point_in_polygon((x,y), polygon):
-                return False
-        return True
-
-    def is_point_in_polygon(point, polygon): #改进版射线法（处理边界情况）
-        """改进版射线法（处理边界情况）"""
-        x, y = point
-        n = len(polygon)
-        inside = False
-        
-        for i in range(n):
-            p1 = polygon[i]
-            p2 = polygon[(i+1)%n]
-            
-            # 处理水平边
-            if p1[1] == p2[1] and y == p1[1]:
-                if min(p1[0], p2[0]) <= x <= max(p1[0], p2[0]):
-                    return True
-            
-            # 处理垂直边
-            if p1[0] == p2[0] and x == p1[0]:
-                if min(p1[1], p2[1]) <= y <= max(p1[1], p2[1]):
-                    return True
-            
-            # 常规射线检测
-            if ((p1[1]>y) != (p2[1]>y)) and \
-            (x < (p2[0]-p1[0])*(y-p1[1])/(p2[1]-p1[1]) + p1[0]):
-                inside = not inside
-        
-        return inside
-
-    def get_entry_direction(self, box, polygon): #判断矩形框进入多边形的方向
-        """判断矩形框进入多边形的方向"""
-        center = ((box[0]+box[2])//2, (box[1]+box[3])//2)
-        dir_vector = self.calculate_direction_vector(polygon[0], polygon[1])
-        
-        # 计算中心点相对于多边形起点的方向
-        dx = center[0] - polygon[0][0]
-        dy = center[1] - polygon[0][1]
-        
-        angle = np.arctan2(dy, dx)
-        return np.degrees(angle) if angle >=0 else np.degrees(angle)+360
-
-    def process_line_detection(self, frame, boxes, roi): #拌线检测增强版
-        events = []
-        line = self.normalize_points(roi["points"], frame.shape)
-        direction_vector = self.calculate_direction_vector(line)
-        
-        for box in boxes:
-            x1,y1,x2,y2,class_id = box
-            center = self.get_center(box)
-            intersects = self.line_intersection(line, box)
-            center_cross = self.is_center_cross(line, center)
-            
-            # 方向判断
-            cross_product = self.calculate_cross_product(line[0], line[1], center)
-            current_direction = self.determine_direction(cross_product, direction_vector)
-            
-            # 事件触发逻辑
-            # if roi["detect_mode"] in ["intersection", "both"] and intersects:
-                # events.append(create_event("line_intersection", class_id, box, current_direction))
-            # if roi["detect_mode"] in ["center_cross", "both"] and center_cross:
-                # events.append(create_event("line_center_cross", class_id, box, current_direction))
-        
-        # return events
-    
-    def process_area_detection(self, frame, boxes, roi): #区域检测增强版
-        events = []
-        polygon = self.normalize_polygon(roi["points"], frame.shape)
-        
-        for box in boxes:
-            x1,y1,x2,y2,class_id = box
-            if self.is_box_in_polygon(box, polygon):
-                direction = self.get_entry_direction(box, polygon)
-                # events.append(create_event("area_enter", class_id, box, direction))
-        
-        return events
-    
     def draw_roi(self, frame, roi_type, roi_points, 
             line_color=(0,255,0), fill_color=(0,0,0,0), 
             thickness=2, line_type=cv2.LINE_AA):
@@ -544,7 +340,7 @@ class DetectionTask:
             cv2.polylines(frame, [roi_array], False, line_color, thickness, line_type)
             # 绘制中间点标记（可选）
             for pt in roi_array:
-                cv2.circle(frame, tuple(pt), 3, (0,255,0), -1)
+                cv2.circle(frame, tuple(pt), 3, line_color, -1)
                 
         elif roi_type == 'area':
             # 区域绘制
@@ -732,7 +528,7 @@ class DetectionTask:
                 config_id=self.config_id,
                 device_id=self.device_id,
                 timestamp=current_time,
-                event_type="object_detection",
+                event_type=self.models_type,
                 confidence=max([d["confidence"] for d in detections]) if detections else 0.0,
                 bounding_box=detections,
                 status=EventStatus.new,
@@ -745,41 +541,40 @@ class DetectionTask:
             
             if self.save_mode in [SaveMode.screenshot, SaveMode.both]:
                 # 绘制检测框和标签
-                annotated_frame = self.draw_detections(frame, detections)    
+                # annotated_frame = self.draw_detections(frame, detections)    
                 # 保存带检测框的截图（原图）
                 thumbnail_path = save_dir / f"{event_id}.jpg"
-                cv2.imwrite(str(thumbnail_path), annotated_frame)
+                cv2.imwrite(str(thumbnail_path), frame)
                 event.thumbnail_path = str(thumbnail_path)
 
                 # 保存带检测框的截图 (缩略图)
-                success, buffer = cv2.imencode('.jpg', annotated_frame, [cv2.IMWRITE_JPEG_QUALITY, 10])
-                height, width = frame.shape[:2]
-                if success:
-                    event.thumbnail_data = buffer.tobytes()
-                    event.is_compressed = True  # 设置压缩标记
-                    event.meta_data = {
-                        "resolution": f"{width}x{height}",
-                        "size": len(buffer.tobytes()),  # 存储图像大小
-                        # 其他元数据...
-                    }
-                else:
-                    logger.error("JPEG编码失败")
+                # success, buffer = cv2.imencode('.jpg', annotated_frame, [cv2.IMWRITE_JPEG_QUALITY, 10])
+                # height, width = frame.shape[:2]
+                # if success:
+                #     event.thumbnail_data = buffer.tobytes()
+                #     event.is_compressed = True  # 设置压缩标记
+                #     event.meta_data = {
+                #         "resolution": f"{width}x{height}",
+                #         "size": len(buffer.tobytes()),  # 存储图像大小
+                #         # 其他元数据...
+                #     }
+                # else:
+                #     logger.error("JPEG编码失败")
+                            
+            # if self.save_mode in [SaveMode.video, SaveMode.both]:
+                # # 从帧缓冲区创建短视频
+                # snippet_path = save_dir / f"{event_id}.mp4"
+                # height, width = frame.shape[:2]
+                # fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+                # out = cv2.VideoWriter(str(snippet_path), fourcc, 5, (width, height))
                 
-            
-            if self.save_mode in [SaveMode.video, SaveMode.both]:
-                # 从帧缓冲区创建短视频
-                snippet_path = save_dir / f"{event_id}.mp4"
-                height, width = frame.shape[:2]
-                fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-                out = cv2.VideoWriter(str(snippet_path), fourcc, 5, (width, height))
-                
-                # 处理视频中的每一帧并添加检测框
-                for f in self.frame_buffer:
-                    # 在每一帧上绘制检测框
-                    annotated_f = self.draw_detections(f, detections)
-                    out.write(annotated_f)
-                out.release()
-                event.snippet_path = str(snippet_path)
+                # # 处理视频中的每一帧并添加检测框
+                # for f in self.frame_buffer:
+                #     # 在每一帧上绘制检测框
+                #     annotated_f = self.draw_detections(f, detections)
+                #     out.write(annotated_f)
+                # out.release()
+                # event.snippet_path = str(snippet_path)
             
             # 提交事件
             db.add(event)
@@ -859,7 +654,7 @@ class DetectionTask:
         
         return annotated_frame
     
-    def broadcast_img_result(self, pose_frame):
+    def broadcast_img_result(self, pose_frame, detections):
         """向所有WebSocket客户端广播检测结果"""
         if not self.clients:
             return  # 没有客户端连接，跳过
@@ -869,10 +664,7 @@ class DetectionTask:
                 roi_type = self.area_coordinates['type']
                 roi_points = self.area_coordinates['points']
                 if roi_type and roi_points:
-                    self.draw_roi(pose_frame, roi_type, roi_points)    
-
-            # 调整检测框坐标
-            adjusted_detections = []
+                    self.draw_roi(pose_frame, roi_type, roi_points)               
             
             # 将帧转换为JPEG，增加质量参数
             _, buffer = cv2.imencode('.jpg', pose_frame, [cv2.IMWRITE_JPEG_QUALITY, 90])  # 提高JPEG质量
@@ -885,7 +677,7 @@ class DetectionTask:
                 "config_id": self.config_id,
                 "timestamp": time.time(),
                 "image": base64_image,
-                "detections": adjusted_detections
+                "detections": detections
             }
             
             # 将消息放入队列（线程安全）
