@@ -567,7 +567,8 @@ export default defineComponent({
       eventModalVisible.value = true;
       
       // 加载缩略图
-      selectedEventThumbnail.value = await loadThumbnail(event.event_id);
+      // selectedEventThumbnail.value = await loadThumbnail(event.event_id);
+      selectedEventThumbnail.value = getImageUrl(event.thumbnail_path);
 
       // 如果状态是新事件，自动更新为已查看
       if (event.status === 'new') {
@@ -670,11 +671,11 @@ export default defineComponent({
     
     // 显示图片预览
     const showImagePreview = (thumbnailPath) => {
-      const result = getImageUrl(thumbnailPath);
-      if(result)
-        previewImageUrl.value = result;
-      else
-        previewImageUrl.value = selectedEventThumbnail.value
+      // const result = getImageUrl(thumbnailPath);
+      // if(result)
+      //   previewImageUrl.value = result;
+      // else
+      previewImageUrl.value = selectedEventThumbnail.value
       
       imagePreviewVisible.value = true;
     };

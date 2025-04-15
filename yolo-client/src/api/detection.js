@@ -187,4 +187,4 @@ export const detectionServiceApi = {
   checkDetectionStatus(deviceId) {
     return apiClient.get(`/detection/status/${deviceId}`);
   }
-}; 
+};

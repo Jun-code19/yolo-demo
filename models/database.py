@@ -32,6 +32,12 @@ class EventStatus(enum.Enum):
     flagged = "flagged"
     archived = "archived"
 
+class PushMethod(enum.Enum):
+    http = "http"
+    https = "https"
+    tcp = "tcp"
+    mqtt = "mqtt"
+
 class DetectionFrequency(enum.Enum):
     realtime = "realtime"
     scheduled = "scheduled"
@@ -219,6 +225,49 @@ class DetectionPerformance(Base):
     objects_detected = Column(Integer)
     device = relationship("Device")
     config = relationship("DetectionConfig")
+
+class DataPushConfig(Base):
+    __tablename__ = "data_push_config"
+    
+    push_id = Column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
+    push_name = Column(String(255), nullable=False)
+    push_method = Column(Enum(PushMethod), nullable=False)
+    # 修改config_id为可选，允许推送器独立于检测配置
+    config_id = Column(String(64), ForeignKey('detection_config.config_id'), nullable=True)
+    # 添加标签字段，用于灵活关联不同模块
+    tags = Column(ARRAY(Text), default=[])
+    enabled = Column(Boolean, default=True)
+    
+    # HTTP/HTTPS设置
+    http_url = Column(Text)
+    http_headers = Column(JSONB)
+    http_method = Column(String(10), default="POST")
+    
+    # TCP设置
+    tcp_host = Column(String(255))
+    tcp_port = Column(Integer)
+    
+    # MQTT设置
+    mqtt_broker = Column(String(255))
+    mqtt_port = Column(Integer, default=1883)
+    mqtt_topic = Column(String(255))
+    mqtt_client_id = Column(String(255))
+    mqtt_username = Column(String(255))
+    mqtt_password = Column(String(255))
+    mqtt_use_tls = Column(Boolean, default=False)
+    
+    # 通用设置
+    push_interval = Column(Integer, default=0)  # 0表示实时推送，>0表示间隔秒数
+    last_push_time = Column(DateTime)
+    retry_count = Column(Integer, default=3)
+    retry_interval = Column(Integer, default=10)  # 重试间隔(秒)
+    include_image = Column(Boolean, default=False)  # 是否包含图像数据
+    data_format = Column(String(50), default="json")
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    
+    # 关系可以保留，但现在是可选的
+    config = relationship("DetectionConfig", foreign_keys=[config_id])
 
 DATABASE_URL = "postgresql://postgres:admin123@10.83.34.35:5432/eyris_core_db"
 

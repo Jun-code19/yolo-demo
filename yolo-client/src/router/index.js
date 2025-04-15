@@ -102,6 +102,15 @@ const routes = [
       requiresAuth: true,
       title: '检测事件'
     }
+  },
+  {
+    path: '/push/config',
+    name: 'PushConfig',
+    component: () => import('../views/PushConfig.vue'),
+    meta: {
+      requiresAuth: true,
+      title: '数据推送配置'
+    }
   }
 ]
 
@@ -115,7 +124,7 @@ router.beforeEach((to, from, next) => {
   const isAuthenticated = localStorage.getItem('token')
   
   // 为了调试，打印路由信息
-  console.log(`路由导航: 从 ${from.path} 到 ${to.path}, 认证状态: ${isAuthenticated ? '已登录' : '未登录'}`)
+  // console.log(`路由导航: 从 ${from.path} 到 ${to.path}, 认证状态: ${isAuthenticated ? '已登录' : '未登录'}`)
   
   if (to.meta.requiresAuth && !isAuthenticated) {
     // 需要认证但未登录，重定向到登录页

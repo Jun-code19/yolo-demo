@@ -1,6 +1,6 @@
 <script setup>
 import { ref, reactive, onMounted, computed, onBeforeUnmount } from 'vue'
-import { HomeFilled, DataLine, VideoCamera, Fold, Expand, Picture, VideoPlay, Monitor, Setting, UserFilled } from '@element-plus/icons-vue'
+import { HomeFilled, DataLine, VideoCamera, Fold, Expand, Picture, VideoPlay, Monitor, Setting, UserFilled, Tickets, Connection } from '@element-plus/icons-vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import deviceApi from '@/api/device'
@@ -45,9 +45,9 @@ onBeforeUnmount(() => {
 const checkTokenValidity = async () => {
   try {
     await deviceApi.validateToken()
-    console.log('Token is valid')
+    // console.log('Token is valid')
   } catch (error) {
-    console.error('Token validation failed:', error)
+    // console.error('Token validation failed:', error)
     if (error.response && error.response.status === 401) {
       // token无效，自动退出
       handleLogout()
@@ -63,7 +63,7 @@ const handleLogout = () => {
   username.value = ''
   
   // 强制刷新页面，确保登录状态更新
-  console.log("正在退出登录...");
+  // console.log("正在退出登录...");
   window.location.href = '/'
 }
 
@@ -129,9 +129,10 @@ const handleDropdownCommand = (command) => {
           </el-menu-item>
           
           <el-menu-item index="/detection/events">
-            <el-icon><DataLine /></el-icon>
-            <template #title>检测事件</template>
+            <el-icon><Tickets /></el-icon>
+            <span>检测事件</span>
           </el-menu-item>
+          
         </el-sub-menu>
 
         <el-menu-item index="/devices">
@@ -152,6 +153,11 @@ const handleDropdownCommand = (command) => {
         <el-menu-item index="/syslogs">
           <el-icon><DataLine /></el-icon>
           <template #title>系统日志</template>
+        </el-menu-item>
+        
+        <el-menu-item index="/push/config">
+            <el-icon><Connection /></el-icon>
+            <span>数据推送</span>
         </el-menu-item>
       </el-menu>
     </el-aside>

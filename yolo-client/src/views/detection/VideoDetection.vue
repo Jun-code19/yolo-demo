@@ -1584,7 +1584,7 @@ onBeforeUnmount(() => {
 }
 
 .model-name {
-  font-weight: bold;
+  /* font-weight: bold; */
   color: #303133;
   margin-bottom: 2px;
 }
