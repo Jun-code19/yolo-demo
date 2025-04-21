@@ -74,10 +74,16 @@ def create_device(device: DeviceCreate, db: Session = Depends(get_db), current_u
         db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
 
-@router.get("/devices/", response_model=List[DeviceResponse])
+@router.get("/devices/", tags=["设备管理"])
 def get_devices(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    devices = db.query(Device).offset(skip).limit(limit).all()
-    return devices
+    devices = db.query(Device)
+    total_count = devices.count()
+    result = devices.offset(skip).limit(limit).all()
+    # 返回包含总数的响应
+    return {
+        "data": result,
+        "total": total_count
+    }
 
 @router.get("/devices/{device_id}", response_model=DeviceResponse)
 def get_device(device_id: str, db: Session = Depends(get_db)):
@@ -350,11 +356,17 @@ def get_syslogs(
     action_type: Optional[str] = None,
     db: Session = Depends(get_db)):
     query = db.query(SysLog)
+    total_count = query.count()
     if user_id:
         query = query.filter(SysLog.user_id == user_id)
     if action_type:
         query = query.filter(SysLog.action_type == action_type)
-    return query.offset(skip).limit(limit).all()
+    result = query.offset(skip).limit(limit).all()
+    # 返回包含总数的响应
+    return {
+        "data": result,
+        "total": total_count
+    }
 
 # 认证API
 class Token(BaseModel):
@@ -1053,7 +1065,7 @@ async def delete_detection_config(
         raise HTTPException(status_code=500, detail=f"删除检测配置失败: {str(e)}")
 
 # 获取设备的所有检测事件
-@router.get("/detection/events", response_model=List[DetectionEventResponse], tags=["检测事件"])
+@router.get("/detection/events", tags=["检测事件"])
 async def get_detection_events(
     device_id: Optional[str] = None,
     config_id: Optional[str] = None,
@@ -1088,6 +1100,9 @@ async def get_detection_events(
             raise HTTPException(status_code=400, detail="无效的状态值")
     if min_confidence:
         query = query.filter(DetectionEvent.confidence >= min_confidence)
+    
+    # 获取总数
+    total_count = query.count()
     
     # 按时间倒序排列
     query = query.order_by(desc(DetectionEvent.created_at))
@@ -1136,7 +1151,11 @@ async def get_detection_events(
         }
         result.append(event_dict)
     
-    return result
+    # 返回包含总数的响应
+    return {
+        "data": result,
+        "total": total_count
+    }
 
 # 获取单个检测事件详情
 @router.get("/detection/events/{event_id}", response_model=DetectionEventResponse, tags=["检测事件"])

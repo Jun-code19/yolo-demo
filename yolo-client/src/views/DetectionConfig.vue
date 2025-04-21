@@ -270,7 +270,7 @@ import { defineComponent, ref, reactive, onMounted, computed } from 'vue';
 import { ElMessage } from 'element-plus';
 import { Plus } from '@element-plus/icons-vue';
 import deviceApi from '@/api/device'
-import { detectionConfigApi, detectionServiceApi } from '@/api/detection';
+import { detectionConfigApi } from '@/api/detection';
 import { startDetection, stopDetection } from '@/api/detection_server';
 
 export default defineComponent({
@@ -1026,7 +1026,7 @@ export default defineComponent({
     const loadDeviceList = async () => {
       try {
         const response = await deviceApi.getDevices();
-        deviceList.value = response.data;
+        deviceList.value = response.data.data;
       } catch (error) {
         ElMessage.error('获取设备列表失败: ' + error.message);
       }

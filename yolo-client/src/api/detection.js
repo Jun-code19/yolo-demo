@@ -160,31 +160,3 @@ export const detectionEventApi = {
     return apiClient.get('/detection/events/stats', { params });
   }
 };
-
-// 检测服务相关 API
-export const detectionServiceApi = {
-  // 启动设备检测
-  startDetection(deviceId, configId = null) {
-    return apiClient.post('/detection/start', {
-      device_id: deviceId,
-      config_id: configId
-    });
-  },
-  
-  // 停止设备检测
-  stopDetection(deviceId) {
-    return apiClient.post('/detection/stop', {
-      device_id: deviceId
-    });
-  },
-  
-  // 获取活跃检测设备列表
-  getActiveDetections() {
-    return apiClient.get('/detection/active');
-  },
-  
-  // 检查设备检测状态
-  checkDetectionStatus(deviceId) {
-    return apiClient.get(`/detection/status/${deviceId}`);
-  }
-};

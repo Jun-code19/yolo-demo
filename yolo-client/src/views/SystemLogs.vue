@@ -100,10 +100,9 @@ const loadData = async () => {
     }
     
     const response = await deviceApi.getSyslogs(params)
-    logs.value = response.data
-    total.value = response.data.length // 实际应用中应从后端获取总数
+    logs.value = response.data.data
+    total.value = response.data.total // 实际应用中应从后端获取总数
   } catch (error) {
-    console.error('加载日志数据失败:', error)
     ElMessage.error('加载日志数据失败，请检查网络连接或服务器状态')
   } finally {
     loading.value = false

@@ -34,9 +34,9 @@
           >
             <el-option
               v-for="type in eventTypes"
-              :key="type"
-              :label="type"
-              :value="type"
+              :key="type.value"
+              :label="type.label"
+              :value="type.value"
             />
           </el-select>
         </el-form-item>
@@ -342,9 +342,13 @@ export default defineComponent({
     const eventList = ref([]);
     const deviceList = ref([]);
     const eventTypes = ref([
-      'person', 'bicycle', 'car', 'motorcycle', 'bus', 'truck',
-      'dog', 'cat', 'bottle', 'chair', 'laptop', 'cell phone'
-    ]);
+    { label: '目标检测', value: 'object_detection' },
+    { label: '图像分割', value: 'segmentation' },
+    { label: '关键点检测', value: 'keypoint' },
+    { label: '姿态估计', value: 'pose' },
+    { label: '人脸识别', value: 'face' },
+    { label: '其他类型', value: 'other' }
+  ]);
     
     // 分页
     const page = ref(1);
@@ -479,7 +483,7 @@ export default defineComponent({
     const loadDeviceList = async () => {
       try {
         const response = await deviceApi.getDevices();        
-        deviceList.value = response.data;
+        deviceList.value = response.data.data;
       } catch (error) {
         ElMessage.error('获取设备列表失败: ' + error.message);
       }
@@ -518,10 +522,9 @@ export default defineComponent({
         }
         
         const response = await detectionEventApi.getEvents(params);
-        eventList.value = response.data;
-        // 暂时假设总数为当前数据长度的10倍
-        // 实际应用中应该从API获取总数
-        total.value = response.data.length;
+        // 从修改后的API响应结构中获取数据和总数
+        eventList.value = response.data.data;
+        total.value = response.data.total;
       } catch (error) {
         ElMessage.error('获取事件列表失败: ' + error.message);
       } finally {

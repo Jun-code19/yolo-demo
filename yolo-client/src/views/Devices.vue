@@ -254,10 +254,9 @@ const loadData = async () => {
   try {
     const skip = (currentPage.value - 1) * pageSize.value
     const response = await deviceApi.getDevices({ skip, limit: pageSize.value })
-    devices.value = response.data
-    total.value = response.data.length // 实际应用中应从后端获取总数
+    devices.value = response.data.data
+    total.value = response.data.total // 实际应用中应从后端获取总数
   } catch (error) {
-    console.error('加载设备数据失败:', error)
     ElMessage.error('加载设备数据失败，请检查网络连接或服务器状态')
   } finally {
     loading.value = false
