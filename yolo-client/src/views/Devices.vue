@@ -449,7 +449,7 @@ const connectToWebSocket = async (streamUrl) => {
       }
       
       // 创建新的WebSocket连接
-      ws.value = new WebSocket('ws://localhost:8765/ws')
+      ws.value = new WebSocket(`ws://${window.location.host}/ws`)
       
       // 连接超时
       const connectionTimeout = setTimeout(() => {

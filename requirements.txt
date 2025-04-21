@@ -16,4 +16,5 @@ bcrypt==4.0.1
 onnxruntime==1.17.0
 alembic==1.11.1
 requests==2.31.0
-paho-mqtt==2.2.1 
+paho-mqtt==2.1.0 
+av==12.3.0

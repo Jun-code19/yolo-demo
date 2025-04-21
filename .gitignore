@@ -3,6 +3,8 @@ node_modules
 *.dll
 *.lib
 new_venv
+wheels
+node_modules_backup
 storage
 *.log
 *.log.*
@@ -11,3 +13,4 @@ storage
 *.log.*.*.*.*
 *.log.*.*.*.*.*
 *.log.*.*.*.*.*.*
+docker-image

@@ -1,0 +1,99 @@
+# version: '3.8'
+
+services:
+  # 数据服务
+  data-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.data-server
+    container_name: yolo-data-server
+    volumes:
+      - ./models:/app/models
+      - ./storage:/app/storage
+    ports:
+      - "8001:8001"
+    environment:
+      - DATABASE_URL=postgresql://postgres:admin123@postgres:5432/yolo
+    depends_on:
+      - postgres
+    restart: always
+    networks:
+      - yolo-network
+
+  # RTSP服务
+  rtsp-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.rtsp-server
+    container_name: yolo-rtsp-server
+    volumes:
+      - ./models:/app/models
+      - ./storage:/app/storage
+    ports:
+      - "8765:8765"
+    environment:
+      - DATABASE_URL=postgresql://postgres:admin123@postgres:5432/yolo
+    depends_on:
+      - postgres
+    restart: always
+    networks:
+      - yolo-network
+
+  # 检测服务
+  detect-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.detect-server
+    container_name: yolo-detect-server
+    volumes:
+      - ./models:/app/models
+      - ./storage:/app/storage
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://postgres:admin123@postgres:5432/yolo
+    depends_on:
+      - postgres
+    restart: always
+    networks:
+      - yolo-network
+
+  # 前端
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: yolo-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - detect-server
+      - data-server
+      - rtsp-server
+    restart: always
+    networks:
+      - yolo-network
+
+  # 数据库
+  postgres:
+    image: postgres:14
+    container_name: yolo-postgres
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_PASSWORD=admin123
+      - POSTGRES_USER=postgres
+      - POSTGRES_DB=yolo
+    ports:
+      - "5432:5432"
+    restart: always
+    networks:
+      - yolo-network
+
+networks:
+  yolo-network:
+    driver: bridge
+
+volumes:
+  postgres-data:
+    driver: local 

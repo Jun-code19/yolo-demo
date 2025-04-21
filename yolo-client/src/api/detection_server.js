@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const BASE_URL = 'http://localhost:8003/api/detection';
+const BASE_URL = '/api/v2/detection';
 
 export const startDetection = async (configId) => {
     try {

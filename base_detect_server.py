@@ -84,22 +84,72 @@ class DetectionTask:
     def load_model(self): # 加载YOLO模型
         """加载YOLO模型"""
         try:
-            logger.info(f"加载模型: {self.model_path}")
-            self.model = YOLO(self.model_path)
-            # 使用GPU并进行优化
-            device = 'cuda' if torch.cuda.is_available() else 'cpu'
-            self.device = torch.device(device)
-            self.model.to(self.device)
+            # 获取模型的绝对路径并记录
+            abs_model_path = os.path.abspath(self.model_path)
+            logger.info(f"加载模型 - 路径: {self.model_path}")
+            logger.info(f"模型绝对路径: {abs_model_path}")
             
-            self.class_names = self.model.names
+            # 设置离线模式，避免连接GitHub
+            os.environ["ULTRALYTICS_OFFLINE"] = "1"
+            # 禁用所有自动更新和在线检查
+            os.environ["YOLO_NO_ANALYTICS"] = "1"
+            os.environ["NO_VERSION_CHECK"] = "1"
+            
+            # 确保模型文件存在
+            if not os.path.exists(abs_model_path):
+                logger.error(f"模型文件不存在: {abs_model_path}")
+                # 尝试在当前目录下的models文件夹中查找
+                base_name = os.path.basename(abs_model_path)
+                alt_path = os.path.join("models", base_name)
+                alt_abs_path = os.path.abspath(alt_path)
+                logger.info(f"尝试在models文件夹中查找: {alt_abs_path}")
+                
+                if os.path.exists(alt_abs_path):
+                    abs_model_path = alt_abs_path
+                    self.model_path = alt_path
+                    logger.info(f"找到模型文件: {abs_model_path}")
+                else:
+                    logger.error(f"无法找到模型文件")
+                    return False
+            
+            # 使用绝对路径加载模型
+            # 最新YOLO版本可能需要使用以下方式加载本地模型
+            # 设置环境变量确保使用本地模型
+            os.environ["YOLO_VERBOSE"] = "0"  # 减少冗余日志
+            
+            # 根据文件扩展名确定模型类型
+            model_ext = os.path.splitext(abs_model_path)[1].lower()
+            logger.info(f"模型文件扩展名: {model_ext}")
+            
+            # 直接使用本地文件路径加载
+            try:
+                logger.info("开始加载模型...")
+                # 强制指定task类型
+                task_type = 'detect'
+                if hasattr(self, 'models_type') and self.models_type == 'pose':
+                    task_type = 'pose'
+                    
+                self.model = YOLO(abs_model_path, task=task_type)
+                logger.info(f"模型加载成功: {self.model}")
+                # 使用GPU并进行优化
+                device = 'cuda' if torch.cuda.is_available() else 'cpu'
+                self.device = torch.device(device)
+                self.model.to(self.device)
+                
+                self.class_names = self.model.names
+                logger.info(f"模型类别: {self.class_names}")
 
-            if device == 'cuda': 
-                # 使用半精度浮点数以提高性能
-                if hasattr(self.model, 'model'):
-                    self.model.model.half()
-                logger.info("Using half precision on GPU")
+                if device == 'cuda': 
+                    # 使用半精度浮点数以提高性能
+                    if hasattr(self.model, 'model'):
+                        self.model.model.half()
+                    logger.info("使用GPU半精度浮点数处理")
 
-            return True
+                return True
+            except Exception as e:
+                logger.error(f"加载模型时出错: {e}")
+                return False
+                
         except Exception as e:
             logger.error(f"模型加载失败: {e}")
             return False
@@ -196,9 +246,14 @@ class DetectionTask:
             logger.error(f"为检测线程创建事件循环失败: {e}")
         
         try:
-            if not self.load_model():
-                logger.error(f"无法启动检测任务 {self.config_id}，模型加载失败")
-                return       
+            # 如果模型已经加载，跳过加载步骤
+            if not hasattr(self, 'model') or self.model is None:
+                logger.info(f"开始加载模型: {self.config_id}")
+                if not self.load_model():
+                    logger.error(f"无法启动检测任务 {self.config_id}，模型加载失败")
+                    return
+            else:
+                logger.info(f"模型已预加载: {self.config_id}")
             
             # 启动读取帧的线程
             self.thread = threading.Thread(target=self.read_frame)
@@ -259,6 +314,15 @@ class DetectionTask:
                                             detect_frame.copy(), 
                                             max_trajectory_length=self.max_trajectory_length,
                                             show_boxes=True,  # 传递显示框的状态
+                                        )
+                                    elif self.area_coordinates and self.area_coordinates['subtype'] == 'simple':
+                                        # 开启目标追踪功能
+                                        self.object_tracker.update(detections)
+                                            # 传递显示框的状态到draw_tracks方法
+                                        img_result = self.object_tracker.draw_tracks(
+                                            detect_frame.copy(), 
+                                            max_trajectory_length=self.max_trajectory_length,
+                                            show_boxes=False,  # 传递显示框的状态
                                         )
                                     else:
                                         img_result = self.display_detection_results(detect_frame,results[0])
@@ -888,19 +952,71 @@ class DetectionServer:
                 logger.error(f"未找到模型: {config.models_id}")
                 return {"status": "error", "message": "未找到模型"}
             
+            # 检查模型文件是否存在
+            model_path = model.file_path
+            abs_model_path = os.path.abspath(model_path)
+            logger.info(f"模型路径: {model_path}, 绝对路径: {abs_model_path}")
+            
+            if not os.path.exists(abs_model_path):
+                # 尝试在models目录中查找
+                base_name = os.path.basename(model_path)
+                alternative_path = os.path.join("models", base_name)
+                alt_abs_path = os.path.abspath(alternative_path)
+                logger.info(f"原始模型文件不存在，尝试替代路径: {alt_abs_path}")
+                
+                if os.path.exists(alt_abs_path):
+                    model_path = alternative_path
+                    logger.info(f"找到模型文件，使用替代路径: {model_path}")
+                else:
+                    logger.error(f"模型文件不存在: {abs_model_path} 或 {alt_abs_path}")
+                    return {"status": "error", "message": f"模型文件不存在: {os.path.basename(model_path)}"}
+            
+            # 预加载模型到缓存中
+            if model_path not in self.models_cache:
+                try:
+                    # 设置离线模式
+                    os.environ["ULTRALYTICS_OFFLINE"] = "1"
+                    os.environ["YOLO_NO_ANALYTICS"] = "1"
+                    os.environ["NO_VERSION_CHECK"] = "1"
+                    
+                    # 确定模型类型
+                    task_type = 'detect'
+                    if model.models_type == 'pose':
+                        task_type = 'pose'
+                    
+                    logger.info(f"预加载模型到缓存: {model_path}, 任务类型: {task_type}")
+                    # 尝试加载模型到缓存
+                    cached_model = YOLO(model_path, task=task_type)
+                    self.models_cache[model_path] = cached_model
+                    logger.info(f"模型已加载到缓存: {model_path}")
+                except Exception as e:
+                    logger.error(f"预加载模型到缓存失败: {e}")
+                    # 失败但不中断流程，让任务自己尝试加载
+            else:
+                logger.info(f"使用缓存的模型: {model_path}")
+            
             # 创建检测任务
             task = DetectionTask(
                 device_id=config.device_id,
                 config_id=config_id,
-                model_path=model.file_path,
+                model_path=model_path,  # 使用可能已更新的模型路径
                 confidence=config.sensitivity,  
-                models_type=model.models_type,  # 从模型表中获取模型类型
+                models_type=model.models_type,
                 target_class=config.target_classes,
                 save_mode=config.save_mode,
-                # region_of_interest=None,  # 暂时不使用区域参数，避免类型不匹配问题
-                # area_type=config.area_type,
                 area_coordinates=config.area_coordinates
             )
+            
+            # 如果模型已缓存，直接设置
+            if model_path in self.models_cache:
+                task.model = self.models_cache[model_path]
+                # 设置其他必要属性
+                task.class_names = task.model.names
+                device = 'cuda' if torch.cuda.is_available() else 'cpu'
+                task.device = torch.device(device)
+                if device == 'cuda' and hasattr(task.model, 'model'):
+                    task.model.model.half()
+                logger.info(f"使用缓存模型设置任务: {config_id}")
             
             # 设置事件循环
             task.loop = asyncio.get_event_loop()
@@ -1069,19 +1185,19 @@ app.add_middleware(
 
 
 # API路由
-@app.post("/api/detection/{config_id}/start")
+@app.post("/api/v2/detection/{config_id}/start")
 async def start_detection_api(config_id: str, db: Session = Depends(get_db)): # 启动检测任务API
     """启动检测任务API"""
     return await detection_server.start_detection(config_id, db)
 
 
-@app.post("/api/detection/{config_id}/stop")
+@app.post("/api/v2/detection/{config_id}/stop")
 async def stop_detection_api(config_id: str, db: Session = Depends(get_db)): # 停止检测任务API
     """停止检测任务API"""
     return await detection_server.stop_detection(config_id, db)
 
 
-@app.get("/api/detection/status")
+@app.get("/api/v2/detection/status")
 async def get_detection_status(): # 获取所有检测任务的状态
     """获取所有检测任务的状态"""
     tasks_status = {}
@@ -1217,18 +1333,18 @@ class PushResponse(BaseModel):
     created_at: datetime
     last_push_time: datetime
 
-
-@app.get("/api/push/stats")
+@app.get("/api/v2/push/stats")
 async def get_push_stats(): # 获取所有数据推送的统计信息
     """获取所有数据推送的统计信息"""
     return await detection_server.get_push_stats()
 
-@app.post("/api/push/reload/{push_id}")
+
+@app.post("/api/v2/push/reload/{push_id}")
 async def reload_push_config(push_id: str, db: Session = Depends(get_db)): # 重新加载指定的推送配置
     """重新加载指定的推送配置"""
     return await detection_server.reload_push_config(push_id, db)
 
-@app.post("/api/push/create")
+@app.post("/api/v2/push/create")
 async def create_push_config(pushdata: PushCreate, db: Session = Depends(get_db)): # 创建新的数据推送配置
     """创建新的数据推送配置"""
     try:
@@ -1297,7 +1413,7 @@ async def create_push_config(pushdata: PushCreate, db: Session = Depends(get_db)
         logger.error(f"创建推送配置失败: {e}")
         raise HTTPException(status_code=500, detail=f"创建推送配置失败: {str(e)}")
 
-@app.get("/api/push/list")
+@app.get("/api/v2/push/list")
 async def list_push_configs(config_id: str = None, tag: str = None, db: Session = Depends(get_db)): # 获取推送配置列表，支持按配置ID或标签筛选
     """获取推送配置列表，支持按配置ID或标签筛选"""
     try:
@@ -1340,7 +1456,7 @@ async def list_push_configs(config_id: str = None, tag: str = None, db: Session 
         logger.error(f"获取推送配置列表失败: {e}")
         raise HTTPException(status_code=500, detail=f"获取推送配置列表失败: {str(e)}")
 
-@app.put("/api/push/{push_id}")
+@app.put("/api/v2/push/{push_id}")
 async def update_push_config(push_id: str, pushdata: PushUpdate, db: Session = Depends(get_db)): # 更新推送配置
     """更新推送配置"""
     try:
@@ -1402,7 +1518,7 @@ async def update_push_config(push_id: str, pushdata: PushUpdate, db: Session = D
         logger.error(f"更新推送配置失败: {e}")
         raise HTTPException(status_code=500, detail=f"更新推送配置失败: {str(e)}")
 
-@app.delete("/api/push/{push_id}")
+@app.delete("/api/v2/push/{push_id}")
 async def delete_push_config(push_id: str, db: Session = Depends(get_db)): # 删除推送配置
     """删除推送配置"""
     try:
@@ -1429,7 +1545,7 @@ async def delete_push_config(push_id: str, db: Session = Depends(get_db)): # 删
         logger.error(f"删除推送配置失败: {e}")
         raise HTTPException(status_code=500, detail=f"删除推送配置失败: {str(e)}")
 
-@app.post("/api/push/test/{push_id}")
+@app.post("/api/v2/push/test/{push_id}")
 async def test_push_config(push_id: str, db: Session = Depends(get_db)): # 测试推送配置
     """测试推送配置"""
     try:
@@ -1486,4 +1602,4 @@ async def shutdown_push_service(): # 停止时关闭推送服务
 if __name__ == "__main__":
     import uvicorn
     logger.info("正在启动检测服务器...")
-    uvicorn.run(app, host="0.0.0.0", port=8003) 
+    uvicorn.run(app, host="0.0.0.0", port=8000) 

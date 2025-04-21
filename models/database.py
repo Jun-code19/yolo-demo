@@ -6,6 +6,7 @@ import enum
 from datetime import datetime
 import uuid
 from sqlalchemy import LargeBinary
+import os
 
 Base = declarative_base()
 
@@ -269,7 +270,16 @@ class DataPushConfig(Base):
     # 关系可以保留，但现在是可选的
     config = relationship("DetectionConfig", foreign_keys=[config_id])
 
-DATABASE_URL = "postgresql://postgres:admin123@10.83.34.35:5432/eyris_core_db"
+# 根据环境区分数据库连接字符串
+# 开发环境使用本地数据库，生产环境使用Docker容器内数据库
+# 开发环境设置的环境变量或默认使用localhost
+dev_mode = os.getenv("DEV_MODE", "false").lower() == "true"
+if dev_mode:
+    # 开发环境使用localhost
+    DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:admin123@10.83.34.35:5432/eyris_core_db")
+else:
+    # 生产环境使用Docker容器名
+    DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:admin123@postgres:5432/yolo")
 
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

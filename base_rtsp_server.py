@@ -1,13 +1,10 @@
 import asyncio
-import json
 import cv2
 import numpy as np
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException, BackgroundTasks
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from ultralytics import YOLO
 import base64
-from io import BytesIO
-from PIL import Image
 import time
 from collections import deque
 import threading
@@ -17,13 +14,9 @@ import logging
 from pathlib import Path
 from contextlib import nullcontext, asynccontextmanager
 import struct
-from typing import Dict, List, Optional
+from typing import Dict
 from api.routes import router as api_router
 import av
-import uuid
-from pydantic import BaseModel
-from models.database import SessionLocal, Device, DetectionConfig
-# from detection_service import start_enabled_detections, add_frame_to_detection
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -49,7 +42,7 @@ app = FastAPI(
     version="1.0",
     lifespan=lifespan
 )
-app.include_router(api_router, prefix="/api/v1")
+app.include_router(api_router, prefix="/api/v3")
 
 # 配置CORS
 app.add_middleware(

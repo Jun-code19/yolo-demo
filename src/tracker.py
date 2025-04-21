@@ -150,6 +150,14 @@ class ObjectTracker:
             interpolated_points = self._interpolate_points(prev_center, current_center)
             self.trackers[track_id]['trajectory'].extend(interpolated_points)
         
+        # 在这里判断是否拌线
+        # if self.area_coordinates and self.area_coordinates['subtype'] == 'directional':
+        #     # 获取当前轨迹点
+        #     current_trajectory = self.trackers[track_id]['trajectory']
+        #     # 获取当前轨迹点的前一个点
+        #     prev_trajectory = current_trajectory[-2]
+            
+
         # 更新轨迹
         self.trackers[track_id]['trajectory'].append(current_center)
         

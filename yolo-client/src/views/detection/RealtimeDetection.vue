@@ -312,7 +312,7 @@ const connectWebSocket = () => {
   connectionError.value = null
   
   // 创建WebSocket连接
-  const wsUrl = `ws://localhost:8003/ws/detection/preview/${selectedConfig.value}`
+  const wsUrl = `ws://${window.location.host}/ws/detection/preview/${selectedConfig.value}`
   ws = new WebSocket(wsUrl)
   
   // 添加超时处理

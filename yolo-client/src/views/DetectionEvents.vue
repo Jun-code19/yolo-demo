@@ -662,8 +662,9 @@ export default defineComponent({
     // 获取事件图片URL
     const getImageUrl = (thumbnailPath) => {
       if (!thumbnailPath) return '';
-        // 假设后端服务的基础URL
-      const baseUrl = 'http://localhost:8001/api/v1/files'; // 替换为您的后端服务地址
+      
+      // 使用相对路径，通过Nginx代理访问后端服务
+      const baseUrl = '/api/v1/files';
   
       // 返回完整的图片URL
       return `${baseUrl}/${thumbnailPath.replace(/\\/g, '/')}`; // 替换反斜杠为正斜杠
