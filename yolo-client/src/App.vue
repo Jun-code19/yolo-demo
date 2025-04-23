@@ -146,13 +146,8 @@ const handleDropdownCommand = (command) => {
         </el-menu-item>
 
         <el-menu-item index="/system">
-          <el-icon><Setting /></el-icon>
-          <template #title>系统状态</template>
-        </el-menu-item>
-        
-        <el-menu-item index="/syslogs">
-          <el-icon><DataLine /></el-icon>
-          <template #title>系统日志</template>
+          <el-icon><Tools /></el-icon>
+          <template #title>系统管理</template>
         </el-menu-item>
         
         <el-menu-item index="/push/config">

@@ -1,0 +1,9 @@
+# 目标检测服务特有依赖
+ultralytics==8.0.196
+torch==2.0.1
+torchvision==0.15.2
+opencv-python==4.8.0.76
+numpy==1.25.2
+aiohttp==3.8.5
+requests==2.31.0
+paho-mqtt==2.2.1

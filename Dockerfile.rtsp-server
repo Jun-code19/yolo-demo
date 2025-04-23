@@ -21,13 +21,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY pip.conf /etc/pip.conf
 
-# 安装Python包
-# RUN pip install av -i /etc/pip.conf
-# 复制项目文件
-COPY requirements.txt .
-
-# 直接从PyPI安装依赖
-RUN pip install --no-cache-dir -r requirements.txt
+# 复制并安装依赖
+COPY requirements.base.txt requirements.rtsp-server.txt ./
+RUN pip install --no-cache-dir -r requirements.base.txt -r requirements.rtsp-server.txt
 
 # 复制项目文件
 COPY . .

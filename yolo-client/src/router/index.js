@@ -38,14 +38,6 @@ const routes = [
     }
   },
   {
-    path: '/syslogs',
-    name: 'SystemLogs',
-    component: () => import('../views/SystemLogs.vue'),
-    meta: {
-      requiresAuth: true
-    }
-  },
-  {
     path: '/realtime',
     name: 'RealtimeDetection',
     component: () => import('../views/detection/RealtimeDetection.vue'),
