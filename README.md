@@ -146,3 +146,38 @@ Apply to README.md
 /api/push/create - 创建推送配置
 /ws/detection/preview/{config_id} - WebSocket实时预览
 通过这份文档，您应该能够理解系统架构、完成安装部署、使用核心功能并准备系统发布。如有其他问题，请参考项目代码或联系开发团队。
+
+## 人群分析模块重构说明
+
+人群分析模块已进行重构，主要变更如下：
+
+1. **模块化改进**：
+   - 将YOLO模型加载和摄像头访问功能封装为独立方法
+   - 拆分人员检测逻辑，减少与实时检测模块的耦合
+
+2. **服务生命周期优化**：
+   - 优化了应用启动和关闭流程，确保服务按照正确顺序启动和关闭
+   - 增强了异常处理和错误恢复能力
+
+3. **API改进**：
+   - 增强了设备验证逻辑
+   - 添加了更完善的错误处理和状态反馈
+   - 改进了获取可用设备的接口，确保只返回有检测配置的设备
+
+4. **功能扩展**：
+   - 支持热力图生成
+   - 支持人数预警
+   - 支持多种时间调度方式(间隔和Cron表达式)
+
+### 使用说明
+
+人群分析模块通过API进行管理，主要接口如下：
+
+- `POST /api/v2/crowd-analysis/jobs`: 创建人群分析任务
+- `GET /api/v2/crowd-analysis/jobs`: 获取所有人群分析任务
+- `GET /api/v2/crowd-analysis/jobs/{job_id}`: 获取特定任务详情
+- `DELETE /api/v2/crowd-analysis/jobs/{job_id}`: 删除分析任务
+- `POST /api/v2/crowd-analysis/jobs/{job_id}/run`: 立即执行分析任务
+- `GET /api/v2/crowd-analysis/available-devices`: 获取可用于人群分析的设备列表
+- `POST /api/v2/crowd-analysis/jobs/{job_id}/pause`: 暂停分析任务
+- `POST /api/v2/crowd-analysis/jobs/{job_id}/resume`: 恢复分析任务

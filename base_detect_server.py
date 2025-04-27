@@ -25,13 +25,14 @@ from threading import Lock  # 导入锁
 from src.tracker import ObjectTracker
 import colorsys
 # 导入独立的数据推送模块
-from src.data_push import data_pusher
+from src.data_pusher import data_pusher
+from src.crowd_analyzer import crowd_analyzer
 from pydantic import BaseModel
 
 from models.database import (
     SessionLocal, DetectionConfig, DetectionEvent, Device, 
     DetectionModel, DetectionPerformance, SaveMode,
-    EventStatus, Base, engine, get_db, DataPushConfig, PushMethod
+    EventStatus, Base, engine, get_db 
 )
 
 # 配置日志
@@ -924,7 +925,6 @@ class DetectionTask:
                 self.broadcast_task.cancel()
                 self.broadcast_task = None
 
-
 class DetectionServer:
     """检测服务器类，管理所有检测任务"""
     
@@ -1121,14 +1121,6 @@ class DetectionServer:
             if config_id in self.tasks:
                 self.tasks[config_id].remove_client(websocket)
 
-    async def get_push_stats(self): # 获取所有数据推送的统计信息
-        """获取所有数据推送的统计信息"""
-        return data_pusher.get_push_stats()
-
-    async def reload_push_config(self, push_id: str, db: Session): # 重新加载指定的推送配置
-        """重新加载指定的推送配置"""
-        return data_pusher.reload_push_config(push_id, db)
-
 # 创建检测服务器实例
 detection_server = DetectionServer()
 
@@ -1140,31 +1132,54 @@ async def lifespan(app: FastAPI):
     # 创建数据库表（如果不存在）
     Base.metadata.create_all(bind=engine)
     
-    await startup_push_service()
+    # 1.启动数据推送服务
+    try:
+        data_pusher.startup_push_service()
+    except Exception as e:
+        logger.error(f"启动数据推送服务失败: {e}")
 
-    # 启动已启用的检测任务
-    db = SessionLocal()
-    await detection_server.start_all_enabled(db)
-    db.close()
+    # 2. 启动检测服务
+    try:
+        db = SessionLocal()
+        await detection_server.start_all_enabled(db)
+        db.close()
+    except Exception as e:
+        logger.error(f"启动检测服务失败: {e}")
+
+    # 3. 启动人群分析服务
+    try:       
+        # 加载所有活跃的人群分析任务
+        crowd_analyzer.load_all_active_jobs()
+        # 启动人群分析服务
+        crowd_analyzer.start()
+    except Exception as e:
+        logger.error(f"启动人群分析服务失败: {e}")
     
     yield
     
-    # 服务关闭时停止所有检测任务
+    # 关闭服务（顺序与启动相反）
     logger.info("检测服务器关闭中...")
-    for config_id, task in list(detection_server.tasks.items()):
-        task.stop()
-
-    await shutdown_push_service()
-
-    # 确保所有任务完成
-    # tasks = asyncio.all_tasks()
-    # for task in tasks:
-    #     if task is not asyncio.current_task():
-    #         task.cancel()
     
-    # # 等待所有任务完成
-    # await asyncio.gather(*tasks, return_exceptions=True)
-
+    # 1. 停止人群分析服务
+    try:
+        crowd_analyzer.stop()
+    except Exception as e:
+        logger.error(f"停止人群分析服务失败: {e}")
+    
+    # 2. 停止检测任务
+    for config_id, task in list(detection_server.tasks.items()):
+        try:
+            task.stop()
+        except Exception as e:
+            logger.error(f"停止检测任务 {config_id} 失败: {e}")
+    
+    # 3. 停止数据推送服务
+    try:
+        data_pusher.shutdown_push_service()
+    except Exception as e:
+        logger.error(f"停止数据推送服务失败: {e}")
+    
+    logger.info("所有服务已停止")
 
 # 创建FastAPI应用
 app = FastAPI(
@@ -1182,7 +1197,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 
 # API路由
 @app.post("/api/v2/detection/{config_id}/start")
@@ -1274,332 +1288,14 @@ async def detection_preview_websocket(websocket: WebSocket, config_id: str): # �
             detection_server.tasks[config_id].remove_client(websocket)
             logger.info(f"WebSocket客户端已从检测任务移除: {config_id}")
 
+# 注册人群分析API路由
+from api.crowd_analysis import router as crowd_analysis_router
+app.include_router(crowd_analysis_router, prefix="/api/v2")
+
 # 添加数据推送相关的API接口
-class PushDataBase(BaseModel):
-    push_name: str
-    push_method: str
-    config_id: str
-    tags: List[str]
-    http_url: str
-    http_method: str
-    tcp_host: str
-    tcp_port: int
-    mqtt_broker: str
-    mqtt_port: int
-    mqtt_topic: str
-    mqtt_username: str
-    mqtt_password: str
-    mqtt_use_tls: bool
-    include_image: bool
-
-class PushCreate(PushDataBase):
-    pass
-
-class PushUpdate(PushDataBase):
-    push_name: Optional[str] = None
-    push_method: Optional[str] = None
-    config_id: Optional[str] = None
-    tags: Optional[List[str]] = None
-    http_url: Optional[str] = None
-    http_method: Optional[str] = None
-    tcp_host: Optional[str] = None
-    tcp_port: Optional[int] = None
-    mqtt_broker: Optional[str] = None
-    mqtt_port: Optional[int] = None
-    mqtt_topic: Optional[str] = None
-    mqtt_username: Optional[str] = None
-    mqtt_password: Optional[str] = None
-    mqtt_use_tls: Optional[bool] = None
-    include_image: Optional[bool] = None
-    enabled: Optional[bool] = None
-
-class PushResponse(BaseModel):
-    push_id: str
-    push_name: str
-    config_id: str
-    tags: List[str]
-    push_method: str
-    http_url: str
-    http_method: str
-    tcp_host: str
-    tcp_port: int
-    mqtt_broker: str
-    mqtt_port: int
-    mqtt_topic: str
-    mqtt_username: str
-    mqtt_password: str
-    mqtt_use_tls: bool
-    include_image: bool
-    created_at: datetime
-    last_push_time: datetime
-
-@app.get("/api/v2/push/stats")
-async def get_push_stats(): # 获取所有数据推送的统计信息
-    """获取所有数据推送的统计信息"""
-    return await detection_server.get_push_stats()
-
-
-@app.post("/api/v2/push/reload/{push_id}")
-async def reload_push_config(push_id: str, db: Session = Depends(get_db)): # 重新加载指定的推送配置
-    """重新加载指定的推送配置"""
-    return await detection_server.reload_push_config(push_id, db)
-
-@app.post("/api/v2/push/create")
-async def create_push_config(pushdata: PushCreate, db: Session = Depends(get_db)): # 创建新的数据推送配置
-    """创建新的数据推送配置"""
-    try:
-        # 验证推送方法
-        try:
-            method = PushMethod(pushdata.push_method.lower())
-        except ValueError:
-            raise HTTPException(status_code=400, detail=f"无效的推送方法: {pushdata.push_method}")
-
-        # 检查检测配置是否存在（如果指定了）
-        if pushdata.config_id:
-            config = db.query(DetectionConfig).filter(DetectionConfig.config_id == pushdata.config_id).first()
-            if not config:
-                raise HTTPException(status_code=404, detail=f"未找到检测配置: {pushdata.config_id}")
-        else:
-            pushdata.config_id = None
-
-        # 根据推送方法验证必要的参数
-        if method == PushMethod.http or method == PushMethod.https:
-            if not pushdata.http_url:    
-                raise HTTPException(status_code=400, detail="HTTP/HTTPS推送需要URL")
-        elif method == PushMethod.tcp:
-            if not pushdata.tcp_host or not pushdata.tcp_port:
-                raise HTTPException(status_code=400, detail="TCP推送需要主机和端口")
-        elif method == PushMethod.mqtt:
-            if not pushdata.mqtt_broker or not pushdata.mqtt_topic:
-                raise HTTPException(status_code=400, detail="MQTT推送需要代理和主题")
-
-        # 创建新的推送配置
-        push_config = DataPushConfig(
-            push_name=pushdata.push_name,
-            config_id=pushdata.config_id,  # 现在可以为空
-            tags=pushdata.tags or [],  # 添加标签
-            push_method=method,
-            http_url=pushdata.http_url,
-            http_method=pushdata.http_method,
-            tcp_host=pushdata.tcp_host,
-            tcp_port=pushdata.tcp_port,
-            mqtt_broker=pushdata.mqtt_broker,
-            mqtt_port=pushdata.mqtt_port,
-            mqtt_topic=pushdata.mqtt_topic,
-            mqtt_username=pushdata.mqtt_username,
-            mqtt_password=pushdata.mqtt_password,
-            mqtt_use_tls=pushdata.mqtt_use_tls,
-            include_image=pushdata.include_image,
-            http_headers={} if method in [PushMethod.http, PushMethod.https] else None
-        )
-
-        db.add(push_config)
-        db.commit()
-        db.refresh(push_config)
-
-        # 重新加载推送配置
-        data_pusher.reload_push_config(push_config.push_id, db)
-
-        return {
-            "status": "success",
-            "message": "推送配置已创建",
-            "push_id": push_config.push_id
-        }
-
-    except HTTPException as e:
-        raise e
-    except Exception as e:
-        db.rollback()
-        logger.error(f"创建推送配置失败: {e}")
-        raise HTTPException(status_code=500, detail=f"创建推送配置失败: {str(e)}")
-
-@app.get("/api/v2/push/list")
-async def list_push_configs(config_id: str = None, tag: str = None, db: Session = Depends(get_db)): # 获取推送配置列表，支持按配置ID或标签筛选
-    """获取推送配置列表，支持按配置ID或标签筛选"""
-    try:
-        query = db.query(DataPushConfig)
-        
-        # 根据配置ID筛选
-        if config_id:
-            query = query.filter(DataPushConfig.config_id == config_id)
-        
-        # 根据标签筛选
-        if tag:
-            query = query.filter(DataPushConfig.tags.any(tag))
-        
-        configs = query.all()
-        return {
-            "status": "success",
-            "configs": [
-                {
-                    "push_id": config.push_id,
-                    "push_name": config.push_name,
-                    "config_id": config.config_id,
-                    "tags": config.tags,  # 添加标签
-                    "push_method": config.push_method.value,
-                    "enabled": config.enabled,
-                    "http_url": config.http_url,
-                    "http_method": config.http_method,
-                    "tcp_host": config.tcp_host,
-                    "tcp_port": config.tcp_port,
-                    "mqtt_broker": config.mqtt_broker,
-                    "mqtt_port": config.mqtt_port,
-                    "mqtt_topic": config.mqtt_topic,
-                    "include_image": config.include_image,
-                    "created_at": config.created_at.isoformat() if config.created_at else None,
-                    "last_push_time": config.last_push_time.isoformat() if config.last_push_time else None
-                }
-                for config in configs
-            ]
-        }
-    except Exception as e:
-        logger.error(f"获取推送配置列表失败: {e}")
-        raise HTTPException(status_code=500, detail=f"获取推送配置列表失败: {str(e)}")
-
-@app.put("/api/v2/push/{push_id}")
-async def update_push_config(push_id: str, pushdata: PushUpdate, db: Session = Depends(get_db)): # 更新推送配置
-    """更新推送配置"""
-    try:
-        # 查找推送配置
-        push_config = db.query(DataPushConfig).filter(DataPushConfig.push_id == push_id).first()
-        if not push_config:
-            raise HTTPException(status_code=404, detail=f"未找到推送配置: {push_id}")
-
-        # 更新字段
-        if pushdata.push_name is not None:
-            push_config.push_name = pushdata.push_name
-        if pushdata.config_id is not None:  # 允许将config_id设置为None
-            # 如果有config_id，检查是否存在
-            if pushdata.config_id and not db.query(DetectionConfig).filter(DetectionConfig.config_id == pushdata.config_id).first():
-                raise HTTPException(status_code=404, detail=f"未找到检测配置: {pushdata.config_id}")
-            push_config.config_id = pushdata.config_id
-        if pushdata.tags is not None:
-            push_config.tags = pushdata.tags
-        if pushdata.enabled is not None:
-            push_config.enabled = pushdata.enabled
-        if pushdata.http_url is not None:
-            push_config.http_url = pushdata.http_url
-        if pushdata.http_method is not None:
-            push_config.http_method = pushdata.http_method
-        if pushdata.tcp_host is not None:
-            push_config.tcp_host = pushdata.tcp_host
-        if pushdata.tcp_port is not None:
-            push_config.tcp_port = pushdata.tcp_port
-        if pushdata.mqtt_broker is not None:
-            push_config.mqtt_broker = pushdata.mqtt_broker
-        if pushdata.mqtt_port is not None:
-            push_config.mqtt_port = pushdata.mqtt_port
-        if pushdata.mqtt_topic is not None:
-            push_config.mqtt_topic = pushdata.mqtt_topic
-        if pushdata.mqtt_username is not None:
-            push_config.mqtt_username = pushdata.mqtt_username
-        if pushdata.mqtt_password is not None:
-            push_config.mqtt_password = pushdata.mqtt_password
-        if pushdata.mqtt_use_tls is not None:
-            push_config.mqtt_use_tls = pushdata.mqtt_use_tls
-        if pushdata.include_image is not None:
-            push_config.include_image = pushdata.include_image
-
-        push_config.updated_at = datetime.now()
-        db.commit()
-
-        # 重新加载推送配置
-        data_pusher.reload_push_config(push_id, db)
-
-        return {
-            "status": "success",
-            "message": "推送配置已更新"
-        }
-
-    except HTTPException as e:
-        raise e
-    except Exception as e:
-        db.rollback()
-        logger.error(f"更新推送配置失败: {e}")
-        raise HTTPException(status_code=500, detail=f"更新推送配置失败: {str(e)}")
-
-@app.delete("/api/v2/push/{push_id}")
-async def delete_push_config(push_id: str, db: Session = Depends(get_db)): # 删除推送配置
-    """删除推送配置"""
-    try:
-        # 查找推送配置
-        push_config = db.query(DataPushConfig).filter(DataPushConfig.push_id == push_id).first()
-        if not push_config:
-            raise HTTPException(status_code=404, detail=f"未找到推送配置: {push_id}")
-
-        db.delete(push_config)
-        db.commit()
-
-        # 从缓存中删除推送配置
-        data_pusher.reload_push_config(push_id, db)
-
-        return {
-            "status": "success",
-            "message": "推送配置已删除"
-        }
-
-    except HTTPException as e:
-        raise e
-    except Exception as e:
-        db.rollback()
-        logger.error(f"删除推送配置失败: {e}")
-        raise HTTPException(status_code=500, detail=f"删除推送配置失败: {str(e)}")
-
-@app.post("/api/v2/push/test/{push_id}")
-async def test_push_config(push_id: str, db: Session = Depends(get_db)): # 测试推送配置
-    """测试推送配置"""
-    try:
-        # 查找推送配置
-        push_config = db.query(DataPushConfig).filter(DataPushConfig.push_id == push_id).first()
-        if not push_config:
-            raise HTTPException(status_code=404, detail=f"未找到推送配置: {push_id}")
-
-        # 创建测试数据
-        test_data = {
-            "timestamp": datetime.now().isoformat(),
-            "test": True,
-            "message": "这是一条测试消息",
-            "push_id": push_id
-        }
-
-        # 根据推送方法进行测试
-        success = False
-        if push_config.push_method == PushMethod.http or push_config.push_method == PushMethod.https:
-            success = data_pusher._push_http(push_config, test_data)
-        elif push_config.push_method == PushMethod.tcp:
-            success = data_pusher._push_tcp(push_config, test_data)
-        elif push_config.push_method == PushMethod.mqtt:
-            success = data_pusher._push_mqtt(push_config, test_data)
-
-        return {
-            "status": "success" if success else "failure",
-            "message": "推送测试成功" if success else "推送测试失败"
-        }
-
-    except Exception as e:
-        logger.error(f"测试推送配置失败: {e}")
-        raise HTTPException(status_code=500, detail=f"测试推送配置失败: {str(e)}")
-
-# 启动应用时加载已配置的推送任务
-@app.on_event("startup")
-async def startup_push_service(): # 启动时加载推送配置
-    """启动时加载推送配置"""
-    db = SessionLocal()
-    try:
-        data_pusher.load_push_configs(db)
-        data_pusher.start()
-        logger.info("数据推送服务已启动")
-    finally:
-        db.close()
-
-# 停止应用时关闭推送服务
-@app.on_event("shutdown")
-async def shutdown_push_service(): # 停止时关闭推送服务
-    """关闭推送服务"""
-    data_pusher.stop()
-    logger.info("数据推送服务已关闭")
+from api.data_push import router as data_push_router
+app.include_router(data_push_router, prefix="/api/v2")
 
 if __name__ == "__main__":
     import uvicorn
-    logger.info("正在启动检测服务器...")
     uvicorn.run(app, host="0.0.0.0", port=8000) 

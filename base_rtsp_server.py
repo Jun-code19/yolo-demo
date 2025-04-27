@@ -15,7 +15,6 @@ from pathlib import Path
 from contextlib import nullcontext, asynccontextmanager
 import struct
 from typing import Dict
-from api.routes import router as api_router
 import av
 
 # 配置日志
@@ -26,10 +25,6 @@ logger = logging.getLogger(__name__)
 async def lifespan(app):
     # 执行启动时的代码
     logger.info("服务启动中...")
-    
-    # 启动所有已启用的检测配置
-    # background_tasks = BackgroundTasks()
-    # background_tasks.add_task(start_enabled_detections)
     
     yield
     
@@ -42,7 +37,6 @@ app = FastAPI(
     version="1.0",
     lifespan=lifespan
 )
-app.include_router(api_router, prefix="/api/v3")
 
 # 配置CORS
 app.add_middleware(
@@ -747,7 +741,6 @@ class ConnectionManager:
 # 创建连接管理器实例
 manager = ConnectionManager()
 
-
 async def process_frame_queue(connection_id: str):
     """异步处理帧队列"""
     queue = frame_queues.get(connection_id)
@@ -1271,9 +1264,31 @@ async def websocket_endpoint(websocket: WebSocket):
             await rtsp_manager.stop_stream(connection_id)
         await manager.disconnect(connection_id)
 
-@app.get("/")
-async def root():
-    return {"message": "YOLO Detection Server"}
+@app.post("/api/v3/model/load")
+async def load_model_api(model_data: dict):
+    """加载模型API端点"""
+    try:
+        # model_id = model_data.get("model_id")
+        model_path = model_data.get("model_path")
+        
+        if not model_path:
+            return {"status": "error", "message": "缺少必要参数"}
+            
+        model = YOLO(model_path)  # 加载模型
+        classes = model.names  # 获取类别名称
+        
+        if model:
+            return {
+                "status": "success", 
+                "message": "模型加载成功",                                  
+                "classes": classes
+            }
+        else:
+            return {"status": "error", "message": "模型加载失败"}
+            
+    except Exception as e:
+        logger.error(f"加载模型失败: {e}")
+        return {"status": "error", "message": f"加载模型失败: {str(e)}"}
 
 if __name__ == "__main__":
     import uvicorn

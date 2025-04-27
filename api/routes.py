@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
 from models.database import get_db, Device, Video, AnalysisResult, Alarm, User, SysLog, DetectionModel, DetectionConfig, DetectionEvent, DetectionSchedule, DetectionStat, DetectionPerformance, SaveMode, EventStatus, DetectionFrequency
-from pydantic import BaseModel, IPvAnyAddress, Field
+from pydantic import BaseModel
 from fastapi.security import OAuth2PasswordRequestForm
 from api.auth import authenticate_user, create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES, get_current_user, check_admin_permission, get_password_hash, verify_password
 from api.logger import log_action
@@ -18,7 +18,6 @@ import json
 from pathlib import Path
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import func, text, desc, and_, or_
-from ultralytics import YOLO
 
 router = APIRouter()
 
@@ -572,11 +571,24 @@ async def upload_model(
             raise HTTPException(status_code=400, detail="Invalid parameters JSON")
     
     # 加载模型并获取类别
-    try:
-        model = YOLO(file_path)  # 加载模型
-        classes = model.names  # 获取类别名称
+    try:      
+        rtsp_service_url = "http://rtsp-server:8765/api/v3/model/load"
+        response = requests.post(rtsp_service_url, json={
+            "model_path": str(file_path)
+        }, timeout=10)
+        if response.status_code != 200:
+            raise HTTPException(status_code=500, detail=f"模型加载失败: {response.text}")
+        # 解析响应以获取类别信息
+        classes = response.json().get("classes", {})  # 假设响应包含一个名为"classes"的字段
+        if not classes:
+            raise HTTPException(status_code=500, detail="模型加载成功，但未返回类别信息")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"模型加载失败: {str(e)}")
+    # try:
+    #     model = YOLO(file_path)  # 加载模型
+    #     classes = model.names  # 获取类别名称
+    # except Exception as e:
+    #     raise HTTPException(status_code=500, detail=f"模型加载失败: {str(e)}")
 
     # 创建数据库记录
     db_model = DetectionModel(

@@ -135,6 +135,11 @@ const handleDropdownCommand = (command) => {
           
         </el-sub-menu>
 
+        <el-menu-item index="/crowd-analysis">
+          <el-icon><DataLine /></el-icon>
+          <template #title>人群分析</template>
+        </el-menu-item>
+
         <el-menu-item index="/devices">
           <el-icon><VideoCamera /></el-icon>
           <template #title>设备管理</template>

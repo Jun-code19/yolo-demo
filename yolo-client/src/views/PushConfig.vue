@@ -551,13 +551,13 @@ export default {
     
     onMounted(() => {
       loadPushConfigs();
-      const statsInterval = setInterval(() => {
-        loadPushStats();
-      }, 30000);
+      // const statsInterval = setInterval(() => {
+      //   loadPushStats();
+      // }, 30000);
       
-      return () => {
-        clearInterval(statsInterval);
-      };
+      // return () => {
+      //   clearInterval(statsInterval);
+      // };
     });
     
     return {

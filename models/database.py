@@ -56,6 +56,8 @@ class Device(Base):
     password = Column(String(256), nullable=False)
     status = Column(Boolean, default=True)
     last_heartbeat = Column(DateTime)
+    location = Column(String(255))
+    area = Column(String(255))
     
     detection_configs = relationship("DetectionConfig", back_populates="device", cascade="all, delete-orphan")
     detection_events = relationship("DetectionEvent", back_populates="device", cascade="all, delete-orphan")
@@ -270,16 +272,55 @@ class DataPushConfig(Base):
     # 关系可以保留，但现在是可选的
     config = relationship("DetectionConfig", foreign_keys=[config_id])
 
+class CrowdAnalysisJob(Base):
+    __tablename__ = "crowd_analysis_job"
+    
+    job_id = Column(String(64), primary_key=True)
+    job_name = Column(String(128), nullable=False)
+    device_ids = Column(ARRAY(String)) # 设备ID列表
+    models_id = Column(String(64), ForeignKey('detection_model.models_id'), nullable=True) # 检测模型ID
+    interval = Column(Integer, nullable=True) # 执行间隔(秒)
+    cron_expression = Column(String(64), nullable=True) # Cron表达式
+    tags = Column(ARRAY(String)) # 标签列表
+    location_info = Column(JSONB, nullable=True) # 位置信息
+    description = Column(String(512), nullable=True) # 描述
+    is_active = Column(Boolean, default=True) # 是否启用
+    detect_classes = Column(ARRAY(String), nullable=True) # 检测类别
+    created_at = Column(DateTime, default=datetime.now)
+    last_run = Column(DateTime, nullable=True) # 最后执行时间
+    last_result = Column(JSONB, nullable=True) # 最后结果
+    last_error = Column(String(512), nullable=True) # 最后错误信息
+    warning_threshold = Column(Integer, default=0)  # 人数预警阈值，0表示不预警
+    warning_message = Column(String(256))  # 预警消息模板
+    warning_receivers = Column(ARRAY(String))  # 预警接收者
+    
+    model = relationship("DetectionModel", foreign_keys=[models_id])
+
+class CrowdAnalysisResult(Base):
+    __tablename__ = "crowd_analysis_result"
+    
+    result_id = Column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
+    job_id = Column(String(64), ForeignKey('crowd_analysis_job.job_id'), nullable=False)
+    timestamp = Column(DateTime, default=datetime.now)
+    total_person_count = Column(Integer, default=0)
+    camera_counts = Column(JSONB)  # 存储各摄像头的人数数据
+    location_info = Column(JSONB, nullable=True)
+    
+    job = relationship("CrowdAnalysisJob", back_populates="results")
+
+# 添加反向关系
+CrowdAnalysisJob.results = relationship("CrowdAnalysisResult", back_populates="job")
+
 # 根据环境区分数据库连接字符串
 # 开发环境使用本地数据库，生产环境使用Docker容器内数据库
 # 开发环境设置的环境变量或默认使用localhost
-dev_mode = os.getenv("DEV_MODE", "false").lower() == "true"
-if dev_mode:
+# dev_mode = os.getenv("DEV_MODE", "false").lower() == "true"
+# if dev_mode:
     # 开发环境使用localhost
-    DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:admin123@10.83.34.35:5432/eyris_core_db")
-else:
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:admin123@10.83.34.35:5432/eyris_core_db")
+# else:
     # 生产环境使用Docker容器名
-    DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:admin123@postgres:5432/yolo")
+    # DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:admin123@postgres:5432/yolo")
 
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

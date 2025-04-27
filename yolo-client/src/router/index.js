@@ -103,6 +103,30 @@ const routes = [
       requiresAuth: true,
       title: '数据推送配置'
     }
+  },
+  {
+    path: '/crowd-analysis',
+    component: () => import('@/views/crowd-analysis/Layout.vue'),
+    children: [
+      {
+        path: '',
+        name: 'CrowdAnalysis',
+        component: () => import('@/views/crowd-analysis/List.vue'),
+        meta: { title: '人群分析' }
+      },
+      {
+        path: 'create',
+        name: 'CreateCrowdAnalysis',
+        component: () => import('@/views/crowd-analysis/Create.vue'),
+        meta: { title: '创建人群分析任务' }
+      },
+      {
+        path: 'detail/:id',
+        name: 'CrowdAnalysisDetail',
+        component: () => import('@/views/crowd-analysis/Detail.vue'),
+        meta: { title: '任务详情' }
+      }
+    ]
   }
 ]
 
