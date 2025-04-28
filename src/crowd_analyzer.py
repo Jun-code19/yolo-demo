@@ -282,7 +282,12 @@ class CrowdAnalyzer:
         """
         try:
             # 构建RTSP URL
-            rtsp_url = f"rtsp://{device.username}:{device.password}@{device.ip_address}:{device.port}/cam/realmonitor?channel=1&subtype=0"
+            if device.device_type == 'nvr':
+                stream_type = 1 if device.stream_type == 'sub' else 0
+                rtsp_url = f"rtsp://{device.username}:{device.password}@{device.ip_address}:{device.port}/cam/realmonitor?channel={device.channel}&subtype={stream_type}"
+            else:
+                stream_type = 1 if device.stream_type == 'sub' else 0
+                rtsp_url = f"rtsp://{device.username}:{device.password}@{device.ip_address}:{device.port}/cam/realmonitor?channel=1&subtype={stream_type}"
             
             # 连接到摄像机
             cap = cv2.VideoCapture(rtsp_url)

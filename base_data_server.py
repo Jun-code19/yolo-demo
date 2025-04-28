@@ -31,5 +31,4 @@ app.add_middleware(
 app.include_router(router, prefix="/api/v1")
 
 if __name__ == "__main__":
-    logger.info("启动服务器...")
     uvicorn.run(app, host="0.0.0.0", port=8001) 

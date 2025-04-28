@@ -312,7 +312,7 @@ const handleModelChange = async (modelId) => {
     
     // 默认选中第一个类别
     if (modelClasses.value.length > 0) {
-      form.detect_classes = [modelClasses.value[0]]
+      form.detect_classes = [modelClasses.value[0].value]
     } else {
       form.detect_classes = []
     }

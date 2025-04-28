@@ -30,6 +30,10 @@ class DeviceCreate(BaseModel):
     port: int
     username: str
     password: str
+    channel: Optional[int] = 1
+    stream_type: Optional[str] = "main"
+    location: Optional[str] = None
+    area: Optional[str] = None
 
 class DeviceResponse(BaseModel):
     device_id: str
@@ -39,6 +43,10 @@ class DeviceResponse(BaseModel):
     port: int
     username: str
     password: str
+    channel: Optional[int] = 1
+    stream_type: Optional[str] = "main"
+    location: Optional[str] = None
+    area: Optional[str] = None
     status: bool
     last_heartbeat: Optional[datetime]
 
@@ -52,6 +60,10 @@ class DeviceUpdate(BaseModel):
     port: int
     username: str
     password: Optional[str]
+    channel: Optional[int] = 1
+    stream_type: Optional[str] = "main"
+    location: Optional[str] = None
+    area: Optional[str] = None
 
 # 设备管理API
 @router.post("/devices/", response_model=DeviceResponse)

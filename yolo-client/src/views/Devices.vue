@@ -86,9 +86,25 @@
         <el-form-item label="设备类型" prop="device_type">
           <el-select v-model="deviceForm.device_type" placeholder="请选择设备类型" style="width: 100%">
             <el-option label="摄像头" value="camera" />
+            <el-option label="硬盘录像机" value="nvr" />
             <el-option label="边缘服务器" value="edge_server" />
             <el-option label="存储节点" value="storage_node" />
           </el-select>
+        </el-form-item>
+        <el-form-item label="通道号" prop="channel" v-if="deviceForm.device_type === 'nvr'">
+          <el-input-number v-model="deviceForm.channel" :min="1" :max="64" placeholder="请输入通道号" style="width: 100%" />
+        </el-form-item>
+        <el-form-item label="码流选择" prop="stream_type">
+          <el-select v-model="deviceForm.stream_type" placeholder="请选择码流" style="width: 100%">
+            <el-option label="主码流" value="main" />
+            <el-option label="辅码流" value="sub" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="位置" prop="location">
+          <el-input v-model="deviceForm.location" placeholder="请输入设备位置" />
+        </el-form-item>
+        <el-form-item label="区域" prop="area">
+          <el-input v-model="deviceForm.area" placeholder="请输入设备区域" />
         </el-form-item>
         <el-form-item label="IP地址" prop="ip_address">
           <el-input v-model="deviceForm.ip_address" placeholder="请输入IP地址" />
@@ -217,7 +233,11 @@ const deviceForm = reactive({
   ip_address: '',
   port: 554,
   username: '',
-  password: ''
+  password: '',
+  channel: 1,
+  stream_type: 'main',
+  location: '',
+  area: ''
 })
 
 const deviceRules = {
@@ -316,7 +336,11 @@ const handleAdd = () => {
     ip_address: '',
     port: 554,
     username: '',
-    password: ''
+    password: '',
+    channel: 1,
+    stream_type: 'main',
+    location: '',
+    area: ''
   })
 }
 
@@ -331,7 +355,11 @@ const handleEdit = (row) => {
     ip_address: row.ip_address,
     port: row.port,
     username: row.username,
-    password: row.password // 不显示密码，如果不修改则留空
+    password: row.password,
+    channel: row.channel || 1,
+    stream_type: row.stream_type || 'main',
+    location: row.location || '',
+    area: row.area || ''
   })
 }
 
@@ -420,12 +448,12 @@ const startPreview = async () => {
     // 构建流地址
     const { device_type, ip_address, port, username, password } = currentDevice.value
     
-    if (device_type === 'camera') {
+    if (device_type === 'camera' || device_type === 'nvr') {
       // 构建RTSP URL（根据摄像头类型可能需要调整URL格式）
-      const rtspUrl = `rtsp://${username}:${password}@${ip_address}:${port}/cam/realmonitor?channel=1&subtype=0`
+      // const rtspUrl = `rtsp://${username}:${password}@${ip_address}:${port}/cam/realmonitor?channel=1&subtype=0`
       
       // 使用WebSocket连接服务器请求代理流
-      await connectToWebSocket(rtspUrl)
+      await connectToWebSocket()
     } else {
       throw new Error('不支持的设备类型')
     }
@@ -439,7 +467,7 @@ const startPreview = async () => {
 }
 
 // 连接WebSocket服务器
-const connectToWebSocket = async (streamUrl) => {
+const connectToWebSocket = async () => {
   return new Promise((resolve, reject) => {
     try {
       // 关闭已有的连接
@@ -768,8 +796,9 @@ const formatDateTime = (dateTime) => {
 const getDeviceTypeName = (type) => {
   const typeMap = {
     'camera': '摄像头',
+    'nvr': '硬盘录像机',
     'edge_server': '边缘服务器',
-    'storage_node': '存储节点'
+    'storage_node': '存储节点',
   }
   return typeMap[type] || type
 }
@@ -777,9 +806,10 @@ const getDeviceTypeName = (type) => {
 // 获取设备类型标签样式
 const getDeviceTypeTag = (type) => {
   const typeTagMap = {
-    'camera': '',
-    'edge_server': 'success',
-    'storage_node': 'warning'
+    'camera': 'info',
+    'nvr': 'success',
+    'edge_server': 'warning',
+    'storage_node': 'danger'
   }
   return typeTagMap[type] || 'info'
 }
@@ -793,7 +823,13 @@ const toggleFallbackMode = () => {
 const buildRtspUrl = () => {
   if (!currentDevice.value) return '';
   
-  return `rtsp://${currentDevice.value.username}:${currentDevice.value.password}@${currentDevice.value.ip_address}:${currentDevice.value.port}/cam/realmonitor?channel=1&subtype=0`
+  if (currentDevice.value.device_type === 'nvr') {
+    // NVR设备，包含通道号
+    return `rtsp://${currentDevice.value.username}:${currentDevice.value.password}@${currentDevice.value.ip_address}:${currentDevice.value.port}/cam/realmonitor?channel=${currentDevice.value.channel || 1}&subtype=${currentDevice.value.stream_type === 'sub' ? 1 : 0}`
+  } else {
+    // 普通摄像头
+    return `rtsp://${currentDevice.value.username}:${currentDevice.value.password}@${currentDevice.value.ip_address}:${currentDevice.value.port}/cam/realmonitor?channel=1&subtype=${currentDevice.value.stream_type === 'sub' ? 1 : 0}`
+  }
 }
 </script>
 

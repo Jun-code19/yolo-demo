@@ -54,6 +54,8 @@ class Device(Base):
     port = Column(SmallInteger, nullable=False)
     username = Column(String(64), nullable=False)
     password = Column(String(256), nullable=False)
+    channel = Column(Integer, default=1)  # 通道号，默认为1
+    stream_type = Column(String(10), default="main")  # 码流类型，main或sub
     status = Column(Boolean, default=True)
     last_heartbeat = Column(DateTime)
     location = Column(String(255))
