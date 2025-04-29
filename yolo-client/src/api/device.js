@@ -127,9 +127,17 @@ export default {
     return apiClient.delete(`/devices/${deviceId}`);
   },
   
-  // 系统日志
+  // 系统日志相关API
   getSyslogs(params) {
     return apiClient.get('/syslogs/', { params });
+  },
+  
+  exportSystemLogs(params) {
+    return apiClient.get('/system/logs/export', { params });
+  },
+  
+  clearSystemLogs(days) {
+    return apiClient.delete(`/system/logs/clear?days=${days}`);
   },
   
   // 模型管理相关API

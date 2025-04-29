@@ -29,7 +29,7 @@ from src.data_pusher import data_pusher
 from src.crowd_analyzer import crowd_analyzer
 from pydantic import BaseModel
 
-from models.database import (
+from src.database import (
     SessionLocal, DetectionConfig, DetectionEvent, Device, 
     DetectionModel, DetectionPerformance, SaveMode,
     EventStatus, Base, engine, get_db 

@@ -9,7 +9,7 @@ import json
 import requests
 import asyncio
 
-from models.database import get_db, DataPushConfig, PushMethod, DetectionConfig
+from src.database import get_db, DataPushConfig, PushMethod, DetectionConfig
 from api.auth import get_current_user, User
 
 # 导入独立的数据推送模块

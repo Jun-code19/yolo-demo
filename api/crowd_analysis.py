@@ -7,7 +7,7 @@ import uuid
 import logging
 import re
 
-from models.database import get_db, DetectionConfig, Device, CrowdAnalysisJob, DetectionModel, CrowdAnalysisResult
+from src.database import get_db, DetectionConfig, Device, CrowdAnalysisJob, DetectionModel, CrowdAnalysisResult
 from src.crowd_analyzer import crowd_analyzer
 from api.auth import get_current_user, User
 

@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <link rel="icon" type="image/svg+xml" href="/fangte_white.ico" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>智能视频分析系统使用说明</title>
+    <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css">
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            position: relative;
+            padding-top: 80px; /* 为固定标题留出空间 */
+        }
+        .fixed-header {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            background: #fff;
+            padding: 5px 0;
+            box-shadow: 0 2px 12px 0 rgba(0,0,0,0.1);
+            z-index: 1000;
+            text-align: center;
+        }
+        .fixed-header h1 {
+            margin: 0;
+            font-size: 24px;
+            color: #409EFF;
+        }
+        .fixed-header p {
+            margin: 0 0 0 0;
+            font-size: 14px;
+            color: #606266;
+        }
+        .toc {
+            position: fixed;
+            left: 20px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 12px 0 rgba(0,0,0,0.1);
+            max-width: 250px;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+        .toc-title {
+            font-size: 16px;
+            font-weight: bold;
+            color: #409EFF;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #409EFF;
+        }
+        .toc-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        .toc-item {
+            margin: 8px 0;
+        }
+        .toc-link {
+            color: #606266;
+            text-decoration: none;
+            display: block;
+            padding: 5px 10px;
+            border-radius: 4px;
+            transition: all 0.3s;
+        }
+        .toc-link:hover {
+            background-color: #f5f7fa;
+            color: #409EFF;
+        }
+        .toc-link.active {
+            background-color: #ecf5ff;
+            color: #409EFF;
+        }
+        .toc-sub-list {
+            list-style: none;
+            padding-left: 20px;
+            margin: 5px 0;
+        }
+        .toc-sub-item {
+            margin: 5px 0;
+        }
+        .toc-sub-link {
+            color: #606266;
+            text-decoration: none;
+            display: block;
+            padding: 3px 10px;
+            border-radius: 4px;
+            transition: all 0.3s;
+            font-size: 14px;
+        }
+        .toc-sub-link:hover {
+            background-color: #f5f7fa;
+            color: #409EFF;
+        }
+        .toc-sub-link.active {
+            background-color: #ecf5ff;
+            color: #409EFF;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+            padding: 20px;
+            background-color: #f8f9fa;
+            border-radius: 8px;
+        }
+        .section {
+            margin-bottom: 30px;
+            padding: 20px;
+            background-color: #fff;
+            border-radius: 8px;
+            box-shadow: 0 2px 12px 0 rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #409EFF;
+            margin-bottom: 20px;
+        }
+        h2 {
+            color: #409EFF;
+            margin-top: 0;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #409EFF;
+        }
+        h3 {
+            color: #606266;
+            margin-top: 20px;
+        }
+        .step {
+            margin-bottom: 15px;
+            padding-left: 20px;
+            position: relative;
+        }
+        .step:before {
+            content: "•";
+            position: absolute;
+            left: 0;
+            color: #409EFF;
+        }
+        .note {
+            background-color: #f4f4f5;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        .warning {
+            background-color: #fef0f0;
+            color: #f56c6c;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        .success {
+            background-color: #f0f9eb;
+            color: #67c23a;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        .screenshot {
+            margin: 20px 0;
+            border: 1px solid #dcdfe6;
+            border-radius: 4px;
+            overflow: hidden;
+            box-shadow: 0 2px 12px 0 rgba(0,0,0,0.1);
+        }
+        .screenshot img {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+        .screenshot-caption {
+            padding: 10px;
+            background-color: #f5f7fa;
+            color: #606266;
+            font-size: 14px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="fixed-header">
+        <h1>智能视频分析系统使用说明</h1>
+        <p>本系统提供视频监控、目标检测、人群分析等功能，帮助您更好地管理和分析视频数据。</p>
+    </div>
+
+    <div class="toc">
+        <div class="toc-title">目录</div>
+        <ul class="toc-list">
+            <li class="toc-item">
+                <a href="#overview" class="toc-link">1. 系统概述</a>
+            </li>
+            <li class="toc-item">
+                <a href="#device-management" class="toc-link">2. 设备管理</a>
+                <ul class="toc-sub-list">
+                    <li class="toc-sub-item"><a href="#add-device" class="toc-sub-link">2.1 添加设备</a></li>
+                    <li class="toc-sub-item"><a href="#edit-device" class="toc-sub-link">2.2 编辑设备</a></li>
+                    <li class="toc-sub-item"><a href="#delete-device" class="toc-sub-link">2.3 删除设备</a></li>
+                </ul>
+            </li>
+            <li class="toc-item">
+                <a href="#detection" class="toc-link">3. 目标检测</a>
+                <ul class="toc-sub-list">
+                    <li class="toc-sub-item"><a href="#realtime-detection" class="toc-sub-link">3.1 实时检测</a></li>
+                    <li class="toc-sub-item"><a href="#video-detection" class="toc-sub-link">3.2 视频检测</a></li>
+                    <li class="toc-sub-item"><a href="#image-detection" class="toc-sub-link">3.3 图片检测</a></li>
+                    <li class="toc-sub-item"><a href="#detection-config" class="toc-sub-link">3.4 检测配置</a></li>
+                    <li class="toc-sub-item"><a href="#detection-events" class="toc-sub-link">3.5 检测事件</a></li>
+                </ul>
+            </li>
+            <li class="toc-item">
+                <a href="#model-management" class="toc-link">4. 模型管理</a>
+                <ul class="toc-sub-list">
+                    <li class="toc-sub-item"><a href="#upload-model" class="toc-sub-link">4.1 上传模型</a></li>
+                    <li class="toc-sub-item"><a href="#model-list" class="toc-sub-link">4.2 模型列表</a></li>
+                    <li class="toc-sub-item"><a href="#model-config" class="toc-sub-link">4.3 模型配置</a></li>
+                </ul>
+            </li>
+            <li class="toc-item">
+                <a href="#crowd-analysis" class="toc-link">5. 人群分析</a>
+                <ul class="toc-sub-list">
+                    <li class="toc-sub-item"><a href="#create-task" class="toc-sub-link">5.1 创建分析任务</a></li>
+                    <li class="toc-sub-item"><a href="#view-results" class="toc-sub-link">5.2 查看分析结果</a></li>
+                </ul>
+            </li>
+            <li class="toc-item">
+                <a href="#data-push" class="toc-link">6. 数据推送</a>
+                <ul class="toc-sub-list">
+                    <li class="toc-sub-item"><a href="#push-config" class="toc-sub-link">6.1 配置推送</a></li>
+                    <li class="toc-sub-item"><a href="#push-management" class="toc-sub-link">6.2 管理推送</a></li>
+                </ul>
+            </li>
+            <li class="toc-item">
+                <a href="#system-management" class="toc-link">7. 系统管理</a>
+                <ul class="toc-sub-list">
+                    <li class="toc-sub-item"><a href="#system-status" class="toc-sub-link">7.1 系统状态</a></li>
+                    <li class="toc-sub-item"><a href="#system-logs" class="toc-sub-link">7.2 系统日志</a></li>
+                </ul>
+            </li>
+            <li class="toc-item">
+                <a href="#faq" class="toc-link">8. 常见问题</a>
+            </li>
+        </ul>
+    </div>
+
+    <div id="overview" class="section">
+        <h2>1. 系统概述</h2>
+        <p>智能视频分析系统是一个集视频监控、目标检测、人群分析于一体的综合管理平台。系统支持多种设备类型，包括摄像头、硬盘录像机、边缘服务器和存储节点。</p>
+        <div class="note">
+            <strong>主要功能：</strong>
+            <ul>
+                <li>设备管理：支持添加、编辑、删除设备，实时监控设备状态</li>
+                <li>目标检测：支持实时检测、视频检测和图片检测</li>
+                <li>人群分析：提供人群密度、行为分析等功能</li>
+                <li>数据推送：支持多种推送方式，包括HTTP、HTTPS、TCP和MQTT</li>
+            </ul>
+        </div>
+    </div>
+
+    <div id="device-management" class="section">
+        <h2>2. 设备管理</h2>
+        <div id="add-device">
+            <h3>2.1 添加设备</h3>
+            <div class="step">点击"设备管理"页面右上角的"添加设备"按钮</div>
+            <div class="screenshot">
+                <img src="./images/help/add-device.png" alt="添加设备按钮">
+                <div class="screenshot-caption">图2.1 添加设备按钮位置</div>
+            </div>
+            <div class="step">填写设备信息，包括设备ID、名称、类型、IP地址、端口、用户名和密码</div>
+            <div class="screenshot">
+                <img src="./images/help/device-form.png" alt="设备信息表单">
+                <div class="screenshot-caption">图2.2 设备信息表单</div>
+            </div>
+            <div class="step">对于NVR设备，需要设置通道号和码流类型</div>
+            <div class="step">点击"确认"按钮完成添加</div>
+        </div>
+        <div id="edit-device">
+            <h3>2.2 编辑设备</h3>
+            <div class="step">在设备列表中找到需要编辑的设备</div>
+            <div class="step">点击"编辑"按钮</div>
+            <div class="step">修改设备信息</div>
+            <div class="step">点击"确认"按钮保存修改</div>
+        </div>
+        <div id="delete-device">
+            <h3>2.3 删除设备</h3>
+            <div class="step">在设备列表中找到需要删除的设备</div>
+            <div class="step">点击"删除"按钮</div>
+            <div class="step">确认删除操作</div>
+            <div class="warning">
+                <strong>注意：</strong>删除设备将同时删除与该设备相关的所有检测配置和事件记录。
+            </div>
+        </div>
+    </div>
+
+    <div id="detection" class="section">
+        <h2>3. 目标检测</h2>
+        <div id="realtime-detection">
+            <h3>3.1 实时检测</h3>
+            <div class="step">进入"实时检测"页面</div>
+            <div class="screenshot">
+                <img src="./images/help/realtime-detection.png" alt="实时检测页面">
+                <div class="screenshot-caption">图3.1 实时检测页面</div>
+            </div>
+            <div class="step">选择要检测的设备</div>
+            <div class="step">选择检测模型</div>
+            <div class="step">点击"开始检测"按钮</div>
+            <div class="note">
+                <strong>注意：</strong>实时检测需要先配置检测参数，包括检测区域、目标类别、灵敏度等。
+            </div>
+        </div>
+
+        <div id="video-detection">
+            <h3>3.2 视频检测</h3>
+            <div class="step">进入"视频检测"页面</div>
+            <div class="screenshot">
+                <img src="./images/help/video-detection.png" alt="视频检测页面">
+                <div class="screenshot-caption">图3.2 视频检测页面</div>
+            </div>
+            <div class="step">选择要检测的视频文件</div>
+            <div class="step">选择检测模型</div>
+            <div class="step">点击"开始检测"按钮</div>
+        </div>
+
+        <div id="image-detection">
+            <h3>3.3 图片检测</h3>
+            <div class="step">进入"图片检测"页面</div>
+            <div class="screenshot">
+                <img src="./images/help/image-detection.png" alt="图片检测页面">
+                <div class="screenshot-caption">图3.3 图片检测页面</div>
+            </div>
+            <div class="step">选择要检测的图片文件</div>
+            <div class="step">选择检测模型</div>
+            <div class="step">点击"开始检测"按钮</div>
+        </div>
+
+        <div id="detection-config">
+            <h3>3.4 检测配置</h3>
+            <div class="step">进入"检测配置"页面</div>
+            <div class="screenshot">
+                <img src="./images/help/detection-config.png" alt="检测配置页面">
+                <div class="screenshot-caption">图3.4 检测配置页面</div>
+            </div>
+            <div class="step">选择要配置的设备</div>
+            <div class="step">设置检测参数：
+                <ul>
+                    <li>检测区域：可以设置检测范围</li>
+                    <li>目标类别：选择需要检测的目标类型</li>
+                    <li>灵敏度：调整检测的灵敏度</li>
+                    <li>保存模式：选择检测结果的保存方式</li>
+                </ul>
+            </div>
+            <div class="step">点击"保存"按钮完成配置</div>
+        </div>
+
+        <div id="detection-events">
+            <h3>3.5 检测事件</h3>
+            <div class="step">进入"检测事件"页面</div>
+            <div class="screenshot">
+                <img src="./images/help/detection-events.png" alt="检测事件页面">
+                <div class="screenshot-caption">图3.5 检测事件页面</div>
+            </div>
+            <div class="step">可以查看所有检测到的事件</div>
+            <div class="step">支持按设备、时间、事件类型等筛选</div>
+            <div class="step">可以查看事件详情，包括截图、视频片段等</div>
+            <div class="step">支持导出事件数据</div>
+        </div>
+    </div>
+
+    <div id="model-management" class="section">
+        <h2>4. 模型管理</h2>
+        <div id="upload-model">
+            <h3>4.1 上传模型</h3>
+            <div class="step">进入"模型管理"页面</div>
+            <div class="screenshot">
+                <img src="./images/help/upload-model.png" alt="上传模型页面">
+                <div class="screenshot-caption">图4.1 上传模型页面</div>
+            </div>
+            <div class="step">点击"上传模型"按钮</div>
+            <div class="step">选择模型文件（支持.pt、.onnx、.pth、.weights格式）</div>
+            <div class="step">填写模型信息：
+                <ul>
+                    <li>模型名称</li>
+                    <li>模型类型</li>
+                    <li>描述信息</li>
+                    <li>参数配置</li>
+                </ul>
+            </div>
+            <div class="step">点击"确认"按钮上传模型</div>
+        </div>
+
+        <div id="model-list">
+            <h3>4.2 模型列表</h3>
+            <div class="step">在模型列表中查看所有已上传的模型</div>
+            <div class="step">可以查看模型详细信息：
+                <ul>
+                    <li>模型名称和类型</li>
+                    <li>上传时间和大小</li>
+                    <li>使用状态</li>
+                    <li>支持的检测类别</li>
+                </ul>
+            </div>
+            <div class="step">支持启用/禁用模型</div>
+            <div class="step">可以删除不需要的模型</div>
+        </div>
+
+        <div id="model-config">
+            <h3>4.3 模型配置</h3>
+            <div class="step">选择要配置的模型</div>
+            <div class="step">设置模型参数：
+                <ul>
+                    <li>检测阈值</li>
+                    <li>目标类别</li>
+                    <li>推理参数</li>
+                </ul>
+            </div>
+            <div class="step">点击"保存"按钮完成配置</div>
+        </div>
+    </div>
+
+    <div id="crowd-analysis" class="section">
+        <h2>5. 人群分析</h2>
+        <div id="create-task">
+            <h3>5.1 创建分析任务</h3>
+            <div class="step">进入"人群分析"页面</div>
+            <div class="screenshot">
+                <img src="./images/help/crowd-analysis.png" alt="人群分析页面">
+            <div class="screenshot-caption">图5.1 人群分析页面</div>
+        </div>
+        <div class="step">点击"新建任务"按钮</div>
+        <div class="step">选择要分析的设备</div>
+        <div class="step">设置分析参数，包括检测类别、时间间隔等</div>
+            <div class="step">点击"确认"按钮创建任务</div>
+        </div>
+
+        <div id="view-results">
+            <h3>5.2 查看分析结果</h3>
+            <div class="step">在任务列表中找到要查看的任务</div>
+            <div class="step">点击"查看结果"按钮</div>
+            <div class="step">查看分析结果，包括人数统计、趋势图等</div>
+        </div>
+        <div class="success">
+            <strong>提示：</strong>系统支持设置预警阈值，当人数超过阈值时将自动发送预警信息。
+        </div>
+    </div>
+
+    <div id="data-push" class="section">
+        <h2>6. 数据推送</h2>
+        <div id="push-config">
+            <h3>6.1 配置推送</h3>
+            <div class="step">进入"数据推送"页面</div>
+            <div class="screenshot">
+                <img src="./images/help/data-push.png" alt="数据推送页面">
+            <div class="screenshot-caption">图6.1 数据推送页面</div>
+        </div>
+        <div class="step">点击"新建推送"按钮</div>
+        <div class="step">选择推送方式（HTTP/HTTPS/TCP/MQTT）</div>
+        <div class="step">填写推送配置信息</div>
+            <div class="step">点击"确认"按钮保存配置</div>
+        </div>
+
+        <div id="push-management">
+            <h3>6.2 管理推送</h3>
+            <div class="step">在推送列表中可以查看所有推送配置</div>
+            <div class="step">支持启用/禁用推送</div>
+            <div class="step">可以编辑或删除推送配置</div>
+        </div>
+        <div class="note">
+            <strong>推送方式说明：</strong>
+            <ul>
+                <li>HTTP/HTTPS：支持自定义请求头和方法</li>
+                <li>TCP：支持设置主机和端口</li>
+                <li>MQTT：支持设置代理服务器、主题等</li>
+            </ul>
+        </div>
+    </div>
+
+    <div id="system-management" class="section">
+        <h2>7. 系统管理</h2>
+        <div id="system-status">
+            <h3>7.1 系统状态</h3>
+            <div class="step">进入"系统管理"页面</div>
+            <div class="step">查看系统运行状态：
+                <ul>
+                    <li>CPU使用率</li>
+                    <li>内存使用情况</li>
+                    <li>磁盘空间</li>
+                    <li>网络状态</li>
+                    <li>服务运行状态</li>
+                </ul>
+            </div>
+            <div class="step">可以查看各个服务的运行状态和日志</div>
+            <div class="step">支持手动启动/停止服务</div>
+        </div>
+
+        <div id="system-logs">
+            <h3>7.2 系统日志</h3>
+            <div class="step">进入"系统日志"页面</div>
+            <div class="step">可以查看以下类型的日志：
+                <ul>
+                    <li>系统操作日志</li>
+                    <li>设备连接日志</li>
+                    <li>检测事件日志</li>
+                    <li>错误日志</li>
+                </ul>
+            </div>
+            <div class="step">支持按时间、类型、用户等条件筛选</div>
+            <div class="step">可以导出日志数据</div>
+            <div class="step">支持日志清理和归档</div>
+        </div>
+    </div>
+
+    <div id="faq" class="section">
+        <h2>8. 常见问题</h2>
+        <div id="device-issues">
+            <h3>8.1 设备连接问题</h3>
+            <div class="step">检查设备IP地址和端口是否正确</div>
+            <div class="step">确认用户名和密码是否正确</div>
+            <div class="step">检查网络连接是否正常</div>
+            <div class="step">查看设备连接日志</div>
+        </div>
+
+        <div id="detection-issues">
+            <h3>8.2 检测问题</h3>
+            <div class="step">确认已选择正确的检测模型</div>
+            <div class="step">检查视频流是否正常</div>
+            <div class="step">调整检测参数（如灵敏度）</div>
+            <div class="step">检查检测配置是否正确</div>
+            <div class="step">查看检测日志</div>
+        </div>
+
+        <div id="push-issues">
+            <h3>8.3 推送问题</h3>
+            <div class="step">检查推送配置是否正确</div>
+            <div class="step">确认目标服务器是否可访问</div>
+            <div class="step">查看推送日志</div>
+            <div class="step">检查网络连接状态</div>
+        </div>
+
+        <div id="system-issues">
+            <h3>8.4 系统问题</h3>
+            <div class="step">检查系统资源使用情况</div>
+            <div class="step">查看系统错误日志</div>
+            <div class="step">确认服务是否正常运行</div>
+            <div class="step">检查系统配置是否正确</div>
+        </div>
+
+        <div class="success">
+            <strong>提示：</strong>如果遇到问题，可以查看系统日志或联系管理员。
+        </div>
+    </div>
+
+    <script>
+        // 目录导航功能
+        document.addEventListener('DOMContentLoaded', function() {
+            const tocLinks = document.querySelectorAll('.toc-link, .toc-sub-link');
+            const sections = document.querySelectorAll('.section');
+
+            // 点击目录项滚动到对应位置
+            tocLinks.forEach(link => {
+                link.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    const targetId = this.getAttribute('href').substring(1);
+                    const targetElement = document.getElementById(targetId);
+                    if (targetElement) {
+                        targetElement.scrollIntoView({ behavior: 'smooth' });
+                    }
+                });
+            });
+
+            // 滚动时更新目录激活状态
+            window.addEventListener('scroll', function() {
+                let current = '';
+                sections.forEach(section => {
+                    const sectionTop = section.offsetTop;
+                    if (pageYOffset >= sectionTop - 60) {
+                        current = section.getAttribute('id');
+                    }
+                });
+
+                tocLinks.forEach(link => {
+                    link.classList.remove('active');
+                    if (link.getAttribute('href').substring(1) === current) {
+                        link.classList.add('active');
+                    }
+                });
+            });
+        });
+    </script>
+</body>
+</html> 

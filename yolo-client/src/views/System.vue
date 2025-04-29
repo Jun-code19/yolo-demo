@@ -162,78 +162,116 @@
 
     <!-- 系统日志面板 -->
     <div v-if="activeTab === 'logs'">
-      <div class="filter-options">
-        <el-input
-          v-model="logFilters.userId"
-          placeholder="用户ID"
-          clearable
-          style="width: 180px; margin-right: 10px"
-        />
-        <el-select
-          v-model="logFilters.actionType"
-          placeholder="操作类型"
-          clearable
-          style="width: 180px; margin-right: 10px"
-        >
-          <el-option label="设备创建" value="create_device" />
-          <el-option label="设备更新" value="update_device" />
-          <el-option label="设备删除" value="delete_device" />
-          <el-option label="用户登录" value="login" />
-          <el-option label="创建管理员" value="create_admin" />
-          <el-option label="更新管理员" value="update_admin" />
-          <el-option label="删除管理员" value="delete_admin" />
-          <el-option label="修改密码" value="update_password" />
-          <el-option label="更新个人资料" value="update_profile" />
-          <el-option label="上传模型" value="upload_model" />
-          <el-option label="删除模型" value="delete_model" />
-          <el-option label="激活模型" value="activate_model" />
-          <el-option label="停用模型" value="deactivate_model" />
-        </el-select>
-        <el-button type="primary" @click="loadLogData">
-          <el-icon><Search /></el-icon>筛选
-        </el-button>
+      <div class="logs-panel">
+        <!-- 筛选条件 -->
+        <el-card class="filter-card">
+          <el-form :inline="true" :model="logFilters" class="filter-form">
+            <el-form-item label="时间范围">
+              <el-date-picker
+                v-model="logFilters.dateRange"
+                type="daterange"
+                range-separator="至"
+                start-placeholder="开始日期"
+                end-placeholder="结束日期"
+                value-format="YYYY-MM-DD"
+              />
+            </el-form-item>
+            <el-form-item label="操作类型">
+              <el-select v-model="logFilters.actionType" placeholder="请选择操作类型" clearable style="width: 180px; margin-right: 10px">
+                <el-option
+                  v-for="(label, value) in actionTypes"
+                  :key="value"
+                  :label="label"
+                  :value="value"
+                />
+              </el-select>
+            </el-form-item>
+            <el-form-item>
+              <el-button type="primary" @click="handleSearch">查询</el-button>
+              <el-button @click="resetFilter">重置</el-button>
+            </el-form-item>
+            <el-form-item class="action-buttons">
+              <el-button type="primary" @click="handleExport">
+                <el-icon><Download /></el-icon>导出日志
+              </el-button>
+              <el-button type="danger" @click="handleClear">
+                <el-icon><Delete /></el-icon>清除日志
+              </el-button>
+            </el-form-item>
+          </el-form>
+        </el-card>
+
+        <!-- 日志列表 -->
+        <el-card class="log-list">
+          <el-table :data="sysLogs" style="width: 100%" v-loading="logsLoading">
+            <el-table-column prop="log_id" label="日志ID" width="80" />
+            <el-table-column prop="user_id" label="用户ID" min-width="120" />
+            <el-table-column prop="action_type" label="操作类型" min-width="120">
+              <template #default="{ row }">
+                <el-tag :type="getActionTypeTag(row.action_type)">
+                  {{ getActionTypeText(row.action_type) }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="target_id" label="目标ID" min-width="120" />
+            <el-table-column prop="detail" label="详情" min-width="200" show-overflow-tooltip />
+            <el-table-column prop="log_time" label="操作时间" min-width="180">
+              <template #default="{ row }">
+                {{ formatDateTime(row.log_time) }}
+              </template>
+            </el-table-column>
+          </el-table>
+
+          <div class="pagination">
+            <el-pagination
+              v-model:current-page="currentPage"
+              v-model:page-size="pageSize"
+              :total="total"
+              :page-sizes="[10, 20, 50, 100]"
+              layout="prev, pager, next, jumper, ->, total, sizes"
+              @size-change="handleSizeChange"
+              @current-change="handleCurrentChange"
+            />
+          </div>
+        </el-card>
       </div>
-
-      <!-- 日志列表 -->
-      <el-card class="log-list">
-        <el-table :data="sysLogs" style="width: 100%" v-loading="logsLoading">
-          <el-table-column prop="log_id" label="日志ID" width="80" />
-          <el-table-column prop="user_id" label="用户ID" min-width="120" />
-          <el-table-column prop="action_type" label="操作类型" min-width="120">
-            <template #default="{ row }">
-              <el-tag :type="getActionTypeTag(row.action_type)">
-                {{ getActionTypeText(row.action_type) }}
-              </el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column prop="target_id" label="目标ID" min-width="120" />
-          <el-table-column prop="detail" label="详情" min-width="200" show-overflow-tooltip />
-          <el-table-column prop="log_time" label="操作时间" min-width="180">
-            <template #default="{ row }">
-              {{ formatDateTime(row.log_time) }}
-            </template>
-          </el-table-column>
-        </el-table>
-
-        <div class="pagination">
-          <el-pagination
-            v-model:current-page="currentPage"
-            v-model:page-size="pageSize"
-            :total="total"
-            :page-sizes="[10, 20, 50, 100]"
-            layout="prev, pager, next, jumper, ->, total, sizes"
-            @size-change="handleSizeChange"
-            @current-change="handleCurrentChange"
-          />
-        </div>
-      </el-card>
     </div>
+
+     <!-- 清除日志对话框 -->
+     <el-dialog
+      v-model="clearDialogVisible"
+      title="清除系统日志"
+      width="400px"
+    >
+      <el-form :model="clearForm" label-width="120px">
+        <el-form-item label="清除天数">
+          <el-input-number
+            v-model="clearForm.days"
+            :min="1"
+            :max="365"
+            :step="1"
+            step-strictly
+          />
+        </el-form-item>
+        <el-form-item>
+          <span class="warning-text">注意：此操作将永久删除指定天数前的所有日志记录，且不可恢复！</span>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <span class="dialog-footer">
+          <el-button @click="clearDialogVisible = false">取消</el-button>
+          <el-button type="danger" @click="confirmClear" :loading="clearing">
+            确认清除
+          </el-button>
+        </span>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, onMounted, onUnmounted } from 'vue'
-import { Refresh, CircleCheck, Warning, Loading, Search } from '@element-plus/icons-vue'
+import { Refresh, CircleCheck, Warning, Loading, Search, Download, Delete } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import deviceApi from '@/api/device'
 
@@ -415,12 +453,61 @@ const sysLogs = ref([])
 const currentPage = ref(1)
 const pageSize = ref(10)
 const total = ref(0)
+const clearDialogVisible = ref(false)
+const clearing = ref(false)
+const clearForm = reactive({
+  days: 30
+})
 
 // 日志筛选条件
 const logFilters = reactive({
-  userId: '',
-  actionType: ''
+  dateRange: [],
+  actionType: '',
+  userId: ''
 })
+
+// 操作类型映射
+const actionTypes = {
+  'create_device': '创建设备',
+  'update_device': '更新设备',
+  'delete_device': '删除设备',
+  'device_status_change': '设备状态变更',
+  'create_detection_config': '创建检测配置',
+  'update_detection_config': '更新检测配置',
+  'delete_detection_config': '删除检测配置',
+  'toggle_detection_config': '启用/禁用检测配置',
+  'create_detection_event': '创建检测事件',
+  'update_detection_event': '更新检测事件',
+  'delete_detection_event': '删除检测事件',
+  'export_detection_events': '导出检测事件',
+  'upload_model': '上传模型',
+  'delete_model': '删除模型',
+  'toggle_model': '启用/禁用模型',
+  'update_model_config': '更新模型配置',
+  'create_crowd_task': '创建人群分析任务',
+  'update_crowd_task': '更新人群分析任务',
+  'delete_crowd_task': '删除人群分析任务',
+  'export_crowd_results': '导出人群分析结果',
+  'create_push_config': '创建推送配置',
+  'update_push_config': '更新推送配置',
+  'delete_push_config': '删除推送配置',
+  'toggle_push_config': '启用/禁用推送配置',
+  'clear_system_logs': '清除系统日志',
+  'export_system_logs': '导出系统日志',
+  'update_system_config': '更新系统配置',
+  'restart_service': '重启服务',
+  'create_user': '创建用户',
+  'update_user': '更新用户',
+  'delete_user': '删除用户',
+  'update_user_permission': '更新用户权限',
+  'change_password': '修改密码',
+  'login': '用户登录',
+  'logout': '用户登出',
+  'export_data': '导出数据',
+  'import_data': '导入数据',
+  'backup_system': '系统备份',
+  'restore_system': '系统恢复'
+}
 
 // 加载日志数据
 const loadLogData = async () => {
@@ -438,6 +525,11 @@ const loadLogData = async () => {
     
     if (logFilters.actionType) {
       params.action_type = logFilters.actionType
+    }
+    
+    if (logFilters.dateRange && logFilters.dateRange.length === 2) {
+      params.start_date = logFilters.dateRange[0]
+      params.end_date = logFilters.dateRange[1]
     }
     
     const response = await deviceApi.getSyslogs(params)
@@ -471,19 +563,45 @@ const formatDateTime = (dateTime) => {
 // 获取操作类型文本
 const getActionTypeText = (type) => {
   const typeMap = {
-    'create_device': '设备创建',
-    'update_device': '设备更新',
-    'delete_device': '设备删除',
-    'login': '用户登录',
-    'create_admin': '创建管理员',
-    'update_admin': '更新管理员',
-    'delete_admin': '删除管理员',
-    'update_password': '修改密码',
-    'update_profile': '更新个人资料',
+    'create_device': '创建设备',
+    'update_device': '更新设备',
+    'delete_device': '删除设备',
+    'device_status_change': '设备状态变更',
+    'create_detection_config': '创建检测配置',
+    'update_detection_config': '更新检测配置',
+    'delete_detection_config': '删除检测配置',
+    'toggle_detection_config': '启用/禁用检测配置',
+    'create_detection_event': '创建检测事件',
+    'update_detection_event': '更新检测事件',
+    'delete_detection_event': '删除检测事件',
+    'export_detection_events': '导出检测事件',
     'upload_model': '上传模型',
     'delete_model': '删除模型',
-    'activate_model': '激活模型',
-    'deactivate_model': '停用模型'
+    'toggle_model': '启用/禁用模型',
+    'update_model_config': '更新模型配置',
+    'create_crowd_task': '创建人群分析任务',
+    'update_crowd_task': '更新人群分析任务',
+    'delete_crowd_task': '删除人群分析任务',
+    'export_crowd_results': '导出人群分析结果',
+    'create_push_config': '创建推送配置',
+    'update_push_config': '更新推送配置',
+    'delete_push_config': '删除推送配置',
+    'toggle_push_config': '启用/禁用推送配置',
+    'clear_system_logs': '清除系统日志',
+    'export_system_logs': '导出系统日志',
+    'update_system_config': '更新系统配置',
+    'restart_service': '重启服务',
+    'create_user': '创建用户',
+    'update_user': '更新用户',
+    'delete_user': '删除用户',
+    'update_user_permission': '更新用户权限',
+    'change_password': '修改密码',
+    'login': '用户登录',
+    'logout': '用户登出',
+    'export_data': '导出数据',
+    'import_data': '导入数据',
+    'backup_system': '系统备份',
+    'restore_system': '系统恢复'
   }
   return typeMap[type] || type
 }
@@ -494,18 +612,105 @@ const getActionTypeTag = (type) => {
     'create_device': 'success',
     'update_device': 'warning',
     'delete_device': 'danger',
-    'login': 'info',
-    'create_admin': 'success',
-    'update_admin': 'warning',
-    'delete_admin': 'danger',
-    'update_password': 'warning',
-    'update_profile': 'warning',
+    'device_status_change': 'info',
+    'create_detection_config': 'success',
+    'update_detection_config': 'warning',
+    'delete_detection_config': 'danger',
+    'toggle_detection_config': 'info',
+    'create_detection_event': 'success',
+    'update_detection_event': 'warning',
+    'delete_detection_event': 'danger',
+    'export_detection_events': 'success',
     'upload_model': 'success',
     'delete_model': 'danger',
-    'activate_model': 'success',
-    'deactivate_model': 'warning'
+    'toggle_model': 'info',
+    'update_model_config': 'warning',
+    'create_crowd_task': 'success',
+    'update_crowd_task': 'warning',
+    'delete_crowd_task': 'danger',
+    'export_crowd_results': 'success',
+    'create_push_config': 'success',
+    'update_push_config': 'warning',
+    'delete_push_config': 'danger',
+    'toggle_push_config': 'info',
+    'clear_system_logs': 'success',
+    'export_system_logs': 'success',
+    'update_system_config': 'warning',
+    'restart_service': 'warning',
+    'create_user': 'success',
+    'update_user': 'warning',
+    'delete_user': 'danger',
+    'update_user_permission': 'info',
+    'change_password': 'success',
+    'login': 'success',
+    'logout': 'success',
+    'export_data': 'success',
+    'import_data': 'success',
+    'backup_system': 'success',
+    'restore_system': 'success'
   }
   return typeTagMap[type] || ''
+}
+
+// 处理导出
+const handleExport = async () => {
+  try {
+    const params = {}
+    if (logFilters.dateRange && logFilters.dateRange.length === 2) {
+      params.start_date = logFilters.dateRange[0]
+      params.end_date = logFilters.dateRange[1]
+    }
+    if (logFilters.actionType) {
+      params.action_type = logFilters.actionType
+    }
+    
+    const response = await deviceApi.exportSystemLogs(params)
+    const blob = new Blob([JSON.stringify(response.data, null, 2)], { type: 'application/json' })
+    const url = window.URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `system_logs_${new Date().toISOString().split('T')[0]}.json`
+    link.click()
+    window.URL.revokeObjectURL(url)
+    
+    ElMessage.success('日志导出成功')
+  } catch (error) {
+    ElMessage.error('日志导出失败')
+  }
+}
+
+// 处理清除日志
+const handleClear = () => {
+  clearDialogVisible.value = true
+}
+
+// 确认清除日志
+const confirmClear = async () => {
+  try {
+    clearing.value = true
+    await deviceApi.clearSystemLogs(clearForm.days)
+    ElMessage.success('日志清除成功')
+    clearDialogVisible.value = false
+    loadLogData()
+  } catch (error) {
+    ElMessage.error('日志清除失败')
+  } finally {
+    clearing.value = false
+  }
+}
+
+// 处理查询
+const handleSearch = () => {
+  currentPage.value = 1
+  loadLogData()
+}
+
+// 重置筛选条件
+const resetFilter = () => {
+  logFilters.dateRange = []
+  logFilters.actionType = ''
+  logFilters.userId = ''
+  handleSearch()
 }
 
 // 页面初始化
@@ -636,6 +841,17 @@ onUnmounted(() => {
   margin-bottom: 20px;
 }
 
+.filter-card {
+  margin-bottom: 20px;
+}
+
+.filter-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
 .log-list {
   margin-bottom: 20px;
 }
@@ -643,5 +859,34 @@ onUnmounted(() => {
 .pagination {
   margin-top: 20px;
   text-align: right;
+}
+
+.logs-panel {
+  margin-top: 20px;
+}
+
+.header-actions {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.filter-card {
+  margin-bottom: 20px;
+}
+
+.filter-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.warning-text {
+  color: #f56c6c;
+  font-size: 14px;
+}
+
+.action-buttons {
+  margin-left: auto;
 }
 </style> 

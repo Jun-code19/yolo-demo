@@ -1,6 +1,6 @@
 <script setup>
 import { ref, reactive, onMounted, computed, onBeforeUnmount } from 'vue'
-import { HomeFilled, DataLine, VideoCamera, Fold, Expand, Picture, VideoPlay, Monitor, Setting, UserFilled, Tickets, Connection } from '@element-plus/icons-vue'
+import { HomeFilled, DataLine, VideoCamera, Fold, Expand, Picture, VideoPlay, Monitor, Setting, UserFilled, Tickets, Connection, QuestionFilled, HelpFilled } from '@element-plus/icons-vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import deviceApi from '@/api/device'
@@ -74,6 +74,11 @@ const handleDropdownCommand = (command) => {
   } else if (command === 'profile') {
     router.push('/profile')
   }
+}
+
+// 打开帮助页面
+const openHelp = () => {
+  window.open('/help.html', '_blank')
 }
 </script>
 
@@ -150,15 +155,16 @@ const handleDropdownCommand = (command) => {
           <template #title>模型管理</template>
         </el-menu-item>
 
-        <el-menu-item index="/system">
-          <el-icon><Tools /></el-icon>
-          <template #title>系统管理</template>
-        </el-menu-item>
-        
         <el-menu-item index="/push/config">
             <el-icon><Connection /></el-icon>
             <span>数据推送</span>
         </el-menu-item>
+
+        <el-menu-item index="/system">
+          <el-icon><Tools /></el-icon>
+          <template #title>系统管理</template>
+        </el-menu-item>
+         
       </el-menu>
     </el-aside>
     <el-container class="right-container">
@@ -175,18 +181,27 @@ const handleDropdownCommand = (command) => {
               </el-icon>
             </el-button>
           </div>
-          <el-dropdown @command="handleDropdownCommand">
-            <div class="user-info">
-              <span class="username">{{ username }}</span>
-              <el-avatar :size="32" :icon="UserFilled" />
-            </div>
-            <template #dropdown>
-              <el-dropdown-menu>
-                <el-dropdown-item command="profile">个人中心</el-dropdown-item>
-                <el-dropdown-item command="logout">退出登录</el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
+          <div class="header-right">
+            <el-button
+              class="help-btn"
+              @click="openHelp"
+            >
+              <el-icon><QuestionFilled /></el-icon>
+              帮助
+            </el-button>
+            <el-dropdown @command="handleDropdownCommand">
+              <div class="user-info">
+                <span class="username">{{ username }}</span>
+                <el-avatar :size="32" :icon="UserFilled" />
+              </div>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="profile">个人中心</el-dropdown-item>
+                  <el-dropdown-item command="logout">退出登录</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
+          </div>
         </div>
       </el-header>
       <el-main>
@@ -295,6 +310,12 @@ const handleDropdownCommand = (command) => {
   align-items: center;
 }
 
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
 .collapse-btn {
   height: 32px;
   width: 32px;
@@ -310,6 +331,27 @@ const handleDropdownCommand = (command) => {
 }
 
 .collapse-btn:hover {
+  background-color: #1e293b;
+  color: #ffffff;
+  border-color: #1e293b;
+  transform: scale(1.05);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.help-btn {
+  height: 32px;
+  padding: 0 16px;
+  font-size: 14px;
+  border: 1px solid #e2e8f0;
+  background-color: #f8fafc;
+  color: #1e293b;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.3s ease;
+}
+
+.help-btn:hover {
   background-color: #1e293b;
   color: #ffffff;
   border-color: #1e293b;

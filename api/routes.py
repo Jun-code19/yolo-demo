@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File,
 from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
-from models.database import get_db, Device, Video, AnalysisResult, Alarm, User, SysLog, DetectionModel, DetectionConfig, DetectionEvent, DetectionSchedule, DetectionStat, DetectionPerformance, SaveMode, EventStatus, DetectionFrequency
+from src.database import get_db, Device, Video, AnalysisResult, Alarm, User, SysLog, DetectionModel, DetectionConfig, DetectionEvent, DetectionSchedule, DetectionStat, DetectionPerformance, SaveMode, EventStatus, DetectionFrequency
 from pydantic import BaseModel
 from fastapi.security import OAuth2PasswordRequestForm
 from api.auth import authenticate_user, create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES, get_current_user, check_admin_permission, get_password_hash, verify_password
@@ -78,8 +78,7 @@ def create_device(device: DeviceCreate, db: Session = Depends(get_db), current_u
         db.add(db_device)
         db.commit()
         db.refresh(db_device)
-        # 记录操作日志
-        log_action(db, current_user.user_id, "create_device", db_device.device_id, f"Created device {db_device.device_name}")
+        log_action(db, current_user.user_id, 'create_device', db_device.device_id, f"创建设备 {db_device.device_name}")
         return db_device
     except Exception as e:
         db.rollback()
@@ -160,8 +159,7 @@ def update_device(device_id: str, device: DeviceUpdate, db: Session = Depends(ge
             setattr(db_device, key, value)
         db.commit()
         db.refresh(db_device)
-        # 记录操作日志
-        log_action(db, current_user.user_id, "update_device", device_id, f"Updated device {db_device.device_name}")
+        log_action(db, current_user.user_id, 'update_device', device_id, f"更新设备 {db_device.device_name}")
         return db_device
     except Exception as e:
         db.rollback()
@@ -177,8 +175,7 @@ def delete_device(device_id: str, db: Session = Depends(get_db), current_user: U
     try:
         db.delete(device)
         db.commit()
-        # 记录操作日志
-        log_action(db, current_user.user_id, "delete_device", device_id, f"Deleted device {device_name}")
+        log_action(db, current_user.user_id, 'delete_device', device_id, f"删除设备 {device_name}")
         return {"message": "Device deleted successfully"}
     except Exception as e:
         db.rollback()
@@ -296,7 +293,7 @@ def create_user(user: UserCreate, db: Session = Depends(get_db), current_user: U
         db.commit()
         db.refresh(db_user)
         # 记录操作日志
-        log_action(db, current_user.user_id, "create_user", db_user.user_id, f"Created user {db_user.username}")
+        log_action(db, current_user.user_id, 'create_user', db_user.user_id, f"创建用户 {db_user.username}")
         return {"message": "用户创建成功", "user_id": db_user.user_id}
     except Exception as e:
         db.rollback()
@@ -314,7 +311,7 @@ def update_user_profile(user_data: UserUpdate, current_user: User = Depends(get_
         db.refresh(current_user)
         
         # 记录操作日志
-        log_action(db, current_user.user_id, "update_profile", current_user.user_id, f"Updated user profile for {current_user.username}")
+        log_action(db, current_user.user_id, 'update_profile', current_user.user_id, f"更新用户个人信息 for {current_user.username}")
         
         return {
             "message": "用户信息更新成功",
@@ -351,7 +348,7 @@ def update_user_password(password_data: PasswordUpdate, current_user: User = Dep
         db.commit()
         
         # 记录操作日志
-        log_action(db, current_user.user_id, "update_password", target_user.user_id, f"Updated password for user {target_user.username}")
+        log_action(db, current_user.user_id, 'change_password', target_user.user_id, f"更新用户 {target_user.username} 的密码")
         
         return {"message": "密码更新成功"}
     except Exception as e:
@@ -364,12 +361,18 @@ def get_syslogs(
     skip: int = 0,
     limit: int = 100,
     user_id: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
     action_type: Optional[str] = None,
     db: Session = Depends(get_db)):
     query = db.query(SysLog)
     total_count = query.count()
     if user_id:
         query = query.filter(SysLog.user_id == user_id)
+    if start_date:
+        query = query.filter(SysLog.log_time >= datetime.strptime(start_date, '%Y-%m-%d'))
+    if end_date:
+        query = query.filter(SysLog.log_time <= datetime.strptime(end_date, '%Y-%m-%d'))
     if action_type:
         query = query.filter(SysLog.action_type == action_type)
     result = query.offset(skip).limit(limit).all()
@@ -413,7 +416,7 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
     )
     
     # 记录登录日志
-    log_action(db, user.user_id, "login", user.user_id, f"User {user.username} logged in")
+    log_action(db, user.user_id, 'login', user.user_id, f"User {user.username} logged in")
     
     return {"access_token": access_token, "token_type": "bearer"}
 
@@ -467,7 +470,7 @@ def initialize_system(admin_data: UserCreate, db: Session = Depends(get_db)):
         db.commit()
         db.refresh(db_user)
         # 记录操作日志
-        log_action(db, db_user.user_id, "create_admin", db_user.user_id, f"Created admin user {db_user.username}")
+        log_action(db, db_user.user_id, 'create_admin', db_user.user_id, f"Created admin user {db_user.username}")
         return {"message": "系统初始化成功，管理员账户已创建"}
     except Exception as e:
         db.rollback()
@@ -622,7 +625,7 @@ async def upload_model(
     db.refresh(db_model)
     
     # 记录操作日志
-    log_action(db, current_user.user_id, "upload_model", models_id, f"Uploaded model {models_name}")
+    log_action(db, current_user.user_id, 'upload_model', models_id, f"Uploaded model {models_name}")
     
     return db_model
 
@@ -650,7 +653,7 @@ def delete_model(models_id: str, db: Session = Depends(get_db),
     db.commit()
     
     # 记录操作日志
-    log_action(db, current_user.user_id, "delete_model", models_id, f"Deleted model {model.models_name}")
+    log_action(db, current_user.user_id, 'delete_model', models_id, f"Deleted model {model.models_name}")
     
     return {"message": "Model deleted successfully"}
 
@@ -902,7 +905,8 @@ async def get_detection_config(
 @router.post("/detection/configs", response_model=DetectionConfigResponse, tags=["检测配置"])
 async def create_detection_config(
     config: DetectionConfigCreate,
-    db: Session = Depends(get_db)):
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)):
     """
     创建新的检测配置
     """
@@ -943,6 +947,7 @@ async def create_detection_config(
     db.commit()
     db.refresh(db_config)
     
+    log_action(db, current_user.user_id, 'create_detection_config', db_config.config_id, f"Created detection config {db_config.config_id}")
     # 转换返回数据
     config_dict = {
         "config_id": db_config.config_id,
@@ -967,7 +972,8 @@ async def create_detection_config(
 async def update_detection_config(
     config_id: str,
     config_update: DetectionConfigUpdate,
-    db: Session = Depends(get_db)):
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)):
     """
     更新检测配置
     """
@@ -1030,6 +1036,7 @@ async def update_detection_config(
     db.commit()
     db.refresh(db_config)
     
+    log_action(db, current_user.user_id, 'update_detection_config', db_config.config_id, f"Updated detection config {db_config.config_id}")
     # 转换返回数据
     config_dict = {
         "config_id": db_config.config_id,
@@ -1066,13 +1073,15 @@ def toggle_detection_active(config_id: str, enabled: bool, db: Session = Depends
     config.enabled = enabled
     db.commit()
     db.refresh(config)
+    log_action(db, current_user.user_id, 'toggle_detection_active', config_id, f"Toggled detection config {config_id} {'enabled' if enabled else 'disabled'}")
     return {"message": f"检测配置 {'启用' if enabled else '禁用'} 成功"}
 
 # 删除检测配置
 @router.delete("/detection/configs/{config_id}", tags=["检测配置"])
 async def delete_detection_config(
     config_id: str,
-    db: Session = Depends(get_db)):
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)):
     """
     删除检测配置
     """
@@ -1083,6 +1092,7 @@ async def delete_detection_config(
     try:
         db.delete(db_config)
         db.commit()
+        log_action(db, current_user.user_id, 'delete_detection_config', config_id, f"Deleted detection config {config_id}")
         return {"message": "检测配置已成功删除"}
     except Exception as e:
         db.rollback()
@@ -1262,7 +1272,8 @@ async def get_thumbnail(event_id: str, db: Session = Depends(get_db)):
 @router.post("/detection/events", response_model=DetectionEventResponse, tags=["检测事件"])
 async def create_detection_event(
     event: DetectionEventCreate,
-    db: Session = Depends(get_db)):
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)):
     """
     创建新的检测事件
     """
@@ -1311,6 +1322,7 @@ async def create_detection_event(
         db.commit()
         db.refresh(db_event)
         
+        log_action(db, current_user.user_id, 'create_detection_event', db_event.event_id, f"Created detection event {db_event.event_id}")
         # 更新统计数据
         update_detection_stats(db, event.device_id, event.event_type)
         
@@ -1362,7 +1374,8 @@ async def create_detection_event(
 async def update_detection_event(
     event_id: str,
     event_update: DetectionEventUpdate,
-    db: Session = Depends(get_db)):
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)):
     """
     更新检测事件状态、备注等信息
     """
@@ -1392,6 +1405,7 @@ async def update_detection_event(
         db.commit()
         db.refresh(db_event)
         
+        log_action(db, current_user.user_id, 'update_detection_event', db_event.event_id, f"Updated detection event {db_event.event_id}")
         # 确保bounding_box是字典
         bounding_box = db_event.bounding_box
         if isinstance(bounding_box, str):
@@ -1439,7 +1453,8 @@ async def update_detection_event(
 @router.delete("/detection/events/{event_id}", tags=["检测事件"])
 async def delete_detection_event(
     event_id: str,
-    db: Session = Depends(get_db)):
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)):
     """
     删除检测事件
     """
@@ -1450,6 +1465,7 @@ async def delete_detection_event(
     try:
         db.delete(db_event)
         db.commit()
+        log_action(db, current_user.user_id, 'delete_detection_event', event_id, f"Deleted detection event {event_id}")
         return {"message": "检测事件已成功删除"}
     except Exception as e:
         db.rollback()
@@ -1607,3 +1623,72 @@ async def get_file(file_path: str):
 
     # 返回文件
     return FileResponse(full_path)
+
+# 添加清除系统日志的API
+@router.delete("/system/logs/clear")
+def clear_system_logs(
+    days: int = Query(30, description="清除多少天前的日志"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(check_admin_permission)
+):
+    """清除系统日志"""
+    try:
+        # 计算截止时间
+        cutoff_date = datetime.now() - timedelta(days=days)
+        
+        # 删除指定日期之前的日志
+        deleted = db.query(SysLog).filter(SysLog.log_time < cutoff_date).delete()
+        db.commit()
+        
+        # 记录清除操作
+        log_action(db, current_user.user_id, 'clear_system_logs', 'system', f"清除{days}天前的系统日志，共{deleted}条")
+        
+        return {"message": f"Successfully cleared {deleted} logs older than {days} days"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+# 添加导出系统日志的API
+@router.get("/system/logs/export")
+def export_system_logs(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    action_type: Optional[str] = None,
+    user_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """导出系统日志"""
+    try:
+        query = db.query(SysLog)
+        
+        if start_date:  
+            query = query.filter(SysLog.log_time >= datetime.strptime(start_date, '%Y-%m-%d'))
+        if end_date:
+            query = query.filter(SysLog.log_time <= datetime.strptime(end_date, '%Y-%m-%d'))
+        if action_type:
+            query = query.filter(SysLog.action_type == action_type)
+        if user_id:
+            query = query.filter(SysLog.user_id == user_id)
+
+        logs = query.order_by(SysLog.log_time.desc()).all()
+        
+        # 记录导出操作
+        log_action(db, current_user.user_id, 'export_system_logs', 'system', f"导出系统日志，共{len(logs)}条")
+        
+        return {
+            "data": [
+                {
+                    "log_id": log.log_id,
+                    "user_id": log.user_id,
+                    "action_type": log.action_type,
+                    "target_id": log.target_id,
+                    "detail": log.detail,
+                    "log_time": log.log_time.isoformat()
+                }
+                for log in logs
+            ],
+            "total": len(logs)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

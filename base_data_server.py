@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from api.routes import router
-from models.database import Base, engine
+from src.database import Base, engine
 import uvicorn
 import logging
 

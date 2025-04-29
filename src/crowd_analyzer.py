@@ -19,7 +19,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.triggers.cron import CronTrigger
 
-from models.database import (
+from src.database import (
     SessionLocal, DetectionConfig, Device, 
     DetectionModel, DetectionPerformance, Base, engine, CrowdAnalysisJob, CrowdAnalysisResult
 )

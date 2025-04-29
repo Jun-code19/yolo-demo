@@ -6,8 +6,8 @@ from sqlalchemy import pool
 from alembic import context
 
 # 导入模型以便Alembic可以自动检测变更
-from models.database import Base
-import models.database
+from src.database import Base
+import src.database
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

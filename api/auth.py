@@ -7,7 +7,7 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 import bcrypt
 from sqlalchemy.orm import Session
-from models.database import User, get_db
+from src.database import User, get_db
 
 # 密钥，实际应用中应从环境变量获取
 SECRET_KEY = "09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7"
@@ -24,13 +24,13 @@ def verify_password(plain_password, hashed_password):
     try:
         # 在一些情况下，密码可能不是使用bcrypt哈希的
         # 或者哈希格式不正确，这里添加错误处理
-        print(f"尝试验证密码：{plain_password}")
-        print(f"使用哈希：{hashed_password}")
+        # print(f"尝试验证密码：{plain_password}")
+        # print(f"使用哈希：{hashed_password}")
         
         # 检查是否是bcrypt哈希
         hashed_password = hashed_password.strip()
         if not hashed_password.startswith('$2'):
-            print("警告：存储的密码不是bcrypt哈希格式，将直接比较明文")
+            # print("警告：存储的密码不是bcrypt哈希格式，将直接比较明文")
             return plain_password == hashed_password
         
         # 解决bcrypt类型转换问题
@@ -44,15 +44,15 @@ def verify_password(plain_password, hashed_password):
                 
             # 使用bcrypt直接验证
             result = bcrypt.checkpw(plain_password, hashed_password)
-            print(f"密码验证结果：{result}")
+            # print(f"密码验证结果：{result}")
             return result
         except Exception as e:
-            print(f"bcrypt直接验证失败: {str(e)}")
+            # print(f"bcrypt直接验证失败: {str(e)}")
             # 如果bcrypt直接验证失败，使用pwd_context作为备选方案
             return pwd_context.verify(str(plain_password), str(hashed_password))
             
     except Exception as e:
-        print(f"密码验证出错: {str(e)}")
+        # print(f"密码验证出错: {str(e)}")
         # 验证出错时，尝试直接比较（紧急回退策略）
         return plain_password == hashed_password
 
@@ -65,9 +65,9 @@ def authenticate_user(db: Session, username: str, password: str):
         return False
     
     # 打印一些调试信息
-    print(f"Authenticating user: {username}")
-    print(f"Password provided: {password}")
-    print(f"Stored password hash: {user.password_hash}")
+    # print(f"Authenticating user: {username}")
+    # print(f"Password provided: {password}")
+    # print(f"Stored password hash: {user.password_hash}")
     
     if not verify_password(password, user.password_hash):
         return False

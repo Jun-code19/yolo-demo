@@ -21,7 +21,7 @@ import paho.mqtt.client as mqtt
 from sqlalchemy.orm import Session
 import numpy as np
 
-from models.database import SessionLocal, DataPushConfig, PushMethod
+from src.database import SessionLocal, DataPushConfig, PushMethod
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)

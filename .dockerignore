@@ -27,6 +27,7 @@ new_venv/
 wheels/
 storage/
 docker-image/
+models/
 
 # Node
 node_modules/
