@@ -27,12 +27,12 @@ export default defineConfig({
         ws: true,
         changeOrigin: true
       },
-      // WebSocket连接
-      '/ws': {
-        target: 'ws://10.83.38.87:8765',
+      // RTSP预览WebSocket
+      '/ws/rtsp/preview': {
+        target: 'ws://10.83.38.87:8000',
         ws: true,
         changeOrigin: true
-      },
+      }
     }
   },
   resolve: {

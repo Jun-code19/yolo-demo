@@ -4,14 +4,10 @@ from typing import List, Optional
 from pydantic import BaseModel
 from datetime import datetime
 import logging
-import uuid
-import json
-import requests
-import asyncio
 
 from src.database import get_db, DataPushConfig, PushMethod, DetectionConfig
 from api.auth import get_current_user, User
-
+from api.logger import log_action
 # 导入独立的数据推送模块
 from src.data_pusher import data_pusher
 
@@ -95,7 +91,7 @@ async def reload_push_config(push_id: str, db: Session = Depends(get_db)):
     return data_pusher.reload_push_config(push_id, db)
 
 @router.post("/create")
-async def create_push_config(pushdata: PushCreate, db: Session = Depends(get_db)): # 创建新的数据推送配置
+async def create_push_config(pushdata: PushCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)): # 创建新的数据推送配置
     """创建新的数据推送配置"""
     try:
         # 验证推送方法
@@ -146,6 +142,9 @@ async def create_push_config(pushdata: PushCreate, db: Session = Depends(get_db)
         db.add(push_config)
         db.commit()
         db.refresh(push_config)
+
+        # 记录创建操作
+        log_action(db, current_user.user_id, 'create_data_push', push_config.push_id, f"创建数据推送配置: {push_config.push_name}")
 
         # 重新加载推送配置
         data_pusher.reload_push_config(push_config.push_id, db)
@@ -207,7 +206,7 @@ async def list_push_configs(config_id: str = None, tag: str = None, db: Session 
         raise HTTPException(status_code=500, detail=f"获取推送配置列表失败: {str(e)}")
 
 @router.put("/{push_id}")
-async def update_push_config(push_id: str, pushdata: PushUpdate, db: Session = Depends(get_db)): # 更新推送配置
+async def update_push_config(push_id: str, pushdata: PushUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)): # 更新推送配置
     """更新推送配置"""
     try:
         # 查找推送配置
@@ -253,6 +252,9 @@ async def update_push_config(push_id: str, pushdata: PushUpdate, db: Session = D
         push_config.updated_at = datetime.now()
         db.commit()
 
+        # 记录更新操作
+        log_action(db, current_user.user_id, 'update_data_push', push_config.push_id, f"更新数据推送配置: {push_config.push_name}")
+
         # 重新加载推送配置
         data_pusher.reload_push_config(push_id, db)
 
@@ -269,7 +271,7 @@ async def update_push_config(push_id: str, pushdata: PushUpdate, db: Session = D
         raise HTTPException(status_code=500, detail=f"更新推送配置失败: {str(e)}")
 
 @router.delete("/{push_id}")
-async def delete_push_config(push_id: str, db: Session = Depends(get_db)): # 删除推送配置
+async def delete_push_config(push_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)): # 删除推送配置
     """删除推送配置"""
     try:
         # 查找推送配置
@@ -279,6 +281,9 @@ async def delete_push_config(push_id: str, db: Session = Depends(get_db)): # 删
 
         db.delete(push_config)
         db.commit()
+
+        # 记录删除操作
+        log_action(db, current_user.user_id, 'delete_data_push', push_config.push_id, f"删除数据推送配置: {push_config.push_name}")
 
         # 从缓存中删除推送配置
         data_pusher.reload_push_config(push_id, db)

@@ -540,7 +540,7 @@ const initWebSocket = () => {
 
     function createNewConnection() {
       try {
-        ws = new WebSocket(`ws://${window.location.host}/ws`)
+        ws = new WebSocket(`ws://${window.location.host}/ws/rtsp/preview`)
         
         ws.onopen = () => {
           console.log('WebSocket connection established, sending handshake...')

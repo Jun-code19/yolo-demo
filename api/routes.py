@@ -587,7 +587,7 @@ async def upload_model(
     
     # 加载模型并获取类别
     try:      
-        rtsp_service_url = "http://rtsp-server:8765/api/v3/model/load"
+        rtsp_service_url = "http://detect-server:8000/api/v2/model/load"
         response = requests.post(rtsp_service_url, json={
             "model_path": str(file_path)
         }, timeout=10)

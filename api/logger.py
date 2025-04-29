@@ -14,7 +14,8 @@ OPERATION_TYPES = {
     'create_detection_config': '创建检测配置',
     'update_detection_config': '更新检测配置',
     'delete_detection_config': '删除检测配置',
-    'toggle_detection_config': '启用/禁用检测配置',
+    'start_detection': '启动检测任务',
+    'stop_detection': '停止检测任务',
     
     # 检测事件
     'create_detection_event': '创建检测事件',
@@ -33,13 +34,16 @@ OPERATION_TYPES = {
     'update_crowd_task': '更新人群分析任务',
     'delete_crowd_task': '删除人群分析任务',
     'export_crowd_results': '导出人群分析结果',
+    'pause_crowd_task': '暂停人群分析任务',
+    'resume_crowd_task': '恢复人群分析任务',
     
     # 数据推送
-    'create_push_config': '创建推送配置',
-    'update_push_config': '更新推送配置',
-    'delete_push_config': '删除推送配置',
-    'toggle_push_config': '启用/禁用推送配置',
-    
+    'create_data_push': '创建推送配置',
+    'update_data_push': '更新推送配置',
+    'delete_data_push': '删除推送配置',
+    'toggle_data_push': '启用/禁用推送配置',
+    'test_data_push': '测试推送配置',
+
     # 系统管理
     'clear_system_logs': '清除系统日志',
     'export_system_logs': '导出系统日志',

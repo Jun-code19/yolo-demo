@@ -178,12 +178,23 @@
             </el-form-item>
             <el-form-item label="操作类型">
               <el-select v-model="logFilters.actionType" placeholder="请选择操作类型" clearable style="width: 180px; margin-right: 10px">
-                <el-option
-                  v-for="(label, value) in actionTypes"
-                  :key="value"
-                  :label="label"
-                  :value="value"
-                />
+                <el-option-group
+                  v-for="(group, key) in actionTypes"
+                  :key="key"
+                  :label="group.label"
+                >
+                  <el-option
+                    v-for="(label, value) in group.options"
+                    :key="value"
+                    :label="label"
+                    :value="value"
+                  >
+                  <div class="model-option">
+                    <span class="model-name">{{ label }}</span>
+                    <span class="model-desc">{{ value }}</span>
+                  </div>
+                  </el-option>
+                </el-option-group>
               </el-select>
             </el-form-item>
             <el-form-item>
@@ -468,45 +479,93 @@ const logFilters = reactive({
 
 // 操作类型映射
 const actionTypes = {
-  'create_device': '创建设备',
-  'update_device': '更新设备',
-  'delete_device': '删除设备',
-  'device_status_change': '设备状态变更',
-  'create_detection_config': '创建检测配置',
-  'update_detection_config': '更新检测配置',
-  'delete_detection_config': '删除检测配置',
-  'toggle_detection_config': '启用/禁用检测配置',
-  'create_detection_event': '创建检测事件',
-  'update_detection_event': '更新检测事件',
-  'delete_detection_event': '删除检测事件',
-  'export_detection_events': '导出检测事件',
-  'upload_model': '上传模型',
-  'delete_model': '删除模型',
-  'toggle_model': '启用/禁用模型',
-  'update_model_config': '更新模型配置',
-  'create_crowd_task': '创建人群分析任务',
-  'update_crowd_task': '更新人群分析任务',
-  'delete_crowd_task': '删除人群分析任务',
-  'export_crowd_results': '导出人群分析结果',
-  'create_push_config': '创建推送配置',
-  'update_push_config': '更新推送配置',
-  'delete_push_config': '删除推送配置',
-  'toggle_push_config': '启用/禁用推送配置',
-  'clear_system_logs': '清除系统日志',
-  'export_system_logs': '导出系统日志',
-  'update_system_config': '更新系统配置',
-  'restart_service': '重启服务',
-  'create_user': '创建用户',
-  'update_user': '更新用户',
-  'delete_user': '删除用户',
-  'update_user_permission': '更新用户权限',
-  'change_password': '修改密码',
-  'login': '用户登录',
-  'logout': '用户登出',
-  'export_data': '导出数据',
-  'import_data': '导入数据',
-  'backup_system': '系统备份',
-  'restore_system': '系统恢复'
+  device: {
+    label: '设备管理',
+    options: {
+      'create_device': '创建设备',
+      'update_device': '更新设备',
+      'delete_device': '删除设备',
+      'device_status_change': '设备状态变更'
+    }
+  },
+  detectionconfig: {
+    label: '检测管理',
+    options: {
+      'create_detection_config': '创建检测配置',
+      'update_detection_config': '更新检测配置',
+      'delete_detection_config': '删除检测配置',
+      'start_detection': '启动检测任务',
+      'stop_detection': '停止检测任务'
+    }
+  },
+  detectionevent: {
+    label: '检测事件',
+    options: {
+      'create_detection_event': '创建检测事件',
+      'update_detection_event': '更新检测事件',
+      'delete_detection_event': '删除检测事件',
+      'export_detection_events': '导出检测事件'
+    }
+  },
+  model: {
+    label: '模型管理',
+    options: {
+      'upload_model': '上传模型',
+      'delete_model': '删除模型',
+      'toggle_model': '启用/禁用模型',
+      'update_model_config': '更新模型配置'
+    }
+  },
+  crowd: {
+    label: '人群分析',
+    options: {
+      'create_crowd_task': '创建人群分析任务',
+      'update_crowd_task': '更新人群分析任务',
+      'delete_crowd_task': '删除人群分析任务',
+      'export_crowd_results': '导出人群分析结果',
+      'pause_crowd_task': '暂停人群分析任务',
+      'resume_crowd_task': '恢复人群分析任务'
+    }
+  },
+  push: {
+    label: '推送管理',
+    options: {
+      'create_data_push': '创建推送配置',
+      'update_data_push': '更新推送配置',
+      'delete_data_push': '删除推送配置',
+      'toggle_data_push': '启用/禁用推送配置'
+    }
+  },
+  system: {
+    label: '系统管理',
+    options: {
+      'clear_system_logs': '清除系统日志',
+      'export_system_logs': '导出系统日志',
+      'update_system_config': '更新系统配置',
+      'restart_service': '重启服务'
+    }
+  },
+  user: {
+    label: '用户管理',
+    options: {
+      'create_user': '创建用户',
+      'update_user': '更新用户',
+      'delete_user': '删除用户',
+      'update_user_permission': '更新用户权限',
+      'change_password': '修改密码',
+      'login': '用户登录',
+      'logout': '用户登出'
+    }
+  },
+  data: {
+    label: '数据管理',
+    options: {
+      'export_data': '导出数据',
+      'import_data': '导入数据',
+      'backup_system': '系统备份',
+      'restore_system': '系统恢复'
+    }
+  }
 }
 
 // 加载日志数据
@@ -562,57 +621,23 @@ const formatDateTime = (dateTime) => {
 
 // 获取操作类型文本
 const getActionTypeText = (type) => {
-  const typeMap = {
-    'create_device': '创建设备',
-    'update_device': '更新设备',
-    'delete_device': '删除设备',
-    'device_status_change': '设备状态变更',
-    'create_detection_config': '创建检测配置',
-    'update_detection_config': '更新检测配置',
-    'delete_detection_config': '删除检测配置',
-    'toggle_detection_config': '启用/禁用检测配置',
-    'create_detection_event': '创建检测事件',
-    'update_detection_event': '更新检测事件',
-    'delete_detection_event': '删除检测事件',
-    'export_detection_events': '导出检测事件',
-    'upload_model': '上传模型',
-    'delete_model': '删除模型',
-    'toggle_model': '启用/禁用模型',
-    'update_model_config': '更新模型配置',
-    'create_crowd_task': '创建人群分析任务',
-    'update_crowd_task': '更新人群分析任务',
-    'delete_crowd_task': '删除人群分析任务',
-    'export_crowd_results': '导出人群分析结果',
-    'create_push_config': '创建推送配置',
-    'update_push_config': '更新推送配置',
-    'delete_push_config': '删除推送配置',
-    'toggle_push_config': '启用/禁用推送配置',
-    'clear_system_logs': '清除系统日志',
-    'export_system_logs': '导出系统日志',
-    'update_system_config': '更新系统配置',
-    'restart_service': '重启服务',
-    'create_user': '创建用户',
-    'update_user': '更新用户',
-    'delete_user': '删除用户',
-    'update_user_permission': '更新用户权限',
-    'change_password': '修改密码',
-    'login': '用户登录',
-    'logout': '用户登出',
-    'export_data': '导出数据',
-    'import_data': '导入数据',
-    'backup_system': '系统备份',
-    'restore_system': '系统恢复'
+  for (const group of Object.values(actionTypes)) {
+    if (group.options[type]) {
+      return group.options[type]
+    }
   }
-  return typeMap[type] || type
+  return type
 }
 
 // 获取操作类型标签样式
 const getActionTypeTag = (type) => {
   const typeTagMap = {
+    // 设备管理
     'create_device': 'success',
     'update_device': 'warning',
     'delete_device': 'danger',
     'device_status_change': 'info',
+    // 检测管理
     'create_detection_config': 'success',
     'update_detection_config': 'warning',
     'delete_detection_config': 'danger',
@@ -621,22 +646,27 @@ const getActionTypeTag = (type) => {
     'update_detection_event': 'warning',
     'delete_detection_event': 'danger',
     'export_detection_events': 'success',
+    // 模型管理
     'upload_model': 'success',
     'delete_model': 'danger',
     'toggle_model': 'info',
     'update_model_config': 'warning',
+    // 人群分析
     'create_crowd_task': 'success',
     'update_crowd_task': 'warning',
     'delete_crowd_task': 'danger',
     'export_crowd_results': 'success',
+    // 推送管理
     'create_push_config': 'success',
     'update_push_config': 'warning',
     'delete_push_config': 'danger',
     'toggle_push_config': 'info',
+    // 系统管理
     'clear_system_logs': 'success',
     'export_system_logs': 'success',
     'update_system_config': 'warning',
     'restart_service': 'warning',
+    // 用户管理
     'create_user': 'success',
     'update_user': 'warning',
     'delete_user': 'danger',
@@ -644,6 +674,7 @@ const getActionTypeTag = (type) => {
     'change_password': 'success',
     'login': 'success',
     'logout': 'success',
+    // 数据管理
     'export_data': 'success',
     'import_data': 'success',
     'backup_system': 'success',
@@ -734,6 +765,21 @@ onUnmounted(() => {
   padding: 20px;
 }
 
+.model-option {
+  display: flex;
+  flex-direction: column;
+}
+
+.model-name {
+  /* font-weight: bold; */
+  color: #303133;
+  margin-bottom: 2px;
+}
+
+.model-desc {
+  font-size: 12px;
+  color: #909399;
+}
 .page-header {
   display: flex;
   flex-direction: column;

@@ -15,7 +15,6 @@ from pathlib import Path
 from contextlib import nullcontext, asynccontextmanager
 import struct
 from typing import Dict
-import av
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -135,43 +134,23 @@ class RTSPManager:
         frame_count = 0
         frame_buffer = self.frame_buffers.get(connection_id)
         skip_frame_count = 0
-        device_id = None
-        
-        # 提取设备ID（如果有）
-        if connection_id in rtsp_sessions and 'device_id' in rtsp_sessions[connection_id]:
-            device_id = rtsp_sessions[connection_id]['device_id']
         
         try:
             # 尝试从RTSP连接视频源
             try:
-                container = av.open(stream_url, options={
-                    'rtsp_transport': 'tcp',
-                    'stimeout': '5000000',  # 增加超时时间，单位为微秒
-                    'timeout': '5000000'
-                })
-                logger.info(f"RTSP连接成功: {stream_url}")
+                cap = cv2.VideoCapture(stream_url)
+                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # 设置缓冲区大小为1，减少延迟
+
+                if cap.isOpened():
+                    logger.info(f"成功连接到摄像机: {stream_url}")
+                else:
+                    logger.error(f"无法连接到摄像机: {stream_url}")
+                    return False
                 
-                # 获取视频流信息
-                video_stream = None
-                for stream in container.streams:
-                    if stream.type == 'video':
-                        video_stream = stream
-                        break
+                fps = cap.get(cv2.CAP_PROP_FPS)
+                width = cap.get(cv2.CAP_PROP_FRAME_WIDTH)
+                height = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
                         
-                if not video_stream:
-                    # 设置错误状态
-                    if connection_id in self.stream_status:
-                        self.stream_status[connection_id] = {
-                            "status": "error", 
-                            "error": "RTSP流中没有视频轨道"
-                        }
-                    return
-                
-                # 更新流状态和信息
-                width = video_stream.width
-                height = video_stream.height
-                fps = video_stream.average_rate
-                
                 if connection_id in self.stream_status:
                     self.stream_status[connection_id] = {
                         "status": "connected",
@@ -183,18 +162,19 @@ class RTSPManager:
                         "error": None
                     }
                 
-                # 高效解码设置
-                video_stream.thread_type = 'AUTO'  # 启用多线程解码
-                
                 logger.info(f"视频流信息: 分辨率={width}x{height}, FPS={fps}")
                 
-                target_fps = min(30, fps if fps else 30)  # 目标帧率最高30fps
+                target_fps = min(30, fps if fps else 30)
                 frame_interval = 1.0 / target_fps
                 
                 last_frame_time = time.time()
                 
                 # 循环处理视频帧
-                for frame in container.decode(video_stream):
+                while True:
+                    ret, frame = cap.read()
+                    if not ret:
+                        break
+                    
                     if stop_event.is_set():
                         logger.info(f"收到停止事件，结束RTSP捕获线程: {connection_id}")
                         break
@@ -210,8 +190,8 @@ class RTSPManager:
                         continue
                     
                     # 将PyAV帧转换为OpenCV格式
-                    img = frame.to_ndarray(format='bgr24')
-                    
+                    # img = frame.to_ndarray(format='bgr24')
+                    img = frame
                     # 添加帧信息
                     frame_data = {
                         "frame": img,
@@ -226,16 +206,6 @@ class RTSPManager:
                         if len(frame_buffer) >= frame_buffer.maxlen:
                             frame_buffer.popleft()  # 移除最老的帧，避免延迟累积
                         frame_buffer.append(frame_data)
-                    
-                    # 如果有设备ID且检测服务正在运行，将帧发送到检测服务
-                    # if device_id:
-                    #     # 每5帧发送一帧到检测服务，避免过度消耗资源
-                    #     if frame_count % 5 == 0:
-                    #         add_frame_to_detection(device_id, img, {
-                    #             "frame_id": frame_count,
-                    #             "source": "rtsp",
-                    #             "connection_id": connection_id
-                    #         })
                     
                     frame_count += 1
                     last_frame_time = current_time
@@ -266,8 +236,8 @@ class RTSPManager:
         finally:
             # 关闭容器
             try:
-                if 'container' in locals():
-                    container.close()
+                if 'cap' in locals():
+                    cap.release()
             except Exception as e:
                 logger.error(f"关闭RTSP容器时发生错误: {e}")
             

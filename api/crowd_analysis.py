@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict
 from pydantic import BaseModel, validator
 from datetime import datetime
 import uuid
@@ -10,7 +10,7 @@ import re
 from src.database import get_db, DetectionConfig, Device, CrowdAnalysisJob, DetectionModel, CrowdAnalysisResult
 from src.crowd_analyzer import crowd_analyzer
 from api.auth import get_current_user, User
-
+from api.logger import log_action
 # 配置日志
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -167,6 +167,9 @@ async def create_analysis_job(
         #     location_info=db_job.location_info
         # )
         
+        # 记录创建操作
+        log_action(db, current_user.user_id, 'create_crowd_task', job_id, f"创建人群分析任务: {job_data.job_name}")
+
         # 构建响应
         response = {
             "job_id": job_id,
@@ -341,6 +344,9 @@ async def delete_analysis_job(
         db.delete(db_job)
         db.commit()
         
+        # 记录删除操作
+        log_action(db, current_user.user_id, 'delete_crowd_task', job_id, f"删除人群分析任务: {job_id}")
+
         return {"status": "success", "message": f"分析任务及相关数据已删除: {job_id}"}
     except Exception as e:
         db.rollback()
@@ -464,6 +470,9 @@ async def pause_analysis_job(
     job.is_active = False
     db.commit()
     
+    # 记录暂停操作
+    log_action(db, current_user.user_id, 'pause_crowd_task', job_id, f"暂停人群分析任务: {job_id}")
+
     # 从运行时服务中移除
     result = crowd_analyzer.remove_analysis_job(job_id)
     
@@ -483,6 +492,9 @@ async def resume_analysis_job(
     job.is_active = True
     db.commit()
     
+    # 记录恢复操作
+    log_action(db, current_user.user_id, 'resume_crowd_task', job_id, f"恢复人群分析任务: {job_id}")
+
     # 重新添加到运行时服务
     crowd_analyzer.add_analysis_job(
         job_id=job.job_id,
@@ -510,6 +522,9 @@ async def export_analysis_results(
     if not job:
         raise HTTPException(status_code=404, detail=f"分析任务不存在: {job_id}")
     
+    # 记录导出操作
+    log_action(db, current_user.user_id, 'export_crowd_results', job_id, f"导出人群分析结果: {job_id}")
+
     # 这里可以实现查询分析结果历史记录的逻辑
     # 可能需要另外一个表来存储历史分析结果
     return {"status": "success", "data": { "job_name": job.job_name, "results": [] }}
@@ -687,6 +702,9 @@ async def update_analysis_job(
         db.commit()
         db.refresh(db_job)
         
+        # 记录更新操作
+        log_action(db, current_user.user_id, 'update_crowd_task', job_id, f"更新人群分析任务: {job_id}")
+
         # 如果激活状态改变，需要特殊处理
         if is_active_changed:
             if db_job.is_active:

@@ -467,7 +467,7 @@ export default defineComponent({
           }
 
           // 创建新的WebSocket连接
-          ws.value = new WebSocket(`ws://${window.location.host}/ws`)
+          ws.value = new WebSocket(`ws://${window.location.host}/ws/rtsp/preview`)
 
           // 连接超时
           const connectionTimeout = setTimeout(() => {

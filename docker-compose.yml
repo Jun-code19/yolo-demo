@@ -20,24 +20,24 @@ services:
     networks:
       - yolo-network
 
-  # RTSP服务
-  rtsp-server:
-    build:
-      context: .
-      dockerfile: Dockerfile.rtsp-server
-    container_name: yolo-rtsp-server
-    volumes:
-      - ./models:/app/models
-      - ./storage:/app/storage
-    ports:
-      - "8765:8765"
-    environment:
-      - DATABASE_URL=postgresql://postgres:admin123@postgres:5432/yolo
-    depends_on:
-      - postgres
-    restart: always
-    networks:
-      - yolo-network
+  # # RTSP服务
+  # rtsp-server:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile.rtsp-server
+  #   container_name: yolo-rtsp-server
+  #   volumes:
+  #     - ./models:/app/models
+  #     - ./storage:/app/storage
+  #   ports:
+  #     - "8765:8765"
+  #   environment:
+  #     - DATABASE_URL=postgresql://postgres:admin123@postgres:5432/yolo
+  #   depends_on:
+  #     - postgres
+  #   restart: always
+  #   networks:
+  #     - yolo-network
 
   # 检测服务
   detect-server:
