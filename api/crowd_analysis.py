@@ -374,6 +374,10 @@ async def run_analysis_job_now(
         
         db_job.is_active = True
         db.commit()
+
+        # 记录立即执行操作
+        log_action(db, current_user.user_id, 'run_crowd_task', job_id, f"立即执行人群分析任务: {job_id}")
+        
         # 尝试从数据库重新加载任务
         try:
             job_details = crowd_analyzer.add_analysis_job(

@@ -69,7 +69,6 @@ services:
     depends_on:
       - detect-server
       - data-server
-      - rtsp-server
     restart: always
     networks:
       - yolo-network

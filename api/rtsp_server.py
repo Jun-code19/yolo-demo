@@ -1,57 +1,32 @@
-import asyncio
-import cv2
-import numpy as np
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.middleware.cors import CORSMiddleware
-from ultralytics import YOLO
-import base64
-import time
-from collections import deque
-import threading
-from concurrent.futures import ThreadPoolExecutor
-import torch
-import logging
-from pathlib import Path
-from contextlib import nullcontext, asynccontextmanager
-import struct
-from typing import Dict
+from fastapi import APIRouter, WebSocket,WebSocketDisconnect # 导入FastAPI相关模块
+from typing import Dict # 导入字典类型
+import cv2 # 导入OpenCV模块
+import base64 # 导入base64编码
+import time # 导入时间模块
+import threading # 导入线程模块
+import asyncio # 导入异步I/O模块
+from concurrent.futures import ThreadPoolExecutor # 导入线程池
+import logging # 导入日志模块
+import numpy as np # 导入NumPy模块
+from collections import deque # 导入双端队列
+from ultralytics import YOLO # 导入YOLO模型
+import torch # 导入PyTorch
+from contextlib import nullcontext # 导入上下文管理器
+from pathlib import Path # 导入路径模块
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-@asynccontextmanager
-async def lifespan(app):
-    # 执行启动时的代码
-    logger.info("服务启动中...")
-    
-    yield
-    
-    # 服务关闭时执行清理工作
-    logger.info("服务关闭中...")
-
-app = FastAPI(
-    title="RTSP Stream Server",
-    description="用于处理RTSP视频流的服务器API",
-    version="1.0",
-    lifespan=lifespan
-)
-
-# 配置CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # 在生产环境中应该设置具体的源
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# 创建API路由
+router = APIRouter(prefix="/rtsp", tags=["RTSP流处理"])
 
 # 全局变量
-models_cache = {}
-frame_queues = {}
+models_cache = {} # 模型缓存
+frame_queues = {} # 帧队列
 max_queue_size = 1  # 减小队列大小以降低延迟
 executor = ThreadPoolExecutor(max_workers=2)  # 减少线程数以避免资源竞争
-previous_boxes = {}
+previous_boxes = {} # 前一帧的检测框
 box_smooth_factor = 0.2  # 减小平滑因子以降低延迟
 max_latency = 1000  # 增加最大延迟阈值(ms)，避免跳过太多帧
 max_size = 320  # 减小处理尺寸以提高性能
@@ -386,7 +361,6 @@ class RTSPManager:
                 })
         finally:
             logger.info(f"帧处理任务已结束: {connection_id}")
-
 # 创建RTSP管理器实例
 rtsp_manager = RTSPManager()
 
@@ -448,9 +422,50 @@ class FrameProcessor:
         
         previous_boxes[frame_id] = smoothed_boxes
         return smoothed_boxes
-
+# 创建帧处理器实例
 frame_processor = FrameProcessor()
 
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: Dict[str, WebSocket] = {}
+        self.connection_tasks: Dict[str, asyncio.Task] = {}
+
+    async def connect(self, websocket: WebSocket) -> str:
+        await websocket.accept()
+        connection_id = str(id(websocket))
+        self.active_connections[connection_id] = websocket
+        return connection_id
+
+    async def disconnect(self, connection_id: str):
+        if connection_id in self.active_connections:
+            websocket = self.active_connections[connection_id]
+            del self.active_connections[connection_id]
+            try:
+                await websocket.close()
+            except Exception:
+                pass
+
+        # 取消并清理相关任务
+        if connection_id in self.connection_tasks:
+            task = self.connection_tasks[connection_id]
+            if not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+            del self.connection_tasks[connection_id]
+
+    async def send_json(self, connection_id: str, message: dict):
+        if connection_id in self.active_connections:
+            try:
+                await self.active_connections[connection_id].send_json(message)
+            except Exception as e:
+                logger.error(f"Error sending message: {e}")
+                await self.disconnect(connection_id)
+# 创建连接管理器实例
+manager = ConnectionManager()
+# 获取或加载YOLO模型
 def get_model(models_name):
     """获取或加载YOLO模型"""
     if models_name not in models_cache:
@@ -501,7 +516,7 @@ def get_model(models_name):
             logger.error(f"Error loading model {models_name}: {e}")
             return None
     return models_cache.get(models_name)
-
+# 处理单帧图像
 def process_frame(frame, models_info, frame_id, timestamp, total_frames=None, start_time=None):
     """处理单帧图像"""
     start_process_time = time.time()
@@ -620,97 +635,7 @@ def process_frame(frame, models_info, frame_id, timestamp, total_frames=None, st
     except Exception as e:
         logger.error(f"Error processing frame: {e}")
         return None
-
-def decode_binary_frame(binary_data):
-    """解码二进制帧数据"""
-    try:
-        # 解析头部信息
-        header_size = struct.calcsize('!QQII')  # frame_id, timestamp, width, height
-        frame_id, timestamp, width, height = struct.unpack('!QQII', binary_data[:header_size])
-        
-        # 解析图像数据
-        image_data = np.frombuffer(binary_data[header_size:], dtype=np.uint8)
-        frame = cv2.imdecode(image_data, cv2.IMREAD_COLOR)
-        
-        if frame is None:
-            raise ValueError("Failed to decode image data")
-        
-        return {
-            'frame_id': frame_id,
-            'timestamp': timestamp,
-            'frame': frame
-        }
-    except Exception as e:
-        logger.error(f"Error decoding binary frame: {e}")
-        return None
-
-def encode_detection_result(result):
-    """将检测结果编码为二进制格式"""
-    try:
-        # 将结果转换为紧凑的二进制格式
-        detections = result['objects']
-        frame_id = result['frame_id']
-        timestamp = result['timestamp']
-        
-        # 头部: frame_id, timestamp, number of detections
-        header = struct.pack('!QQI', frame_id, int(timestamp), len(detections))
-        
-        # 检测结果数据
-        detection_data = bytearray()
-        for det in detections:
-            # 每个检测结果: class_id, confidence, x, y, w, h
-            class_id = 0  # 这里需要根据实际类别映射设置
-            conf = float(det['confidence'])
-            x, y, w, h = map(float, det['bbox'])
-            detection_data.extend(struct.pack('!IfFFFF', class_id, conf, x, y, w, h))
-        
-        return header + detection_data
-    except Exception as e:
-        logger.error(f"Error encoding detection result: {e}")
-        return None
-
-class ConnectionManager:
-    def __init__(self):
-        self.active_connections: Dict[str, WebSocket] = {}
-        self.connection_tasks: Dict[str, asyncio.Task] = {}
-
-    async def connect(self, websocket: WebSocket) -> str:
-        await websocket.accept()
-        connection_id = str(id(websocket))
-        self.active_connections[connection_id] = websocket
-        return connection_id
-
-    async def disconnect(self, connection_id: str):
-        if connection_id in self.active_connections:
-            websocket = self.active_connections[connection_id]
-            del self.active_connections[connection_id]
-            try:
-                await websocket.close()
-            except Exception:
-                pass
-
-        # 取消并清理相关任务
-        if connection_id in self.connection_tasks:
-            task = self.connection_tasks[connection_id]
-            if not task.done():
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
-            del self.connection_tasks[connection_id]
-
-    async def send_json(self, connection_id: str, message: dict):
-        if connection_id in self.active_connections:
-            try:
-                await self.active_connections[connection_id].send_json(message)
-            except Exception as e:
-                logger.error(f"Error sending message: {e}")
-                await self.disconnect(connection_id)
-
-# 创建连接管理器实例
-manager = ConnectionManager()
-
+# 异步处理帧队列
 async def process_frame_queue(connection_id: str):
     """异步处理帧队列"""
     queue = frame_queues.get(connection_id)
@@ -776,7 +701,7 @@ async def process_frame_queue(connection_id: str):
         logger.error(f"Unexpected error in frame queue processing for client {connection_id}: {e}")
     finally:
         logger.info(f"Frame queue processing ended for client {connection_id}")
-
+# 非极大值抑制(NMS)
 def non_max_suppression(boxes, scores, iou_threshold=0.45):
     """
     执行非极大值抑制(NMS)，去除重叠的检测框
@@ -842,8 +767,8 @@ def non_max_suppression(boxes, scores, iou_threshold=0.45):
     except Exception as e:
         logger.error(f"Error in NMS: {e}")
         return list(range(len(boxes)))  # 出错时返回所有框
-
-@app.websocket("/ws")
+# 检测预览WebSocket端点
+@router.websocket("/preview")
 async def websocket_endpoint(websocket: WebSocket):
     connection_id = await manager.connect(websocket)
     rtsp_sessions[connection_id] = {"status": "connected"}
@@ -853,7 +778,7 @@ async def websocket_endpoint(websocket: WebSocket):
         # 等待客户端的连接请求
         while True:
             message = await websocket.receive_json()
-            
+            # 增加处理连接请求的逻辑
             if message["type"] == "connect":
                 # 发送连接确认
                 await websocket.send_json({
@@ -861,8 +786,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 })
                 logger.info(f"Client {connection_id} connected")
                 continue
-            
-            # 处理RTSP预览请求
+            # 增加处理RTSP预览请求的逻辑
             elif message["type"] == "preview_request":
                 # 获取RTSP URL
                 stream_url = message.get("stream_url")
@@ -894,7 +818,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         "message": "启动流处理失败，可能该流已在处理中"
                     })
                 continue
-                
+            # 增加处理模型配置请求的逻辑
             elif message["type"] == "config":
                 # 处理模型配置
                 models_name = message.get("models_name")
@@ -931,7 +855,6 @@ async def websocket_endpoint(websocket: WebSocket):
                         "message": error_msg
                     })
                 continue
-            
             # 增加处理图片检测请求的逻辑
             elif message["type"] == "image":
                 # 处理单张图片检测请求
@@ -1113,7 +1036,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         "message": error_msg
                     })
                 continue
-                
+            # 增加处理视频信息请求的逻辑
             elif message["type"] == "video_info":
                 # 处理视频信息
                 if not models_info:
@@ -1128,8 +1051,8 @@ async def websocket_endpoint(websocket: WebSocket):
                 
                 # 启动帧处理任务
                 task = asyncio.create_task(process_frame_queue(connection_id))
-                manager.connection_tasks[connection_id] = task
-                
+                manager.connection_tasks[connection_id] = task               
+            # 增加处理视频帧请求的逻辑
             elif message["type"] == "frame":
                 # 处理视频帧
                 if not models_info:
@@ -1183,8 +1106,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         "type": "error",
                         "message": f"Failed to process frame: {str(e)}"
                     })
-            
-            # 处理特定命令
+            # 增加处理启动RTSP流请求的逻辑
             elif message["type"] == "start_stream":
                 stream_url = message.get("url", "")
                 device_id = message.get("device_id", None)  # 添加设备ID参数
@@ -1212,14 +1134,13 @@ async def websocket_endpoint(websocket: WebSocket):
                         "error": "无法启动RTSP流",
                         "status": "error"
                     })
-            
+            # 增加处理停止RTSP流请求的逻辑
             elif message["type"] == "stop_stream":
                 await rtsp_manager.stop_stream(connection_id)
                 await manager.send_json(connection_id, {
                     "message": "RTSP流已停止",
                     "status": "stopped"
                 })
-            
             else:
                 # 处理其他现有命令...
                 pass
@@ -1233,33 +1154,3 @@ async def websocket_endpoint(websocket: WebSocket):
         if connection_id in active_connections:
             await rtsp_manager.stop_stream(connection_id)
         await manager.disconnect(connection_id)
-
-@app.post("/api/v3/model/load")
-async def load_model_api(model_data: dict):
-    """加载模型API端点"""
-    try:
-        # model_id = model_data.get("model_id")
-        model_path = model_data.get("model_path")
-        
-        if not model_path:
-            return {"status": "error", "message": "缺少必要参数"}
-            
-        model = YOLO(model_path)  # 加载模型
-        classes = model.names  # 获取类别名称
-        
-        if model:
-            return {
-                "status": "success", 
-                "message": "模型加载成功",                                  
-                "classes": classes
-            }
-        else:
-            return {"status": "error", "message": "模型加载失败"}
-            
-    except Exception as e:
-        logger.error(f"加载模型失败: {e}")
-        return {"status": "error", "message": f"加载模型失败: {str(e)}"}
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("base_rtsp_server:app", host="0.0.0.0", port=8765, reload=True)

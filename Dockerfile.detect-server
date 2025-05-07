@@ -17,8 +17,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxext6 \
     libxrender-dev \
     libpq-dev \
+    tzdata \
     && rm -rf /var/lib/apt/lists/*
     
+# 设置时区为中国标准时间
+RUN ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \
+    dpkg-reconfigure -f noninteractive tzdata
+
 COPY pip.conf /etc/pip.conf
 
 # 复制并安装依赖

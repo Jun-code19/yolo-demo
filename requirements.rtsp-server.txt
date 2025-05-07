@@ -1,8 +1,0 @@
-# RTSP流服务特有依赖
-av==12.3.0  # PyAV
-ultralytics==8.3.91
-torch==2.4.1
-torchvision==0.19.1
-opencv-python==4.8.1.78
-numpy== 1.24.3
-onnxruntime==1.17.0

@@ -34,8 +34,9 @@ OPERATION_TYPES = {
     'update_crowd_task': '更新人群分析任务',
     'delete_crowd_task': '删除人群分析任务',
     'export_crowd_results': '导出人群分析结果',
-    'pause_crowd_task': '暂停人群分析任务',
-    'resume_crowd_task': '恢复人群分析任务',
+    'pause_crowd_task': '停止人群分析任务',
+    'resume_crowd_task': '启动人群分析任务',
+    'run_crowd_task': '立即执行人群分析任务',
     
     # 数据推送
     'create_data_push': '创建推送配置',
