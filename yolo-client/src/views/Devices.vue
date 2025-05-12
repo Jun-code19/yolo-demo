@@ -2,9 +2,26 @@
   <div class="devices-container">
     <div class="page-header">
       <h2>设备管理</h2>
-      <el-button type="primary" @click="handleAdd">
-        <el-icon><Plus /></el-icon>添加设备
-      </el-button>
+      <el-space>
+        <el-dropdown @command="handleExport">
+          <el-button type="primary">
+            <el-icon><Download /></el-icon>导出
+            <el-icon><ArrowDown /></el-icon>
+          </el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="template">导出模板</el-dropdown-item>
+              <el-dropdown-item command="data">导出数据</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
+        <el-button type="primary" @click="handleImport">
+          <el-icon><Upload /></el-icon>导入
+        </el-button>
+        <el-button type="primary" @click="handleAdd">
+          <el-icon><Plus /></el-icon>添加设备
+        </el-button>
+      </el-space>
     </div>
 
     <!-- 设备列表 -->
@@ -202,12 +219,49 @@
         </span>
       </template>
     </el-dialog>
+    
+    <!-- 导入对话框 -->
+    <el-dialog
+      v-model="importDialogVisible"
+      title="导入设备"
+      width="500px"
+      destroy-on-close
+    >
+      <el-upload
+        class="upload-demo"
+        drag
+        action="#"
+        :auto-upload="false"
+        :on-change="handleFileChange"
+        :limit="1"
+        accept=".xlsx,.xls,.csv"
+      >
+        <el-icon class="el-icon--upload"><upload-filled /></el-icon>
+        <div class="el-upload__text">
+          拖拽文件到此处或 <em>点击上传</em>
+        </div>
+        <template #tip>
+          <div class="el-upload__tip">
+            请上传Excel(.xlsx/.xls)或CSV(.csv)格式文件，文件大小不超过10MB
+          </div>
+        </template>
+      </el-upload>
+      
+      <template #footer>
+        <span class="dialog-footer">
+          <el-button @click="importDialogVisible = false">取消</el-button>
+          <el-button type="primary" @click="submitImport" :loading="importing">
+            确认导入
+          </el-button>
+        </span>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, onMounted, onUnmounted } from 'vue'
-import { Plus, VideoCamera, CircleClose, Camera } from '@element-plus/icons-vue'
+import { Plus, VideoCamera, CircleClose, Camera, Download, ArrowDown, Upload, UploadFilled } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import deviceApi from '@/api/device'
 
@@ -268,6 +322,11 @@ const ws = ref(null)
 const currentFrame = ref(null)
 const showFallbackImage = ref(false)
 
+// 导入相关
+const importDialogVisible = ref(false)
+const importFile = ref(null)
+const importing = ref(false)
+
 // 加载设备数据
 const loadData = async () => {
   loading.value = true
@@ -303,7 +362,7 @@ let refreshInterval
 // 初始化
 onMounted(() => {
   loadData()
-  refreshStatus()
+  // refreshStatus()
   // refreshInterval = setInterval(refreshStatus, 60000)
 })
 
@@ -831,6 +890,103 @@ const buildRtspUrl = () => {
     return `rtsp://${currentDevice.value.username}:${currentDevice.value.password}@${currentDevice.value.ip_address}:${currentDevice.value.port}/cam/realmonitor?channel=1&subtype=${currentDevice.value.stream_type === 'sub' ? 1 : 0}`
   }
 }
+
+// 导入功能
+const handleImport = () => {
+  importDialogVisible.value = true
+  importFile.value = null
+}
+
+const handleFileChange = (file) => {
+  if (!file) return
+  
+  // 检查文件类型
+  const validTypes = [
+    'application/vnd.ms-excel',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'text/csv'
+  ]
+  
+  if (!validTypes.includes(file.raw.type)) {
+    ElMessage.error('请上传Excel或CSV格式的文件')
+    return false
+  }
+  
+  // 检查文件大小，不超过10MB
+  const isLt10M = file.size / 1024 / 1024 < 10
+  if (!isLt10M) {
+    ElMessage.error('文件大小不能超过10MB')
+    return false
+  }
+  
+  importFile.value = file.raw
+}
+
+const submitImport = async () => {
+  if (!importFile.value) {
+    ElMessage.warning('请先选择要导入的文件')
+    return
+  }
+  
+  importing.value = true
+  try {
+    const formData = new FormData()
+    formData.append('file', importFile.value)
+    
+    const response = await deviceApi.importDevices(formData)
+    
+    if (response.status === 200) {
+      ElMessage.success('导入成功')
+      importDialogVisible.value = false
+      loadData() // 刷新列表
+    } else {
+      ElMessage.error(`导入失败: ${response.data.detail || '未知错误'}`)
+    }
+  } catch (error) {
+    console.error('导入设备失败:', error)
+    ElMessage.error(`导入失败: ${error.response?.data?.detail || error.message}`)
+  } finally {
+    importing.value = false
+  }
+}
+
+// 导出功能
+const handleExport = async (command) => {
+  try {
+    let response
+    let filename
+    
+    if (command === 'template') {
+      // 导出模板
+      response = await deviceApi.exportDeviceTemplate()
+      filename = '设备导入模板.xlsx'
+    } else if (command === 'data') {
+      // 导出数据
+      response = await deviceApi.exportDevices()
+      filename = `设备数据_${new Date().toISOString().split('T')[0]}.xlsx`
+    }
+    
+    // 处理文件下载
+    if (response && response.data) {
+      const blob = new Blob([response.data], { 
+        type: response.headers['content-type'] 
+      })
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.setAttribute('download', filename)
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      window.URL.revokeObjectURL(url)
+      
+      ElMessage.success('导出成功')
+    }
+  } catch (error) {
+    console.error('导出失败:', error)
+    ElMessage.error(`导出失败: ${error.response?.data?.detail || error.message}`)
+  }
+}
 </script>
 
 <style scoped>
@@ -937,5 +1093,24 @@ const buildRtspUrl = () => {
   object-fit: contain;
   background-color: #000;
   display: none;
+}
+
+.upload-demo {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+}
+
+.el-upload__tip {
+  margin-top: 10px;
+  color: #909399;
+  font-size: 12px;
+}
+
+.el-icon--upload {
+  font-size: 48px;
+  color: #409eff;
+  margin-bottom: 10px;
 }
 </style> 

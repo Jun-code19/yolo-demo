@@ -51,13 +51,13 @@
           <el-option
             v-for="model in availableModels"
             :key="model.model_id"
-            :label="model.model_name"
+            :label="`${model.model_name} (${getModelTypeName(model.model_type)})`"
             :value="model.model_id"
           >
-            <span>{{ model.model_name }}</span>
-            <span v-if="model.model_type" style="color: #8492a6; font-size: 13px">
-              ({{ model.model_type }})
-            </span>
+            <div class="model-option">
+              <span>{{ model.model_name }}</span>
+              <el-tag size="small" effect="plain">{{ getModelTypeName(model.model_type) }}</el-tag>
+            </div>
           </el-option>
         </el-select>
         <div class="hint">所有设备将使用同一个模型进行分析</div>
@@ -73,12 +73,13 @@
             collapse-tags-tooltip
             :max-collapse-tags="4"
           >
-            <el-option
-              v-for="cls in modelClasses"
-              :key="cls.value"
-              :label="cls.label"
-              :value="cls.value"
-            />
+            <el-option v-for="(classItem, index) in modelClasses" :key="classItem.value" :label="classItem.label"
+              :value="classItem.value">
+              <div class="class-option">
+                <span>{{ classItem.label }}</span>
+                <span class="class-id">{{ classItem.value }}</span>
+              </div>
+            </el-option>
           </el-select>
           <div class="hint">选择需要检测的对象类别，默认选中第一个类别</div>
         </el-form-item>
@@ -268,11 +269,23 @@ const fetchAvailableDevices = async () => {
 const fetchAvailableModels = async () => {
   try {
     const res = await crowdAnalysisApi.getAvailableModels()
-    availableModels.value = res.data
+    availableModels.value = res.data.filter(model => model.is_active);
   } catch (error) {
     ElMessage.error('获取检测模型列表失败')
-    console.error(error)
   }
+}
+
+// 获取模型类型名称
+const getModelTypeName = (type) => {
+  const typeMap = {
+    'object_detection': '目标检测',
+    'segmentation': '图像分割',
+    'keypoint': '关键点检测',
+    'pose': '姿态估计',
+    'face': '人脸识别',
+    'other': '其他类型'
+  }
+  return typeMap[type] || type
 }
 
 const removeTag = (tag) => {
@@ -387,5 +400,23 @@ const submitForm = async () => {
   color: #909399;
   line-height: 1.5;
   margin-top: 5px;
+}
+
+.model-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.model-option, .class-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.class-id {
+  color: #909399;
+  font-size: 12px;
+  margin-left: auto;
 }
 </style>

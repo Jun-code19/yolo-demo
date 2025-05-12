@@ -19,9 +19,14 @@
             <el-option
               v-for="device in deviceList"
               :key="device.device_id"
-              :label="device.device_name"
+              :label="`${device.device_name} (${device.device_id})`"
               :value="device.device_id"
-            />
+            >
+              <div class="device-option">
+                <span>{{ device.device_name }}</span>
+                <span class="device-id">({{ device.device_id }})</span>
+              </div>
+            </el-option>
           </el-select>
         </el-form-item>
         
@@ -99,8 +104,9 @@
           label="设备"
           min-width="120"
         >
-          <template #default="{ row }">
-            {{ getDeviceName(row.device_id) }}
+          <template #default="{ row }">           
+              <span>{{ getDeviceName(row.device_id) }}</span>
+              <span>({{ row.device_id }})</span>
           </template>
         </el-table-column>
 
@@ -217,7 +223,8 @@
           <div class="event-info">
             <el-descriptions :column="1">
               <el-descriptions-item label="设备">
-                {{ getDeviceName(selectedEvent.device_id) }}
+                <span>{{ getDeviceName(selectedEvent.device_id) }}</span>
+                <span>({{ selectedEvent.device_id }})</span>
               </el-descriptions-item>
               <el-descriptions-item label="事件类型">
                 <el-tag :type="getEventTypeColor(selectedEvent.event_type)">
@@ -804,5 +811,17 @@ export default defineComponent({
   margin-top: 16px;
   display: flex;
   justify-content: flex-end;
+}
+
+.device-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.device-id {
+  color: #909399;
+  font-size: 12px;
+  margin-left: auto;
 }
 </style> 

@@ -549,7 +549,8 @@ async def get_available_models(
             "model_id": model.models_id,
             "model_name": model.models_name,
             "model_type": model.models_type,
-            "description": model.description or ""
+            "description": model.description or "",
+            "is_active": model.is_active
         })
     
     return available_models

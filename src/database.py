@@ -64,23 +64,11 @@ class Device(Base):
     detection_configs = relationship("DetectionConfig", back_populates="device", cascade="all, delete-orphan")
     detection_events = relationship("DetectionEvent", back_populates="device", cascade="all, delete-orphan")
 
-class Video(Base):
-    __tablename__ = "video"
-    
-    video_id = Column(String(64), primary_key=True)
-    device_id = Column(String(64), ForeignKey('device.device_id'))
-    start_time = Column(DateTime, nullable=False)
-    end_time = Column(DateTime)
-    storage_path = Column(Text, nullable=False)
-    resolution = Column(String(16))
-    frame_rate = Column(SmallInteger)
-    analysis_status = Column(Boolean, default=False)
-
 class AnalysisResult(Base):
     __tablename__ = "analysis_result"
     
     result_id = Column(Integer, primary_key=True)
-    video_id = Column(String(64), ForeignKey('video.video_id'))
+    # video_id = Column(String(64), ForeignKey('video.video_id'))
     target_type = Column(Enum(AnalysisTarget), nullable=False)
     confidence = Column(Float, nullable=False)
     start_frame = Column(Integer)
@@ -150,6 +138,7 @@ class DetectionConfig(Base):
     max_storage_days = Column(Integer, default=30)
     area_coordinates = Column(JSONB)  # 新增字段，用于存储区域坐标
     area_type = Column(Text, default="none")  # 新增字段，用于存储区域类型(拌线/区域)
+    schedule_config = Column(JSONB)  # 定时检测配置
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
     created_by = Column(String(64), ForeignKey('users.user_id'))
@@ -332,4 +321,22 @@ def get_db():
     try:
         yield db
     finally:
-        db.close() 
+        db.close()
+
+# 添加DetectionLog表
+class DetectionLog(Base):
+    __tablename__ = "detection_log"
+    
+    log_id = Column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
+    config_id = Column(String(64), ForeignKey('detection_config.config_id'), nullable=False)
+    device_id = Column(String(64), ForeignKey('device.device_id'), nullable=False)
+    operation = Column(String(50), nullable=False)  # start, stop, auto_start, auto_stop
+    status = Column(String(50))  # success, failed
+    message = Column(Text)
+    created_by = Column(String(64), ForeignKey('users.user_id'), nullable=True)
+    created_at = Column(DateTime, default=datetime.now)
+    
+    # 关联
+    config = relationship("DetectionConfig")
+    device = relationship("Device")
+    user = relationship("User", foreign_keys=[created_by]) 

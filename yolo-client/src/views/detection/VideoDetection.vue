@@ -10,24 +10,17 @@
           :disabled="isDetecting"
           :loading="loadingModels"
         >
-          <el-option-group
-            v-for="group in models"
-            :key="group.type"
-            :label="group.type"
+        <el-option
+            v-for="model in models"
+            :key="model.models_id"
+            :label="`${model.models_name} (${getModelTypeName(model.models_type)})`"
+            :value="model.models_id"
           >
-            <el-option
-              v-for="model in group.models"
-              :key="model.value"
-              :label="model.label"
-              :value="model.value"
-            >
-              <div class="model-option">
-                <span class="model-name">{{ model.label }}</span>
-                <span class="model-desc">{{ model.description }}</span>
-                <span class="model-format">格式：{{ model.format }}</span>
-              </div>
-            </el-option>
-          </el-option-group>
+            <div class="model-option">
+              <span>{{ model.models_name }}</span>
+              <el-tag size="small" effect="plain">{{ getModelTypeName(model.models_type) }}</el-tag>
+            </div>
+          </el-option>
           <template #empty>
             <div class="empty-model-list">
               <p v-if="loadingModels">加载模型中...</p>
@@ -182,7 +175,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch, nextTick, onBeforeUnmount } from 'vue'
 import { VideoPlay } from '@element-plus/icons-vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import deviceApi from '@/api/device'
 
 // WebSocket 连接
@@ -192,10 +185,7 @@ const maxReconnectAttempts = 3
 let reconnectAttempts = 0
 let isReconnecting = false
 let isWsConnected = false
-let videoPlayer = null
-let canvasContext = null
 let animationFrameId = null
-let timeUpdateInterval = null
 
 // 响应式变量
 const videoFile = ref(null)
@@ -208,10 +198,6 @@ const remainingTime = ref('00:00')
 const detectedCount = ref(0)
 const detectionResults = ref([])
 const selectedModel = ref('')
-const detectionTime = ref('00:00:00')
-const fps = ref(0)
-const lastFrameTime = ref(0)
-const frameCount = ref(0)
 const videoRef = ref(null)
 const canvasRef = ref(null)
 const lastSentTime = ref(0)
@@ -241,47 +227,15 @@ const loadModels = async () => {
     loadingModels.value = true
     addDetectionRecord('info', '正在加载检测模型列表...')
     
-    const { data } = await deviceApi.getModels()
-    
-    // 按模型类型分组
-    const groupedModels = {}
-    data.forEach(model => {
-      // 只加载激活状态的模型
-      if (!model.is_active) return
-      
-      const type = getModelTypeName(model.models_type)
-      if (!groupedModels[type]) {
-        groupedModels[type] = []
-      }
-      
-      // 获取模型描述信息，如果没有则提供默认描述
-      let description = model.description || getDefaultDescription(model.models_type, model.models_name)
-      
-      groupedModels[type].push({
-        label: model.models_name,
-        value: model.models_id,
-        description: description,
-        format: model.format.toUpperCase(),
-        size: formatFileSize(model.file_size),
-        uploadTime: formatDate(model.upload_time),
-        path: model.file_path,
-        parameters: model.parameters || {}
-      })
-    })
-    
-    // 转换为组件需要的格式
-    models.value = Object.keys(groupedModels).map(type => ({
-      type,
-      models: groupedModels[type]
-    }))
+    const response = await deviceApi.getModels();
+    models.value = response.data.filter(model => model.is_active);
     
     if (models.value.length === 0) {
       addDetectionRecord('warning', '未找到可用的检测模型，请先上传和激活模型')
     } else {
-      addDetectionRecord('success', `成功加载 ${data.filter(m => m.is_active).length} 个检测模型`)
+      addDetectionRecord('success', `成功加载 ${models.value.length} 个检测模型`)
     }
   } catch (error) {
-    console.error('加载模型列表失败:', error)
     addDetectionRecord('error', '加载模型列表失败: ' + (error.response?.data?.detail || error.message))
   } finally {
     loadingModels.value = false
@@ -291,7 +245,7 @@ const loadModels = async () => {
 // 获取模型类型名称
 const getModelTypeName = (type) => {
   const typeMap = {
-    'object_detection': 'YOLO系列',
+    'object_detection': '目标检测',
     'segmentation': '分割模型',
     'keypoint': '关键点检测',
     'pose': '姿态估计',
@@ -299,26 +253,6 @@ const getModelTypeName = (type) => {
     'other': '其他模型'
   }
   return typeMap[type] || type
-}
-
-// 获取默认描述
-const getDefaultDescription = (type, name) => {
-  if (type === 'object_detection') {
-    if (name.toLowerCase().includes('yolo')) {
-      if (name.toLowerCase().includes('n')) {
-        return '速度最快，适合实时检测'
-      } else if (name.toLowerCase().includes('s')) {
-        return '速度和精度的平衡'
-      } else if (name.toLowerCase().includes('m')) {
-        return '中等精度'
-      } else if (name.toLowerCase().includes('l')) {
-        return '高精度'
-      } else if (name.toLowerCase().includes('x')) {
-        return '最高精度'
-      }
-    }
-  }
-  return '通用检测模型'
 }
 
 // 监听选择模型变化时，获取模型详情
@@ -337,31 +271,6 @@ watch(selectedModel, async (modelId) => {
     addDetectionRecord('error', '获取模型详情失败: ' + (error.response?.data?.detail || error.message))
   }
 })
-
-// 格式化文件大小
-const formatFileSize = (size) => {
-  if (size < 1024) {
-    return size + ' B'
-  } else if (size < 1024 * 1024) {
-    return (size / 1024).toFixed(2) + ' KB'
-  } else if (size < 1024 * 1024 * 1024) {
-    return (size / (1024 * 1024)).toFixed(2) + ' MB'
-  } else {
-    return (size / (1024 * 1024 * 1024)).toFixed(2) + ' GB'
-  }
-}
-
-// 格式化日期
-const formatDate = (dateStr) => {
-  const date = new Date(dateStr)
-  return date.toLocaleString('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit'
-  })
-}
 
 // 添加检测记录
 const addDetectionRecord = (type, message) => {
@@ -923,30 +832,6 @@ const handleDetectionResult = (data) => {
 
 // 添加记录时间控制
 let lastRecordTime = 0
-
-// 为每个类别生成固定的颜色
-const getColorForClass = (() => {
-  const colorMap = new Map()
-  const colors = [
-    '#FF3B30', // 红色
-    '#34C759', // 绿色
-    '#007AFF', // 蓝色
-    '#FF9500', // 橙色
-    '#AF52DE', // 紫色
-    '#5856D6', // 靛蓝
-    '#FF2D55', // 粉红
-    '#FFCC00'  // 黄色
-  ]
-  let colorIndex = 0
-
-  return (className) => {
-    if (!colorMap.has(className)) {
-      colorMap.set(className, colors[colorIndex % colors.length])
-      colorIndex++
-    }
-    return colorMap.get(className)
-  }
-})()
 
 // 修改帧捕获启动函数
 const startFrameCapture = () => {
@@ -1580,7 +1465,8 @@ onBeforeUnmount(() => {
 
 .model-option {
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  gap: 8px;
 }
 
 .model-name {

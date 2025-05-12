@@ -10,24 +10,17 @@
           :disabled="isDetecting"
           :loading="loadingModels"
         >
-          <el-option-group
-            v-for="group in models"
-            :key="group.type"
-            :label="group.type"
+          <el-option
+            v-for="model in models"
+            :key="model.models_id"
+            :label="`${model.models_name} (${getModelTypeName(model.models_type)})`"
+            :value="model.models_id"
           >
-            <el-option
-              v-for="model in group.models"
-              :key="model.value"
-              :label="model.label"
-              :value="model.value"
-            >
-              <div class="model-option">
-                <span class="model-name">{{ model.label }}</span>
-                <span class="model-desc">{{ model.description }}</span>
-                <span class="model-format">格式：{{ model.format }}</span>
-              </div>
-            </el-option>
-          </el-option-group>
+            <div class="model-option">
+              <span>{{ model.models_name }}</span>
+              <el-tag size="small" effect="plain">{{ getModelTypeName(model.models_type) }}</el-tag>
+            </div>
+          </el-option>
           <template #empty>
             <div class="empty-model-list">
               <p v-if="loadingModels">加载模型中...</p>
@@ -83,8 +76,7 @@
                 >
                   <el-image
                     :src="image.url"
-                    fit="cover"
-                    :loading="loading"
+                    fit="cover"                   
                   >
                     <template #placeholder>
                       <div class="image-placeholder">
@@ -94,7 +86,7 @@
                   </el-image>
                   <el-tag
                     size="small"
-                    :type="image.status === 'done' ? 'success' : image.status === 'processing' ? 'warning' : ''"
+                    :type="image.status === 'done' ? 'success' : image.status === 'processing' ? 'warning' : 'primary'"
                   >
                     {{ getStatusText(image.status) }}
                   </el-tag>
@@ -215,47 +207,15 @@ const loadModels = async () => {
     loadingModels.value = true
     addDetectionRecord('info', '正在加载检测模型列表...')
     
-    const { data } = await deviceApi.getModels()
-    
-    // 按模型类型分组
-    const groupedModels = {}
-    data.forEach(model => {
-      // 只加载激活状态的模型
-      if (!model.is_active) return
-      
-      const type = getModelTypeName(model.models_type)
-      if (!groupedModels[type]) {
-        groupedModels[type] = []
-      }
-      
-      // 获取模型描述信息，如果没有则提供默认描述
-      let description = model.description || getDefaultDescription(model.models_type, model.models_name)
-      
-      groupedModels[type].push({
-        label: model.models_name,
-        value: model.models_id,
-        description: description,
-        format: model.format.toUpperCase(),
-        size: formatFileSize(model.file_size),
-        uploadTime: formatDate(model.upload_time),
-        path: model.file_path,
-        parameters: model.parameters || {}
-      })
-    })
-    
-    // 转换为组件需要的格式
-    models.value = Object.keys(groupedModels).map(type => ({
-      type,
-      models: groupedModels[type]
-    }))
+    const response = await deviceApi.getModels();
+    models.value = response.data.filter(model => model.is_active);
     
     if (models.value.length === 0) {
       addDetectionRecord('warning', '未找到可用的检测模型，请先上传和激活模型')
     } else {
-      addDetectionRecord('success', `成功加载 ${data.filter(m => m.is_active).length} 个检测模型`)
+      addDetectionRecord('success', `成功加载 ${models.value.length} 个检测模型`)
     }
   } catch (error) {
-    console.error('加载模型列表失败:', error)
     addDetectionRecord('error', '加载模型列表失败: ' + (error.response?.data?.detail || error.message))
   } finally {
     loadingModels.value = false
@@ -265,7 +225,7 @@ const loadModels = async () => {
 // 获取模型类型名称
 const getModelTypeName = (type) => {
   const typeMap = {
-    'object_detection': 'YOLO系列',
+    'object_detection': '目标检测',
     'segmentation': '分割模型',
     'keypoint': '关键点检测',
     'pose': '姿态估计',
@@ -690,7 +650,8 @@ const drawDetectionBoxes = (objects) => {
     ctx.clearRect(0, 0, canvas.width, canvas.height)
     
     // 不绘制原图，因为已经有img标签显示原图
-    
+    ctx.drawImage(image, 0, 0)
+
     // 遍历目标并绘制检测框
     objects.forEach(obj => {
       const [x, y, w, h] = obj.bbox
@@ -783,7 +744,7 @@ const handleImageChange = async (file) => {
     console.log('Image info created:', imageInfo)
     imageList.value.push(imageInfo)
     if (currentImageIndex.value === -1) {
-      currentImageIndex.value = 0
+      currentImage.value = imageInfo
     }
   } catch (error) {
     console.error('Error processing image file:', error)
@@ -1353,8 +1314,8 @@ onUnmounted(() => {
 
 .model-option {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  align-items: center;
+  gap: 8px;
 }
 
 .model-name {

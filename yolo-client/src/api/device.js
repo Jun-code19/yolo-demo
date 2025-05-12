@@ -127,19 +127,6 @@ export default {
     return apiClient.delete(`/devices/${deviceId}`);
   },
   
-  // 系统日志相关API
-  getSyslogs(params) {
-    return apiClient.get('/syslogs/', { params });
-  },
-  
-  exportSystemLogs(params) {
-    return apiClient.get('/system/logs/export', { params });
-  },
-  
-  clearSystemLogs(days) {
-    return apiClient.delete(`/system/logs/clear?days=${days}`);
-  },
-  
   // 模型管理相关API
   getModels() {
     return apiClient.get('/models/');
@@ -163,5 +150,33 @@ export default {
   
   toggleModelActive(modelId, active) {
     return apiClient.put(`/models/${modelId}/toggle?active=${active}`);
-  }
+  },
+  
+  // 获取首页仪表盘数据
+  getDashboardOverview() {
+    return apiClient.get('/dashboard/overview');
+  },
+
+  // 导出设备数据模板
+  exportDeviceTemplate() {
+    return apiClient.get('/devices/export/template', {
+      responseType: 'blob' // 使用blob响应类型来处理文件下载
+    });
+  },
+  
+  // 导出设备数据
+  exportDevices() {
+    return apiClient.get('/devices/export/data', {
+      responseType: 'blob' // 使用blob响应类型来处理文件下载
+    });
+  },
+  
+  // 导入设备数据
+  importDevices(formData) {
+    return apiClient.post('/devices/import', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      }
+    });
+  },
 }; 

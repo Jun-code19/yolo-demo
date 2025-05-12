@@ -3,26 +3,27 @@
 支持多摄像头同步采集，根据预设时间间隔进行分析，并将结果推送至外部平台
 用于生成人数分布地图和人流统计
 """
-
-import asyncio
-import logging
-import threading
-import time
-import uuid
-from datetime import datetime, time as dt_time
-import json
-import cv2
-import numpy as np
-from typing import Dict, List, Optional, Union
-from sqlalchemy.orm import Session
-from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.triggers.interval import IntervalTrigger
-from apscheduler.triggers.cron import CronTrigger
-
+from pathlib import Path # 导入路径模块
+import asyncio # 导入异步I/O模块
+import logging # 导入日志模块
+import threading # 导入线程模块
+import time # 导入时间模块
+import uuid # 导入UUID模块
+from datetime import datetime, time as dt_time # 导入日期时间模块
+import json # 导入JSON模块
+import cv2 # 导入OpenCV模块
+import numpy as np # 导入NumPy模块
+from typing import Dict, List, Optional, Union # 导入类型提示
+from sqlalchemy.orm import Session # 导入数据库会话
+from apscheduler.schedulers.background import BackgroundScheduler # 导入调度器
+from apscheduler.triggers.interval import IntervalTrigger # 导入间隔触发器
+from apscheduler.triggers.cron import CronTrigger # 导入Cron触发器
+# 导入数据库模型
 from src.database import (
     SessionLocal, DetectionConfig, Device, 
     DetectionModel, DetectionPerformance, Base, engine, CrowdAnalysisJob, CrowdAnalysisResult
 )
+# 导入数据推送模块
 from src.data_pusher import data_pusher
 
 # 配置日志
@@ -186,7 +187,7 @@ class CrowdAnalyzer:
             
             # 遍历所有设备
             for device_id in device_ids:
-                result = self._analyze_single_camera(device_id, yolo_model, 0.5, detect_classes)  # 使用默认置信度
+                result = self._analyze_single_camera(device_id, yolo_model, 0.35, detect_classes)  # 使用默认置信度
                 if result:
                     # 确保所有结果都可JSON序列化
                     result_serializable = self._ensure_json_serializable(result)
@@ -412,6 +413,14 @@ class CrowdAnalyzer:
                 "area": device.area or "",
                 "person_detections": person_boxes
             }
+
+            # 采集图像到本地
+            if True and frame is not None and person_boxes is not None and person_count > 0:
+                save_dir = Path(f"storage/detection/{datetime.now().strftime('%Y-%m-%d')}/{device_id}")
+                save_dir.mkdir(parents=True, exist_ok=True)   
+                # 保存带检测框的截图（原图）
+                thumbnail_path = save_dir / f"{datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}.jpg"
+                cv2.imwrite(str(thumbnail_path), frame)
             
             # 可选：添加预览图（缩小尺寸以减少数据量）
             if frame is not None:

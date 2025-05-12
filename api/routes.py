@@ -2,19 +2,21 @@ from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File,
 from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
-from src.database import get_db, Device, Video, AnalysisResult, Alarm, User, SysLog, DetectionModel, DetectionConfig, DetectionEvent, DetectionSchedule, DetectionStat, DetectionPerformance, SaveMode, EventStatus, DetectionFrequency
+from src.database import get_db, Device, AnalysisResult, Alarm, User, SysLog, DetectionModel, DetectionConfig, DetectionEvent, DetectionSchedule, DetectionStat, DetectionPerformance, SaveMode, EventStatus, DetectionFrequency, DetectionLog, CrowdAnalysisJob, DataPushConfig
 from pydantic import BaseModel
 from fastapi.security import OAuth2PasswordRequestForm
 from api.auth import authenticate_user, create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES, get_current_user, check_admin_permission, get_password_hash, verify_password
 from api.logger import log_action
 from passlib.context import CryptContext
-from fastapi.responses import FileResponse,Response
+from fastapi.responses import FileResponse, Response, StreamingResponse
 import requests
 
 import os
 import shutil
 import uuid
 import json
+import io
+import pandas as pd
 from pathlib import Path
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import func, text, desc, and_, or_
@@ -181,37 +183,9 @@ def delete_device(device_id: str, db: Session = Depends(get_db), current_user: U
         db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
 
-# 视频管理API
-class VideoCreate(BaseModel):
-    video_id: str
-    device_id: str
-    start_time: datetime
-    storage_path: str
-    resolution: Optional[str]
-    frame_rate: Optional[int]
-
-@router.post("/videos/")
-def create_video(video: VideoCreate, db: Session = Depends(get_db)):
-    db_video = Video(**video.dict())
-    try:
-        db.add(db_video)
-        db.commit()
-        db.refresh(db_video)
-        return db_video
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=400, detail=str(e))
-
-@router.get("/videos/{video_id}")
-def get_video(video_id: str, db: Session = Depends(get_db)):
-    video = db.query(Video).filter(Video.video_id == video_id).first()
-    if not video:
-        raise HTTPException(status_code=404, detail="Video not found")
-    return video
-
 # 分析结果API
 class AnalysisResultCreate(BaseModel):
-    video_id: str
+    # video_id: str
     target_type: str
     confidence: float
     start_frame: Optional[int]
@@ -365,7 +339,7 @@ def get_syslogs(
     end_date: Optional[str] = None,
     action_type: Optional[str] = None,
     db: Session = Depends(get_db)):
-    query = db.query(SysLog)
+    query = db.query(SysLog).order_by(SysLog.log_time.desc())
     total_count = query.count()
     if user_id:
         query = query.filter(SysLog.user_id == user_id)
@@ -700,6 +674,7 @@ class DetectionConfigBase(BaseModel):
     save_mode: Optional[str] = "none"
     save_duration: int = 10
     max_storage_days: int = 30
+    schedule_config: Optional[Dict[str, Any]] = None  # 定时检测配置
 
 class DetectionConfigCreate(DetectionConfigBase):
     pass
@@ -715,6 +690,7 @@ class DetectionConfigUpdate(BaseModel):
     max_storage_days: Optional[int] = None
     # area_type:Optional[str] = None
     area_coordinates:Optional[AreaCoordinates] = None
+    schedule_config: Optional[Dict[str, Any]] = None  # 定时检测配置
 
 class DetectionConfigResponse(DetectionConfigBase):
     config_id: str
@@ -740,6 +716,7 @@ class DetectionConfigDetailResponse(DetectionConfigBase):
     created_at: datetime
     updated_at: datetime
     created_by: Optional[str] = None
+    schedule_config: Optional[Dict[str, Any]] = None  # 定时检测配置
 
     class Config:
         from_attributes = True
@@ -817,6 +794,7 @@ class DetectionEventResponse(DetectionEventBase):
 async def get_detection_configs(
     device_id: Optional[str] = None,
     enabled: Optional[bool] = None,
+    frequency: Optional[str] = None,
     skip: int = 0,
     limit: int = 100,
     db: Session = Depends(get_db)):
@@ -829,6 +807,8 @@ async def get_detection_configs(
         query = query.filter(DetectionConfig.device_id == device_id)
     if enabled is not None:
         query = query.filter(DetectionConfig.enabled == enabled)
+    if frequency is not None:
+        query = query.filter(DetectionConfig.frequency == frequency)
     
     configs = query.offset(skip).limit(limit).all()
     
@@ -859,6 +839,7 @@ async def get_detection_configs(
             "max_storage_days": config.max_storage_days,
             "area_type": config.area_type,
             "area_coordinates": area_coordinates,
+            "schedule_config": config.schedule_config,
             "created_at": config.created_at,
             "updated_at": config.updated_at,
             "created_by": config.created_by
@@ -927,6 +908,10 @@ async def create_detection_config(
     except ValueError:
         raise HTTPException(status_code=400, detail="无效的频率或保存模式值")
     
+    # 验证定时检测配置
+    if config.frequency == "scheduled" and not config.schedule_config:
+        raise HTTPException(status_code=400, detail="定时检测需要提供时间配置")
+    
     # 创建配置记录
     db_config = DetectionConfig(
         config_id=str(uuid.uuid4()),
@@ -942,6 +927,10 @@ async def create_detection_config(
         created_at=datetime.now(),
         updated_at=datetime.now()
     )
+    
+    # 添加定时检测配置
+    if config.schedule_config:
+        db_config.schedule_config = config.schedule_config
     
     db.add(db_config)
     db.commit()
@@ -1002,8 +991,19 @@ async def update_detection_config(
     if config_update.frequency is not None:
         try:
             db_config.frequency = DetectionFrequency(config_update.frequency) if isinstance(config_update.frequency, str) else config_update.frequency
+            # 如果切换到定时检测，但没有提供定时配置，检查是否存在
+            if config_update.frequency == "scheduled" and not config_update.schedule_config:
+                if not hasattr(db_config, 'schedule_config') or not db_config.schedule_config:
+                    raise HTTPException(status_code=400, detail="定时检测需要提供时间配置")
+            # 如果切换到非定时检测，清除定时配置
+            elif config_update.frequency != "scheduled" and hasattr(db_config, 'schedule_config'):
+                db_config.schedule_config = None
         except ValueError:
             raise HTTPException(status_code=400, detail="无效的频率值")
+    
+    # 更新定时检测配置
+    if config_update.schedule_config is not None:
+        db_config.schedule_config = config_update.schedule_config
     
     if config_update.save_mode is not None:
         try:
@@ -1028,7 +1028,6 @@ async def update_detection_config(
         #     raise HTTPException(status_code=422, detail="Invalid area coordinates")
         db_config.area_coordinates = config_update.area_coordinates.dict()
     
-
     # 更新时间戳
     db_config.updated_at = datetime.now()
     
@@ -1052,7 +1051,6 @@ async def update_detection_config(
         "created_at": db_config.created_at,
         "updated_at": db_config.updated_at,
         "created_by": db_config.created_by
-        # "area_type": db_config.area_type
     }
     
     return config_dict
@@ -1692,3 +1690,883 @@ def export_system_logs(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# 添加检测日志API
+@router.get("/detection/logs/")
+def get_detection_logs(
+    skip: int = 0,
+    limit: int = 100,
+    config_id: Optional[str] = None,
+    device_id: Optional[str] = None,
+    operation: Optional[str] = None,
+    status: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """获取检测日志"""
+    query = db.query(DetectionLog).order_by(DetectionLog.created_at.desc())
+    
+    # 应用筛选条件
+    if config_id:
+        query = query.filter(DetectionLog.config_id == config_id)
+    if device_id:
+        query = query.filter(DetectionLog.device_id == device_id)
+    if operation:
+        query = query.filter(DetectionLog.operation == operation)
+    if status:
+        query = query.filter(DetectionLog.status == status)
+    if start_date:
+        query = query.filter(DetectionLog.created_at >= datetime.strptime(start_date, '%Y-%m-%d'))
+    if end_date:
+        # 添加一天，以便包含结束日期当天的记录
+        end = datetime.strptime(end_date, '%Y-%m-%d') + timedelta(days=1)
+        query = query.filter(DetectionLog.created_at < end)
+    
+    # 计算总记录数
+    total_count = query.count()
+    
+    # 获取分页结果
+    logs = query.order_by(DetectionLog.created_at.desc()).offset(skip).limit(limit).all()
+    
+    # 构建响应
+    result = []
+    for log in logs:
+        # 获取设备和配置的名称
+        device_name = None
+        config_name = None
+        try:
+            device = db.query(Device).filter(Device.device_id == log.device_id).first()
+            if device:
+                device_name = device.device_name
+            
+            config = db.query(DetectionConfig).filter(DetectionConfig.config_id == log.config_id).first()
+            if config:
+                config_name = f"检测配置 {config.config_id[:6]}..." 
+        except Exception:
+            pass
+        
+        # 获取用户名
+        username = None
+        if log.created_by:
+            try:
+                user = db.query(User).filter(User.user_id == log.created_by).first()
+                if user:
+                    username = user.username
+            except Exception:
+                pass
+        
+        # 构建日志记录
+        log_data = {
+            "log_id": log.log_id,
+            "config_id": log.config_id,
+            "config_name": config_name,
+            "device_id": log.device_id,
+            "device_name": device_name,
+            "operation": log.operation,
+            "status": log.status,
+            "message": log.message,
+            "created_by": log.created_by,
+            "username": username,
+            "created_at": log.created_at.isoformat()
+        }
+        result.append(log_data)
+    
+    return {
+        "data": result,
+        "total": total_count
+    }
+
+# 设备数据导出模板
+@router.get("/devices/export/template")
+def export_device_template(current_user: User = Depends(get_current_user)):
+    """导出设备数据模板"""
+    # 创建数据框架
+    df = pd.DataFrame(columns=[
+        "device_id", "device_name", "device_type", 
+        "ip_address", "port", "username", "password",
+        "channel", "stream_type", "location", "area"
+    ])
+    
+    # 添加示例数据行
+    example_row = {
+        "device_id": "camera1", 
+        "device_name": "前门摄像头", 
+        "device_type": "camera",
+        "ip_address": "192.168.1.100", 
+        "port": 554, 
+        "username": "admin", 
+        "password": "admin123",
+        "channel": 1, 
+        "stream_type": "main", 
+        "location": "前门", 
+        "area": "安全区"
+    }
+    df = pd.concat([df, pd.DataFrame([example_row])], ignore_index=True)
+    
+    # 创建内存缓冲区并保存Excel文件
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df.to_excel(writer, sheet_name='设备模板', index=False)
+        
+        # 获取工作簿和工作表对象
+        workbook = writer.book
+        worksheet = writer.sheets['设备模板']
+        
+        # 设置列宽
+        for i, col in enumerate(df.columns):
+            column_len = max(df[col].astype(str).map(len).max(), len(col)) + 2
+            worksheet.set_column(i, i, column_len)
+            
+        # 添加列说明
+        # 创建说明工作表
+        info_worksheet = workbook.add_worksheet('填写说明')
+        
+        # 设置标题格式
+        title_format = workbook.add_format({
+            'bold': True, 
+            'font_size': 14, 
+            'align': 'center',
+            'valign': 'vcenter'
+        })
+        
+        # 设置正文格式
+        content_format = workbook.add_format({
+            'font_size': 11,
+            'text_wrap': True,
+            'valign': 'top'
+        })
+        
+        # 写入标题
+        info_worksheet.write(0, 0, '设备导入模板填写说明', title_format)
+        info_worksheet.set_row(0, 30)
+        
+        # 合并标题单元格
+        info_worksheet.merge_range('A1:B1', '设备导入模板填写说明', title_format)
+        
+        # 写入说明内容
+        instructions = [
+            ['字段', '说明'],
+            ['device_id', '设备ID，必填，唯一标识符'],
+            ['device_name', '设备名称，必填'],
+            ['device_type', '设备类型，必填，可选值：camera(摄像头)/nvr(硬盘录像机)/edge_server(边缘服务器)/storage_node(存储节点)'],
+            ['ip_address', 'IP地址，必填，格式：xxx.xxx.xxx.xxx'],
+            ['port', '端口号，必填，整数，默认554'],
+            ['username', '用户名，必填'],
+            ['password', '密码，必填'],
+            ['channel', '通道号，选填，适用于NVR设备，整数，默认1'],
+            ['stream_type', '码流类型，选填，可选值：main(主码流)/sub(辅码流)，默认main'],
+            ['location', '位置，选填'],
+            ['area', '区域，选填']
+        ]
+        
+        # 写入说明内容
+        for row_num, row_data in enumerate(instructions):
+            info_worksheet.write(row_num + 1, 0, row_data[0], content_format)
+            info_worksheet.write(row_num + 1, 1, row_data[1], content_format)
+            
+        # 设置列宽
+        info_worksheet.set_column('A:A', 15)
+        info_worksheet.set_column('B:B', 60)
+    
+    # 设置文件指针位置到开始
+    output.seek(0)
+    
+    # 记录日志
+    log_action(next(get_db()), current_user.user_id, 'export_device_template', 'system', f"用户 {current_user.username} 导出设备模板")
+    
+    # 返回Excel文件
+    return StreamingResponse(
+        output, 
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=device_template.xlsx"}
+    )
+
+# 设备数据导出
+@router.get("/devices/export/data")
+def export_devices(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """导出所有设备数据"""
+    # 从数据库获取所有设备
+    devices = db.query(Device).all()
+    
+    # 将设备数据转换为字典列表
+    devices_data = []
+    for device in devices:
+        device_dict = {
+            "device_id": device.device_id,
+            "device_name": device.device_name,
+            "device_type": device.device_type,
+            "ip_address": device.ip_address,
+            "port": device.port,
+            "username": device.username,
+            "password": device.password,
+            "channel": device.channel,
+            "stream_type": device.stream_type,
+            "location": device.location,
+            "area": device.area,
+            "status": "在线" if device.status else "离线",
+            "last_heartbeat": device.last_heartbeat.strftime("%Y-%m-%d %H:%M:%S") if device.last_heartbeat else ""
+        }
+        devices_data.append(device_dict)
+    
+    # 创建数据框架
+    df = pd.DataFrame(devices_data)
+    
+    # 创建内存缓冲区并保存Excel文件
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df.to_excel(writer, sheet_name='设备数据', index=False)
+        
+        # 获取工作簿和工作表对象
+        workbook = writer.book
+        worksheet = writer.sheets['设备数据']
+        
+        # 设置列宽
+        for i, col in enumerate(df.columns):
+            column_len = max(df[col].astype(str).map(len).max(), len(col)) + 2
+            worksheet.set_column(i, i, column_len)
+    
+    # 设置文件指针位置到开始
+    output.seek(0)
+    
+    # 记录日志
+    log_action(db, current_user.user_id, 'export_devices', 'system', f"用户 {current_user.username} 导出设备数据")
+    
+    # 设置当前日期作为文件名一部分
+    current_date = datetime.now().strftime("%Y%m%d")
+    
+    # 返回Excel文件
+    return StreamingResponse(
+        output, 
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename=devices_{current_date}.xlsx"}
+    )
+
+# 设备数据导入
+@router.post("/devices/import")
+async def import_devices(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """导入设备数据"""
+    # 检查文件扩展名
+    file_extension = os.path.splitext(file.filename)[1].lower()
+    if file_extension not in ['.xlsx', '.xls', '.csv']:
+        raise HTTPException(status_code=400, detail="仅支持Excel(.xlsx/.xls)或CSV(.csv)文件格式")
+    
+    # 读取文件内容
+    contents = await file.read()
+    
+    try:
+        # 解析Excel文件
+        df = pd.read_excel(io.BytesIO(contents)) if file_extension in ['.xlsx', '.xls'] else pd.read_csv(io.BytesIO(contents))
+        
+        # 检查必要的列是否存在
+        required_columns = ['device_id', 'device_name', 'device_type', 'ip_address', 'port', 'username', 'password']
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        
+        if missing_columns:
+            raise ValueError(f"导入文件缺少必要的列: {', '.join(missing_columns)}")
+        
+        # 处理导入的设备数据
+        success_count = 0
+        error_count = 0
+        update_count = 0
+        errors = []
+        
+        for index, row in df.iterrows():
+            try:
+                # 检查必填字段是否有值
+                for col in required_columns:
+                    if pd.isna(row[col]) or str(row[col]).strip() == '':
+                        raise ValueError(f"第{index+2}行: {col}字段不能为空")
+                
+                # 检查设备类型是否有效
+                valid_device_types = ['camera', 'nvr', 'edge_server', 'storage_node']
+                if row['device_type'] not in valid_device_types:
+                    raise ValueError(f"第{index+2}行: 无效的设备类型 '{row['device_type']}'. 有效类型: {', '.join(valid_device_types)}")
+                
+                # 准备设备数据
+                device_data = {
+                    "device_id": str(row['device_id']),
+                    "device_name": str(row['device_name']),
+                    "device_type": str(row['device_type']),
+                    "ip_address": str(row['ip_address']),
+                    "port": int(row['port']),
+                    "username": str(row['username']),
+                    "password": str(row['password']),
+                    "channel": int(row['channel']) if 'channel' in row and not pd.isna(row['channel']) else 1,
+                    "stream_type": str(row['stream_type']) if 'stream_type' in row and not pd.isna(row['stream_type']) else 'main',
+                    "location": str(row['location']) if 'location' in row and not pd.isna(row['location']) else None,
+                    "area": str(row['area']) if 'area' in row and not pd.isna(row['area']) else None
+                }
+                
+                # 检查设备ID是否已存在
+                existing_device = db.query(Device).filter(Device.device_id == device_data['device_id']).first()
+                
+                if existing_device:
+                    # 更新已存在的设备
+                    for key, value in device_data.items():
+                        setattr(existing_device, key, value)
+                    update_count += 1
+                else:
+                    # 创建新设备
+                    new_device = Device(**device_data)
+                    db.add(new_device)
+                    success_count += 1
+                
+            except Exception as e:
+                error_count += 1
+                errors.append(str(e))
+                continue
+        
+        # 提交事务
+        db.commit()
+        
+        # 记录日志
+        log_action(
+            db, 
+            current_user.user_id, 
+            'import_devices', 
+            'system', 
+            f"用户 {current_user.username} 导入设备数据: 成功新增{success_count}个, 更新{update_count}个, 失败{error_count}个"
+        )
+        
+        # 构建响应
+        response = {
+            "message": f"设备导入完成: 成功新增{success_count}个, 更新{update_count}个, 失败{error_count}个",
+            "success_count": success_count,
+            "update_count": update_count,
+            "error_count": error_count
+        }
+        
+        # 如果有错误，添加错误详情
+        if errors:
+            response["errors"] = errors[:10]  # 只返回前10个错误
+            if len(errors) > 10:
+                response["errors"].append(f"... 还有{len(errors) - 10}个错误未显示")
+        
+        return response
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"处理导入文件时出错: {str(e)}")
+
+@router.get("/detection/logs/export")
+def export_detection_logs(
+    skip: int = 0,
+    limit: int = 1000,
+    config_id: Optional[str] = None,
+    device_id: Optional[str] = None,
+    operation: Optional[str] = None,
+    status: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """导出检测日志"""
+    try:
+        query = db.query(DetectionLog).order_by(DetectionLog.created_at.desc())
+        
+        # 应用筛选条件
+        if config_id:
+            query = query.filter(DetectionLog.config_id == config_id)
+        if device_id:
+            query = query.filter(DetectionLog.device_id == device_id)
+        if operation:
+            query = query.filter(DetectionLog.operation == operation)
+        if status:
+            query = query.filter(DetectionLog.status == status)
+        if start_date:
+            query = query.filter(DetectionLog.created_at >= datetime.strptime(start_date, '%Y-%m-%d'))
+        if end_date:
+            # 添加一天，以便包含结束日期当天的记录
+            end = datetime.strptime(end_date, '%Y-%m-%d') + timedelta(days=1)
+            query = query.filter(DetectionLog.created_at < end)
+        
+        # 获取数据
+        logs = query.limit(limit).offset(skip).all()
+        
+        # 转换为Excel
+        df = pd.DataFrame()
+        result = []
+        
+        for log in logs:
+            # 获取设备和配置的名称
+            device_name = None
+            config_name = None
+            try:
+                device = db.query(Device).filter(Device.device_id == log.device_id).first()
+                if device:
+                    device_name = device.device_name
+                
+                config = db.query(DetectionConfig).filter(DetectionConfig.config_id == log.config_id).first()
+                if config:
+                    config_name = f"检测配置 {config.config_id[:6]}..." 
+            except Exception:
+                pass
+            
+            # 获取用户名
+            username = None
+            if log.created_by:
+                try:
+                    user = db.query(User).filter(User.user_id == log.created_by).first()
+                    if user:
+                        username = user.username
+                except Exception:
+                    pass
+            
+            # 构建日志记录
+            log_data = {
+                "日志ID": log.log_id,
+                "设备ID": log.device_id,
+                "设备名称": device_name,
+                "配置ID": log.config_id,
+                "配置名称": config_name,
+                "操作类型": log.operation,
+                "状态": "成功" if log.status == "success" else "失败",
+                "消息": log.message,
+                "执行用户ID": log.created_by,
+                "执行用户": username,
+                "操作时间": log.created_at.strftime("%Y-%m-%d %H:%M:%S") if log.created_at else ""
+            }
+            result.append(log_data)
+        
+        df = pd.DataFrame(result)
+        
+        # 创建内存缓冲区并保存Excel文件
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            df.to_excel(writer, sheet_name='检测日志', index=False)
+            
+            # 获取工作簿和工作表对象
+            workbook = writer.book
+            worksheet = writer.sheets['检测日志']
+            
+            # 设置列宽
+            for i, col in enumerate(df.columns):
+                column_len = max(df[col].astype(str).map(len).max(), len(col)) + 2
+                worksheet.set_column(i, i, column_len)
+        
+        # 设置文件指针位置到开始
+        output.seek(0)
+        
+        # 记录日志
+        log_action(db, current_user.user_id, 'export_detection_logs', 'system', f"用户 {current_user.username} 导出检测日志")
+        
+        # 设置当前日期作为文件名一部分
+        current_date = datetime.now().strftime("%Y%m%d")
+        
+        # 返回Excel文件
+        return StreamingResponse(
+            output, 
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment; filename=detection_logs_{current_date}.xlsx"}
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"导出日志失败: {str(e)}")
+
+@router.delete("/detection/logs/clear")
+def clear_detection_logs(
+    days: int = Query(30, description="清除多少天前的日志"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(check_admin_permission)
+):
+    """清除检测日志"""
+    try:
+        # 计算截止时间
+        cutoff_date = datetime.now() - timedelta(days=days)
+        
+        # 删除指定日期之前的日志
+        deleted = db.query(DetectionLog).filter(DetectionLog.created_at < cutoff_date).delete()
+        db.commit()
+        
+        # 记录清除操作
+        log_action(db, current_user.user_id, 'clear_detection_logs', 'system', f"清除{days}天前的检测日志，共{deleted}条")
+        
+        return {"message": f"成功清除 {deleted} 条{days}天前的检测日志"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+# 系统状态监控API
+@router.get("/system/status")
+def get_system_status(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """获取系统状态信息（CPU、内存、磁盘、GPU等）"""
+    try:
+        import psutil
+        import os
+        import subprocess
+        import json
+        
+        # CPU使用率
+        cpu_percent = psutil.cpu_percent(interval=1)
+        
+        # 内存使用率
+        memory = psutil.virtual_memory()
+        memory_percent = memory.percent
+        
+        # 磁盘使用率
+        disk = psutil.disk_usage('/')
+        disk_percent = disk.percent
+        
+        # 获取服务状态，与前端服务名称保持一致
+        services = [
+            {"name": "检测服务", "status": "stopped"},
+            {"name": "数据服务", "status": "stopped"},
+            {"name": "数据库服务", "status": "stopped"},
+            {"name": "网页服务", "status": "stopped"}
+        ]
+        
+        # 尝试从docker或系统服务获取状态
+        try:
+            # 尝试使用docker ps获取服务状态
+            docker_status_cmd = "docker ps --format '{{.Names}}'"
+            docker_result = subprocess.run(docker_status_cmd, shell=True, capture_output=True, text=True)
+            
+            if docker_result.returncode == 0:
+                docker_output = docker_result.stdout.strip()
+                
+                # 解析docker输出，匹配实际的容器名称
+                if docker_output:
+                    running_containers = docker_output.split('\n')
+                    
+                    # 检测服务
+                    if any(container for container in running_containers if 'yolo-detect-server' in container):
+                        services[0]["status"] = "running"
+                    
+                    # 数据服务
+                    if any(container for container in running_containers if 'yolo-data-server' in container):
+                        services[1]["status"] = "running"
+                    
+                    # 数据库服务
+                    if any(container for container in running_containers if 'yolo-postgres' in container):
+                        services[2]["status"] = "running"
+                    
+                    # 网页服务
+                    if any(container for container in running_containers if 'yolo-frontend' in container):
+                        services[3]["status"] = "running"
+        except Exception as e:
+            print(f"获取Docker服务状态失败: {str(e)}")
+        
+        # 尝试使用系统命令获取系统服务状态（作为备用，优先使用Docker状态）
+        try:
+            if os.name == 'posix':  # Linux 或 MacOS
+                for i, service_name in enumerate(["yolo-detect-server", "yolo-data-server", "yolo-postgres", "yolo-frontend"]):
+                    # 只有当前面的Docker检查没有将其标记为running时，才进行系统服务检查
+                    if services[i]["status"] != "running":
+                        service_cmd = f"systemctl is-active {service_name}"
+                        service_result = subprocess.run(service_cmd, shell=True, capture_output=True, text=True)
+                        
+                        if service_result.stdout.strip() == "active":
+                            services[i]["status"] = "running"
+            elif os.name == 'nt':  # Windows
+                for i, service_name in enumerate(["YoloDetectServer", "YoloDataServer", "YoloPostgres", "YoloFrontend"]):
+                    # 只有当前面的Docker检查没有将其标记为running时，才进行系统服务检查
+                    if services[i]["status"] != "running":
+                        service_cmd = f"sc query {service_name} | findstr RUNNING"
+                        service_result = subprocess.run(service_cmd, shell=True, capture_output=True, text=True)
+                        
+                        if "RUNNING" in service_result.stdout:
+                            services[i]["status"] = "running"
+        except Exception as e:
+            print(f"获取系统服务状态失败: {str(e)}")
+        
+        # 尝试获取GPU信息
+        gpu_percent = 0
+        try:
+            # 尝试使用nvidia-smi获取GPU信息
+            gpu_cmd = "nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits"
+            gpu_result = subprocess.run(gpu_cmd, shell=True, capture_output=True, text=True)
+            
+            if gpu_result.returncode == 0:
+                gpu_output = gpu_result.stdout.strip()
+                try:
+                    gpu_percent = float(gpu_output)
+                except ValueError:
+                    pass
+        except Exception:
+            # 如果nvidia-smi不可用，保持gpu_percent为0
+            pass
+            
+        # 确定系统整体状态
+        status = "normal"
+        if cpu_percent > 90 or memory_percent > 90 or disk_percent > 90 or gpu_percent > 90:
+            status = "danger"
+        elif cpu_percent > 70 or memory_percent > 80 or disk_percent > 80 or gpu_percent > 70:
+            status = "warning"
+            
+        # 获取最近的系统日志
+        logs = db.query(SysLog).order_by(SysLog.log_time.desc()).limit(20).all()
+        log_entries = []
+        for log in logs:
+            log_entries.append({
+                "time": log.log_time.strftime("%Y-%m-%d %H:%M:%S"),
+                "level": "INFO" if "error" not in log.detail.lower() else "ERROR",
+                "message": log.detail
+            })
+            
+        # 构建响应
+        response = {
+            "status": status,
+            "cpu": cpu_percent,
+            "memory": memory_percent,
+            "disk": disk_percent,
+            "gpu": gpu_percent,
+            "services": services,
+            "logs": log_entries
+        }
+        
+        return response
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取系统状态失败: {str(e)}")
+
+# 服务控制API
+@router.post("/system/services/{service_name}/{action}")
+def control_service(
+    service_name: str, 
+    action: str, 
+    db: Session = Depends(get_db), 
+    current_user: User = Depends(check_admin_permission)
+):
+    """控制系统服务（启动/停止）"""
+    if action not in ["start", "stop"]:
+        raise HTTPException(status_code=400, detail="不支持的操作，只能是start或stop")
+        
+    # 服务名称映射
+    service_map = {
+        "detect": {"docker": "detect-server", "system": "yolo-detect-server"},
+        "data": {"docker": "data-server", "system": "yolo-data-server"},
+        "database": {"docker": "postgres", "system": "yolo-postgres"},
+        "frontend": {"docker": "frontend", "system": "yolo-frontend"}
+    }
+    
+    if service_name not in service_map:
+        raise HTTPException(status_code=400, detail=f"不支持的服务: {service_name}")
+    
+    try:
+        import subprocess
+        import os
+        
+        success = False
+        message = ""
+        
+        # 首先尝试使用docker-compose控制服务
+        try:
+            docker_service = service_map[service_name]["docker"]
+            docker_cmd = f"docker-compose {action} {docker_service}"
+            
+            docker_result = subprocess.run(docker_cmd, shell=True, capture_output=True, text=True)
+            
+            if docker_result.returncode == 0:
+                success = True
+                message = f"Docker服务 {docker_service} {action}成功"
+        except Exception as e:
+            print(f"Docker控制失败: {str(e)}")
+        
+        # 如果Docker控制失败，尝试系统服务
+        if not success:
+            try:
+                system_service = service_map[service_name]["system"]
+                
+                if os.name == 'posix':  # Linux 或 MacOS
+                    service_cmd = f"systemctl {action} {system_service}"
+                elif os.name == 'nt':  # Windows
+                    if action == "start":
+                        service_cmd = f"sc start {system_service}"
+                    else:
+                        service_cmd = f"sc stop {system_service}"
+                else:
+                    raise Exception("不支持的操作系统")
+                
+                service_result = subprocess.run(service_cmd, shell=True, capture_output=True, text=True)
+                
+                if (os.name == 'posix' and service_result.returncode == 0) or \
+                   (os.name == 'nt' and "SUCCESS" in service_result.stdout):
+                    success = True
+                    message = f"系统服务 {system_service} {action}成功"
+                else:
+                    message = f"系统服务 {system_service} {action}失败: {service_result.stderr or service_result.stdout}"
+            except Exception as e:
+                message = f"系统服务控制失败: {str(e)}"
+        
+        # 记录操作日志
+        action_type = "start_service" if action == "start" else "stop_service"
+        log_action(db, current_user.user_id, action_type, service_name, message)
+        
+        if success:
+            return {"status": "success", "message": message}
+        else:
+            raise Exception(message)
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"控制服务失败: {str(e)}")
+
+# 首页仪表盘API
+@router.get("/dashboard/overview")
+def get_dashboard_overview(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """获取首页仪表盘概览数据"""
+    try:
+        # 获取当前日期（用于今日数据统计）
+        today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        yesterday = today - timedelta(days=1)
+        
+        # 1. 设备统计
+        total_devices = db.query(Device).count()
+        online_devices = db.query(Device).filter(Device.status == True).count()
+        
+        # 2. 检测配置统计
+        total_configs = db.query(DetectionConfig).count()
+        active_configs = db.query(DetectionConfig).filter(DetectionConfig.enabled == True).count()
+        
+        # 3. 检测事件统计
+        # 今日事件数
+        today_events = db.query(DetectionEvent).filter(
+            DetectionEvent.created_at >= today
+        ).count()
+        
+        # 昨日事件数（用于计算趋势）
+        yesterday_events = db.query(DetectionEvent).filter(
+            DetectionEvent.created_at >= yesterday,
+            DetectionEvent.created_at < today
+        ).count()
+        
+        # 异常事件数（未处理）
+        unhandled_events = db.query(DetectionEvent).filter(
+            DetectionEvent.status == EventStatus.new
+        ).count()
+        
+        # 异常类型分布
+        event_types = db.query(
+            DetectionEvent.event_type, 
+            func.count(DetectionEvent.event_id).label('count')
+        ).group_by(DetectionEvent.event_type).all()
+        
+        event_type_distribution = {event_type: count for event_type, count in event_types}
+        
+        # 4. 检测性能统计
+        # 获取最近的性能数据
+        latest_performance = db.query(DetectionPerformance).order_by(
+            DetectionPerformance.timestamp.desc()
+        ).first()
+        
+        avg_detection_time = 0
+        if latest_performance:
+            # 计算总处理时间 = 检测时间 + 预处理时间 + 后处理时间
+            avg_detection_time = (
+                latest_performance.detection_time + 
+                latest_performance.preprocessing_time + 
+                latest_performance.postprocessing_time
+            )
+        
+        # 5. 近7天的检测事件趋势
+        seven_days_ago = today - timedelta(days=7)
+        daily_events = []
+        
+        for i in range(7):
+            day_start = seven_days_ago + timedelta(days=i)
+            day_end = day_start + timedelta(days=1)
+            
+            count = db.query(DetectionEvent).filter(
+                DetectionEvent.created_at >= day_start,
+                DetectionEvent.created_at < day_end
+            ).count()
+            
+            daily_events.append({
+                "date": day_start.strftime("%Y-%m-%d"),
+                "count": count
+            })
+        
+        # 6. 最近检测事件
+        recent_events = db.query(DetectionEvent).order_by(
+            DetectionEvent.created_at.desc()
+        ).limit(5).all()
+        
+        def getModelTypeName(type):
+            typeMap = {
+                'object_detection': '目标检测',
+                'segmentation': '图像分割',
+                'keypoint': '关键点检测',
+                'pose': '姿态估计',
+                'face': '人脸识别',
+                'other': '其他类型'
+            }
+            return typeMap[type] or type
+
+        recent_activities = []
+        for event in recent_events:
+            # 获取设备名称
+            device = db.query(Device).filter(Device.device_id == event.device_id).first()
+            device_name = device.device_name if device else "未知设备"
+            
+            # 确定事件类型
+            event_type = "primary"
+            if event.status == EventStatus.new:
+                event_type = "danger"
+            elif event.status == EventStatus.viewed or event.status == EventStatus.flagged:
+                event_type = "warning"
+            elif event.status == EventStatus.archived:
+                event_type = "success"
+            
+            # 计算时间差
+            time_diff = datetime.now() - event.created_at
+            if time_diff.days > 0:
+                time_str = f"{time_diff.days} 天前"
+            elif time_diff.seconds >= 3600:
+                time_str = f"{time_diff.seconds // 3600} 小时前"
+            elif time_diff.seconds >= 60:
+                time_str = f"{time_diff.seconds // 60} 分钟前"
+            else:
+                time_str = f"{time_diff.seconds} 秒前"
+            
+            recent_activities.append({
+                "content": f"[{getModelTypeName(event.event_type)}][{device_name}]检测到:{event.meta_data.get('count', 0) if event.meta_data else '未知'}个目标",    
+                "timestamp": time_str,
+                "type": event_type,
+                "event_id": event.event_id
+            })
+        
+        # 计算趋势数据
+        event_trend = 0
+        if yesterday_events > 0:
+            event_trend = ((today_events - yesterday_events) / yesterday_events) * 100
+        
+        # 计算准确率（模拟数据，实际应从系统配置或性能统计中获取）
+        accuracy = 98.5  # 默认值
+        
+        # 整合返回数据
+        response = {
+            "cards": {
+                "today_events": {
+                    "value": today_events,
+                    "trend": event_trend
+                },
+                "unhandled_events": {
+                    "value": unhandled_events
+                },
+                "accuracy": {
+                    "value": accuracy
+                },
+                "avg_detection_time": {
+                    "value": avg_detection_time
+                }
+            },
+            "devices": {
+                "total": total_devices,
+                "online": online_devices
+            },
+            "configs": {
+                "total": total_configs,
+                "active": active_configs
+            },
+            "trend_data": daily_events,
+            "event_distribution": event_type_distribution,
+            "recent_activities": recent_activities
+        }
+        
+        return response
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取仪表盘数据失败: {str(e)}")

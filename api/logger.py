@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from src.database import SysLog
+from src.database import SysLog, DetectionLog
 from datetime import datetime
 
 # 在文件开头添加新的操作类型常量
@@ -88,3 +88,38 @@ def log_action(db: Session, user_id: str, action_type: str, target_id: str, deta
     except Exception as e:
         print(f"记录操作日志失败: {str(e)}")
         db.rollback()
+
+# 添加记录检测日志的函数
+def log_detection_action(config_id: str, device_id: str, operation: str, status: str, message: str, user_id: str = None, db = None):
+    """记录检测任务操作日志"""
+    from src.database import SessionLocal
+    
+    # 标记是否需要在函数内部关闭数据库会话
+    close_db = False
+    try:
+        # 如果没有传入数据库会话，创建一个新的
+        if db is None or isinstance(db, str):
+            db = SessionLocal()
+            close_db = True
+            
+        log = DetectionLog(
+            config_id=config_id,
+            device_id=device_id,
+            operation=operation,
+            status=status,
+            message=message,
+            created_by=user_id,
+            created_at=datetime.now()
+        )
+        db.add(log)
+        db.commit()
+        # print(f"记录检测日志成功: {operation} {config_id}")
+    except Exception as e:
+        print(f"记录检测日志失败: {str(e)}")
+        if close_db and hasattr(db, 'rollback'):
+            db.rollback()
+    finally:
+        # 只有在函数内部创建的会话才需要关闭
+        if close_db and hasattr(db, 'close'):
+            db.close()
+

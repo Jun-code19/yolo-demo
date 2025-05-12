@@ -43,7 +43,10 @@ apiClient.interceptors.response.use(
 // 检测配置相关 API
 export const detectionConfigApi = {
   // 获取检测配置列表
-  getConfigs(params = { skip: 0, limit: 100 }) {
+  getConfigs(params = { skip: 0, limit: 100 }, frequency) {
+    if (frequency) {
+      params = { ...params, frequency };
+    }
     return apiClient.get('/detection/configs', { params });
   },
   

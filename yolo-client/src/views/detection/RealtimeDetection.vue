@@ -266,7 +266,7 @@ const selectedConfigName = computed(() => {
 const loadConfigurations = async () => {
   try {
     // 替换为实际的API端点
-    const response = await detectionConfigApi.getConfigs();
+    const response = await detectionConfigApi.getConfigs(null, 'realtime');
     // 转换配置数据
     configs.value = response.data.map(config => ({
       config_id: config.config_id,

@@ -5,6 +5,7 @@
       <el-tabs v-model="activeTab" class="system-tabs">
         <el-tab-pane label="系统状态" name="status"></el-tab-pane>
         <el-tab-pane label="系统日志" name="logs"></el-tab-pane>
+        <el-tab-pane label="检测日志" name="detection_logs"></el-tab-pane>
       </el-tabs>
     </div>
 
@@ -12,11 +13,13 @@
     <div v-if="activeTab === 'status'">
       <div class="status-header">
         <el-button type="primary" @click="refreshStatus">
-          <el-icon><Refresh /></el-icon>
+          <el-icon>
+            <Refresh />
+          </el-icon>
           刷新
         </el-button>
       </div>
-      
+
       <el-row :gutter="20">
         <el-col :span="12">
           <el-card class="status-card">
@@ -28,17 +31,14 @@
                 <el-tag type="danger" v-else>异常</el-tag>
               </div>
             </template>
-            
+
             <div class="resource-list">
               <div class="resource-item">
                 <div class="item-header">
                   <span>CPU 使用率</span>
                   <span>{{ systemStatus.cpu }}%</span>
                 </div>
-                <el-progress 
-                  :percentage="systemStatus.cpu" 
-                  :status="getCpuStatus(systemStatus.cpu)"
-                />
+                <el-progress :percentage="systemStatus.cpu" :status="getCpuStatus(systemStatus.cpu)" />
               </div>
 
               <div class="resource-item">
@@ -46,10 +46,7 @@
                   <span>内存使用率</span>
                   <span>{{ systemStatus.memory }}%</span>
                 </div>
-                <el-progress 
-                  :percentage="systemStatus.memory" 
-                  :status="getMemoryStatus(systemStatus.memory)"
-                />
+                <el-progress :percentage="systemStatus.memory" :status="getMemoryStatus(systemStatus.memory)" />
               </div>
 
               <div class="resource-item">
@@ -57,10 +54,7 @@
                   <span>GPU 使用率</span>
                   <span>{{ systemStatus.gpu }}%</span>
                 </div>
-                <el-progress 
-                  :percentage="systemStatus.gpu" 
-                  :status="getGpuStatus(systemStatus.gpu)"
-                />
+                <el-progress :percentage="systemStatus.gpu" :status="getGpuStatus(systemStatus.gpu)" />
               </div>
 
               <div class="resource-item">
@@ -68,10 +62,7 @@
                   <span>磁盘使用率</span>
                   <span>{{ systemStatus.disk }}%</span>
                 </div>
-                <el-progress 
-                  :percentage="systemStatus.disk" 
-                  :status="getDiskStatus(systemStatus.disk)"
-                />
+                <el-progress :percentage="systemStatus.disk" :status="getDiskStatus(systemStatus.disk)" />
               </div>
             </div>
           </el-card>
@@ -108,20 +99,12 @@
                 </div>
                 <div class="service-actions">
                   <el-button-group>
-                    <el-button 
-                      type="primary" 
-                      link 
-                      :disabled="service.status === 'running'"
-                      @click="startService(service)"
-                    >
+                    <el-button type="primary" link :disabled="service.status === 'running'"
+                      @click="startService(service)">
                       启动
                     </el-button>
-                    <el-button 
-                      type="danger" 
-                      link 
-                      :disabled="service.status === 'stopped'"
-                      @click="stopService(service)"
-                    >
+                    <el-button type="danger" link :disabled="service.status === 'stopped'"
+                      @click="stopService(service)">
                       停止
                     </el-button>
                   </el-button-group>
@@ -167,32 +150,18 @@
         <el-card class="filter-card">
           <el-form :inline="true" :model="logFilters" class="filter-form">
             <el-form-item label="时间范围">
-              <el-date-picker
-                v-model="logFilters.dateRange"
-                type="daterange"
-                range-separator="至"
-                start-placeholder="开始日期"
-                end-placeholder="结束日期"
-                value-format="YYYY-MM-DD"
-              />
+              <el-date-picker v-model="logFilters.dateRange" type="daterange" range-separator="至"
+                start-placeholder="开始日期" end-placeholder="结束日期" value-format="YYYY-MM-DD" />
             </el-form-item>
             <el-form-item label="操作类型">
-              <el-select v-model="logFilters.actionType" placeholder="请选择操作类型" clearable style="width: 180px; margin-right: 10px">
-                <el-option-group
-                  v-for="(group, key) in actionTypes"
-                  :key="key"
-                  :label="group.label"
-                >
-                  <el-option
-                    v-for="(label, value) in group.options"
-                    :key="value"
-                    :label="label"
-                    :value="value"
-                  >
-                  <div class="model-option">
-                    <span class="model-name">{{ label }}</span>
-                    <span class="model-desc">{{ value }}</span>
-                  </div>
+              <el-select v-model="logFilters.actionType" placeholder="请选择操作类型" clearable
+                style="width: 180px; margin-right: 10px">
+                <el-option-group v-for="(group, key) in actionTypes" :key="key" :label="group.label">
+                  <el-option v-for="(label, value) in group.options" :key="value" :label="label" :value="value">
+                    <div class="model-option">
+                      <span class="model-name">{{ label }}</span>
+                      <span class="model-desc">{{ value }}</span>
+                    </div>
                   </el-option>
                 </el-option-group>
               </el-select>
@@ -203,10 +172,14 @@
             </el-form-item>
             <el-form-item class="action-buttons">
               <el-button type="primary" @click="handleExport">
-                <el-icon><Download /></el-icon>导出日志
+                <el-icon>
+                  <Download />
+                </el-icon>导出日志
               </el-button>
               <el-button type="danger" @click="handleClear">
-                <el-icon><Delete /></el-icon>清除日志
+                <el-icon>
+                  <Delete />
+                </el-icon>清除日志
               </el-button>
             </el-form-item>
           </el-form>
@@ -215,7 +188,7 @@
         <!-- 日志列表 -->
         <el-card class="log-list">
           <el-table :data="sysLogs" style="width: 100%" v-loading="logsLoading">
-            <el-table-column prop="log_id" label="日志ID" width="80" />
+            <!-- <el-table-column prop="log_id" label="日志ID" width="80" /> -->
             <el-table-column prop="user_id" label="用户ID" min-width="120" />
             <el-table-column prop="action_type" label="操作类型" min-width="120">
               <template #default="{ row }">
@@ -234,35 +207,104 @@
           </el-table>
 
           <div class="pagination">
-            <el-pagination
-              v-model:current-page="currentPage"
-              v-model:page-size="pageSize"
-              :total="total"
-              :page-sizes="[10, 20, 50, 100]"
-              layout="prev, pager, next, jumper, ->, total, sizes"
-              @size-change="handleSizeChange"
-              @current-change="handleCurrentChange"
-            />
+            <el-pagination v-model:current-page="currentPage" v-model:page-size="pageSize" :total="total"
+              :page-sizes="[10, 20, 50, 100]" layout="prev, pager, next, jumper, ->, total, sizes"
+              @size-change="handleSizeChange" @current-change="handleCurrentChange" />
           </div>
         </el-card>
       </div>
     </div>
 
-     <!-- 清除日志对话框 -->
-     <el-dialog
-      v-model="clearDialogVisible"
-      title="清除系统日志"
-      width="400px"
-    >
+    <!-- 检测日志面板 -->
+    <div v-if="activeTab === 'detection_logs'">
+      <div class="logs-panel">
+        <!-- 筛选条件 -->
+        <el-card class="filter-card">
+          <el-form :inline="true" class="filter-form">
+            <el-form-item label="时间范围">
+              <el-date-picker v-model="detectionLogFilters.dateRange" type="daterange" range-separator="至"
+                start-placeholder="开始日期" end-placeholder="结束日期" value-format="YYYY-MM-DD" />
+            </el-form-item>
+            <el-form-item label="操作类型">
+              <el-select v-model="detectionLogFilters.operation" placeholder="请选择操作类型" clearable
+                style="width: 180px; margin-right: 10px">
+                <el-option label="启动" value="start"></el-option>
+                <el-option label="停止" value="stop"></el-option>
+                <el-option label="自动启动" value="auto_start"></el-option>
+                <el-option label="自动停止" value="auto_stop"></el-option>
+                <el-option label="定时设置" value="schedule"></el-option>
+                <el-option label="取消定时" value="unschedule"></el-option>
+              </el-select>
+            </el-form-item>
+            <el-form-item label="状态">
+              <el-select v-model="detectionLogFilters.status" placeholder="请选择状态" clearable
+                style="width: 120px; margin-right: 10px">
+                <el-option label="成功" value="success"></el-option>
+                <el-option label="失败" value="failed"></el-option>
+              </el-select>
+            </el-form-item>
+            <el-form-item>
+              <el-button type="primary" @click="handleDetectionLogSearch">查询</el-button>
+              <el-button @click="resetDetectionLogFilter">重置</el-button>
+            </el-form-item>
+            <el-form-item class="action-buttons">
+              <el-button type="primary" @click="handleExportDetectionLogs">
+                <el-icon>
+                  <Download />
+                </el-icon>导出日志
+              </el-button>
+              <el-button type="danger" @click="handleClearDetectionLogs">
+                <el-icon>
+                  <Delete />
+                </el-icon>清除日志
+              </el-button>
+            </el-form-item>
+          </el-form>
+        </el-card>
+
+        <!-- 日志列表 -->
+        <el-card class="log-list">
+          <el-table :data="detectionLogs" style="width: 100%" v-loading="detectionLogsLoading">
+            <el-table-column prop="device_name" label="设备名称" min-width="120" />
+            <el-table-column prop="config_name" label="检测配置" min-width="120" />
+            <el-table-column prop="operation" label="操作类型" min-width="100">
+              <template #default="{ row }">
+                <el-tag :type="getOperationTypeTag(row.operation)">
+                  {{ getOperationTypeText(row.operation) }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="status" label="状态" width="80">
+              <template #default="{ row }">
+                <el-tag :type="row.status === 'success' ? 'success' : 'danger'">
+                  {{ row.status === 'success' ? '成功' : '失败' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="message" label="详情" min-width="200" show-overflow-tooltip />
+            <el-table-column prop="username" label="执行用户" min-width="100" />
+            <el-table-column prop="created_at" label="操作时间" min-width="180">
+              <template #default="{ row }">
+                {{ formatDateTime(row.created_at) }}
+              </template>
+            </el-table-column>
+          </el-table>
+
+          <div class="pagination">
+            <el-pagination v-model:current-page="detectionLogCurrentPage" v-model:page-size="detectionLogPageSize"
+              :total="detectionLogTotal" :page-sizes="[10, 20, 50, 100]"
+              layout="prev, pager, next, jumper, ->, total, sizes" @size-change="handleDetectionLogSizeChange"
+              @current-change="handleDetectionLogCurrentChange" />
+          </div>
+        </el-card>
+      </div>
+    </div>
+
+    <!-- 清除日志对话框 -->
+    <el-dialog v-model="clearDialogVisible" title="清除系统日志" width="400px">
       <el-form :model="clearForm" label-width="120px">
         <el-form-item label="清除天数">
-          <el-input-number
-            v-model="clearForm.days"
-            :min="1"
-            :max="365"
-            :step="1"
-            step-strictly
-          />
+          <el-input-number v-model="clearForm.days" :min="1" :max="365" :step="1" step-strictly />
         </el-form-item>
         <el-form-item>
           <span class="warning-text">注意：此操作将永久删除指定天数前的所有日志记录，且不可恢复！</span>
@@ -277,6 +319,26 @@
         </span>
       </template>
     </el-dialog>
+
+    <!-- 清除检测日志对话框 -->
+    <el-dialog v-model="clearDetectionLogDialogVisible" title="清除检测日志" width="400px">
+      <el-form :model="clearDetectionLogForm" label-width="120px">
+        <el-form-item label="清除天数">
+          <el-input-number v-model="clearDetectionLogForm.days" :min="1" :max="365" :step="1" step-strictly />
+        </el-form-item>
+        <el-form-item>
+          <span class="warning-text">注意：此操作将永久删除指定天数前的所有检测日志记录，且不可恢复！</span>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <span class="dialog-footer">
+          <el-button @click="clearDetectionLogDialogVisible = false">取消</el-button>
+          <el-button type="danger" @click="confirmClearDetectionLog" :loading="clearingDetectionLog">
+            确认清除
+          </el-button>
+        </span>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -284,7 +346,7 @@
 import { ref, reactive, onMounted, onUnmounted } from 'vue'
 import { Refresh, CircleCheck, Warning, Loading, Search, Download, Delete } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import deviceApi from '@/api/device'
+import systemLogApi from '@/api/system_log'
 
 // 选项卡控制
 const activeTab = ref('status')
@@ -301,33 +363,49 @@ const systemStatus = ref({
 // 服务列表
 const services = ref([
   { name: '检测服务', status: 'stopped' },
-  { name: 'WebSocket服务', status: 'stopped' },
+  { name: '数据服务', status: 'stopped' },
   { name: '数据库服务', status: 'stopped' },
-  { name: '缓存服务', status: 'stopped' }
+  { name: '网页服务', status: 'stopped' }
 ])
 
 // 系统日志
 const logs = ref([])
 
+// 检测日志
+const detectionLogs = ref([])
+
 // 刷新状态
 const refreshStatus = async () => {
   try {
-    // 这里添加实际的API调用
-    // const response = await fetch('/api/system/status')
-    // const data = await response.json()
-    
-    // 模拟数据
-    systemStatus.value = {
-      status: 'normal',
-      cpu: Math.floor(Math.random() * 100),
-      memory: Math.floor(Math.random() * 100),
-      gpu: Math.floor(Math.random() * 100),
-      disk: Math.floor(Math.random() * 100)
+    const response = await systemLogApi.getSystemStatus()
+
+    if (response.status === 200) {
+      // 更新系统状态
+      systemStatus.value = {
+        status: response.data.status,
+        cpu: response.data.cpu,
+        memory: response.data.memory,
+        gpu: response.data.gpu,
+        disk: response.data.disk
+      }
+
+      // 更新服务状态
+      if (response.data.services && response.data.services.length > 0) {
+        services.value = response.data.services
+      }
+
+      // 更新日志
+      if (response.data.logs && response.data.logs.length > 0) {
+        logs.value = response.data.logs
+      }
+
+      // 不显示通知，避免频繁刷新时打扰用户
+    } else {
+      console.error('获取系统状态失败:', response)
     }
-    
-    ElMessage.success('状态已更新')
   } catch (error) {
-    ElMessage.error('获取系统状态失败')
+    console.error('获取系统状态失败:', error)
+    ElMessage.error('获取系统状态失败，请检查网络连接')
   }
 }
 
@@ -374,26 +452,80 @@ const getLogLevelType = (level) => {
 const startService = async (service) => {
   try {
     service.status = 'starting'
-    // 这里添加实际的API调用
-    await new Promise(resolve => setTimeout(resolve, 1000))
-    service.status = 'running'
-    addLog('INFO', `服务 ${service.name} 已启动`)
+
+    // 根据服务名称确定服务ID
+    let serviceId = ''
+    if (service.name === '检测服务') {
+      serviceId = 'detect'
+    } else if (service.name === '数据服务') {
+      serviceId = 'data'
+    } else if (service.name === '数据库服务') {
+      serviceId = 'database'
+    } else if (service.name === '网页服务') {
+      serviceId = 'frontend'
+    }
+
+    if (!serviceId) {
+      throw new Error('未知服务')
+    }
+
+    // 调用API启动服务
+    const response = await systemLogApi.controlService(serviceId, 'start')
+
+    if (response.status === 200) {
+      service.status = 'running'
+      addLog('INFO', `服务 ${service.name} 已启动`)
+      ElMessage.success(`${service.name}已启动`)
+    } else {
+      service.status = 'stopped'
+      addLog('ERROR', `服务 ${service.name} 启动失败`)
+      ElMessage.error(`${service.name}启动失败`)
+    }
   } catch (error) {
+    console.error('启动服务失败:', error)
     service.status = 'stopped'
-    addLog('ERROR', `服务 ${service.name} 启动失败`)
+    addLog('ERROR', `服务 ${service.name} 启动失败: ${error.message}`)
+    ElMessage.error(`${service.name}启动失败: ${error.response?.data?.detail || error.message}`)
   }
 }
 
 const stopService = async (service) => {
   try {
     service.status = 'stopping'
-    // 这里添加实际的API调用
-    await new Promise(resolve => setTimeout(resolve, 1000))
-    service.status = 'stopped'
-    addLog('INFO', `服务 ${service.name} 已停止`)
+
+    // 根据服务名称确定服务ID
+    let serviceId = ''
+    if (service.name === '检测服务') {
+      serviceId = 'detect'
+    } else if (service.name === '数据服务') {
+      serviceId = 'data'
+    } else if (service.name === '数据库服务') {
+      serviceId = 'database'
+    } else if (service.name === '网页服务') {
+      serviceId = 'frontend'
+    }
+
+    if (!serviceId) {
+      throw new Error('未知服务')
+    }
+
+    // 调用API停止服务
+    const response = await systemLogApi.controlService(serviceId, 'stop')
+
+    if (response.status === 200) {
+      service.status = 'stopped'
+      addLog('INFO', `服务 ${service.name} 已停止`)
+      ElMessage.success(`${service.name}已停止`)
+    } else {
+      service.status = 'running'
+      addLog('ERROR', `服务 ${service.name} 停止失败`)
+      ElMessage.error(`${service.name}停止失败`)
+    }
   } catch (error) {
+    console.error('停止服务失败:', error)
     service.status = 'running'
-    addLog('ERROR', `服务 ${service.name} 停止失败`)
+    addLog('ERROR', `服务 ${service.name} 停止失败: ${error.message}`)
+    ElMessage.error(`${service.name}停止失败: ${error.response?.data?.detail || error.message}`)
   }
 }
 
@@ -524,7 +656,8 @@ const actionTypes = {
       'delete_crowd_task': '删除人群分析任务',
       'export_crowd_results': '导出人群分析结果',
       'pause_crowd_task': '暂停人群分析任务',
-      'resume_crowd_task': '恢复人群分析任务'
+      'resume_crowd_task': '恢复人群分析任务',
+      'run_crowd_task': '运行人群分析任务'
     }
   },
   push: {
@@ -577,21 +710,21 @@ const loadLogData = async () => {
       skip,
       limit: pageSize.value
     }
-    
+
     if (logFilters.userId) {
       params.user_id = logFilters.userId
     }
-    
+
     if (logFilters.actionType) {
       params.action_type = logFilters.actionType
     }
-    
+
     if (logFilters.dateRange && logFilters.dateRange.length === 2) {
       params.start_date = logFilters.dateRange[0]
       params.end_date = logFilters.dateRange[1]
     }
-    
-    const response = await deviceApi.getSyslogs(params)
+
+    const response = await systemLogApi.getSyslogs(params)
     sysLogs.value = response.data.data
     total.value = response.data.total
   } catch (error) {
@@ -694,8 +827,8 @@ const handleExport = async () => {
     if (logFilters.actionType) {
       params.action_type = logFilters.actionType
     }
-    
-    const response = await deviceApi.exportSystemLogs(params)
+
+    const response = await systemLogApi.exportSystemLogs(params)
     const blob = new Blob([JSON.stringify(response.data, null, 2)], { type: 'application/json' })
     const url = window.URL.createObjectURL(blob)
     const link = document.createElement('a')
@@ -703,7 +836,7 @@ const handleExport = async () => {
     link.download = `system_logs_${new Date().toISOString().split('T')[0]}.json`
     link.click()
     window.URL.revokeObjectURL(url)
-    
+
     ElMessage.success('日志导出成功')
   } catch (error) {
     ElMessage.error('日志导出失败')
@@ -719,7 +852,7 @@ const handleClear = () => {
 const confirmClear = async () => {
   try {
     clearing.value = true
-    await deviceApi.clearSystemLogs(clearForm.days)
+    await systemLogApi.clearSystemLogs(clearForm.days)
     ElMessage.success('日志清除成功')
     clearDialogVisible.value = false
     loadLogData()
@@ -744,13 +877,198 @@ const resetFilter = () => {
   handleSearch()
 }
 
+// 检测日志数据
+const detectionLogsLoading = ref(false)
+const detectionLogCurrentPage = ref(1)
+const detectionLogPageSize = ref(10)
+const detectionLogTotal = ref(0)
+
+// 检测日志筛选条件
+const detectionLogFilters = reactive({
+  dateRange: [],
+  operation: '',
+  status: '',
+  device_id: '',
+  config_id: ''
+})
+
+// 操作类型文本映射
+const operationTypeMap = {
+  'start': '启动',
+  'stop': '停止',
+  'auto_start': '自动启动',
+  'auto_stop': '自动停止',
+  'schedule': '定时设置',
+  'unschedule': '取消定时'
+}
+
+// 获取操作类型文本
+const getOperationTypeText = (type) => {
+  return operationTypeMap[type] || type
+}
+
+// 获取操作类型标签颜色
+const getOperationTypeTag = (type) => {
+  const tagMap = {
+    'start': 'success',
+    'stop': 'danger',
+    'auto_start': 'success',
+    'auto_stop': 'warning',
+    'schedule': 'info',
+    'unschedule': 'info'
+  }
+  return tagMap[type] || 'info'
+}
+
+// 加载检测日志数据
+const loadDetectionLogData = async () => {
+  detectionLogsLoading.value = true
+  try {
+    const skip = (detectionLogCurrentPage.value - 1) * detectionLogPageSize.value
+    const params = {
+      skip,
+      limit: detectionLogPageSize.value
+    }
+
+    if (detectionLogFilters.operation) {
+      params.operation = detectionLogFilters.operation
+    }
+
+    if (detectionLogFilters.status) {
+      params.status = detectionLogFilters.status
+    }
+
+    if (detectionLogFilters.device_id) {
+      params.device_id = detectionLogFilters.device_id
+    }
+
+    if (detectionLogFilters.config_id) {
+      params.config_id = detectionLogFilters.config_id
+    }
+
+    if (detectionLogFilters.dateRange && detectionLogFilters.dateRange.length === 2) {
+      params.start_date = detectionLogFilters.dateRange[0]
+      params.end_date = detectionLogFilters.dateRange[1]
+    }
+
+    const response = await systemLogApi.getDetectionLogs(params)
+    detectionLogs.value = response.data.data
+    detectionLogTotal.value = response.data.total
+  } catch (error) {
+    ElMessage.error('加载检测日志数据失败，请检查网络连接或服务器状态')
+  } finally {
+    detectionLogsLoading.value = false
+  }
+}
+
+// 检测日志分页处理
+const handleDetectionLogSizeChange = (val) => {
+  detectionLogPageSize.value = val
+  loadDetectionLogData()
+}
+
+const handleDetectionLogCurrentChange = (val) => {
+  detectionLogCurrentPage.value = val
+  loadDetectionLogData()
+}
+
+// 处理检测日志查询
+const handleDetectionLogSearch = () => {
+  detectionLogCurrentPage.value = 1
+  loadDetectionLogData()
+}
+
+// 重置检测日志筛选条件
+const resetDetectionLogFilter = () => {
+  detectionLogFilters.dateRange = []
+  detectionLogFilters.operation = ''
+  detectionLogFilters.status = ''
+  detectionLogFilters.device_id = ''
+  detectionLogFilters.config_id = ''
+  handleDetectionLogSearch()
+}
+
+// 检测日志清除相关
+const clearDetectionLogDialogVisible = ref(false)
+const clearingDetectionLog = ref(false)
+const clearDetectionLogForm = reactive({
+  days: 30
+})
+
+// 处理导出检测日志
+const handleExportDetectionLogs = async () => {
+  try {
+    const params = {}
+    if (detectionLogFilters.dateRange && detectionLogFilters.dateRange.length === 2) {
+      params.start_date = detectionLogFilters.dateRange[0]
+      params.end_date = detectionLogFilters.dateRange[1]
+    }
+    if (detectionLogFilters.operation) {
+      params.operation = detectionLogFilters.operation
+    }
+    if (detectionLogFilters.status) {
+      params.status = detectionLogFilters.status
+    }
+    if (detectionLogFilters.device_id) {
+      params.device_id = detectionLogFilters.device_id
+    }
+    if (detectionLogFilters.config_id) {
+      params.config_id = detectionLogFilters.config_id
+    }
+
+    const response = await systemLogApi.exportDetectionLogs(params)
+
+    // 处理文件下载
+    const blob = new Blob([response.data], {
+      type: response.headers['content-type']
+    })
+    const url = window.URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.setAttribute('download', `detection_logs_${new Date().toISOString().split('T')[0]}.xlsx`)
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    window.URL.revokeObjectURL(url)
+
+    ElMessage.success('检测日志导出成功')
+  } catch (error) {
+    console.error('导出检测日志失败:', error)
+    ElMessage.error('检测日志导出失败')
+  }
+}
+
+// 处理清除检测日志
+const handleClearDetectionLogs = () => {
+  clearDetectionLogDialogVisible.value = true
+}
+
+// 确认清除检测日志
+const confirmClearDetectionLog = async () => {
+  try {
+    clearingDetectionLog.value = true
+    await systemLogApi.clearDetectionLogs(clearDetectionLogForm.days)
+    ElMessage.success('检测日志清除成功')
+    clearDetectionLogDialogVisible.value = false
+    loadDetectionLogData()
+  } catch (error) {
+    console.error('清除检测日志失败:', error)
+    ElMessage.error('检测日志清除失败')
+  } finally {
+    clearingDetectionLog.value = false
+  }
+}
+
 // 页面初始化
 onMounted(() => {
   refreshStatus()
   refreshInterval = setInterval(refreshStatus, 5000)
-  
+
   // 加载系统日志
   loadLogData()
+
+  // 加载检测日志
+  loadDetectionLogData()
 })
 
 onUnmounted(() => {
@@ -780,6 +1098,7 @@ onUnmounted(() => {
   font-size: 12px;
   color: #909399;
 }
+
 .page-header {
   display: flex;
   flex-direction: column;
