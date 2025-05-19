@@ -768,6 +768,12 @@ const selectImage = (index) => {
     canvasContext.drawImage(img, 0, 0)
   }
   img.src = imageList.value[index].url
+
+  if (currentImage.value && currentImage.value.results && currentImage.value.results.length > 0){
+    
+    drawDetectionBoxes(currentImage.value.results)
+    
+  }
 }
 
 // 下载结果

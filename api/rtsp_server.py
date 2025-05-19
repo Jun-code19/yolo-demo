@@ -486,26 +486,26 @@ def get_model(models_name):
                     model.model.half()
                 logger.info("Using half precision on GPU")
             
-            # 导出ONNX模型以提高性能
-            try:
-                onnx_path = f"models/{models_name}.onnx"
-                if not Path(onnx_path).exists():
-                    model.export(format='onnx', dynamic=True, half=True)
-                    logger.info(f"Model exported to ONNX: {onnx_path}")
-                    
-                    # 尝试使用ONNX Runtime
-                    import onnxruntime as ort
-                    providers = ['CUDAExecutionProvider', 'CPUExecutionProvider'] if device == 'cuda' else ['CPUExecutionProvider']
-                    session = ort.InferenceSession(onnx_path, providers=providers)
-                    models_cache[models_name] = {
-                        'type': 'onnx',
-                        'session': session,
-                        'model': model
-                    }
-                    logger.info("Using ONNX Runtime for inference")
-                    return models_cache[models_name]
-            except Exception as e:
-                logger.warning(f"ONNX optimization failed: {e}")
+                # 导出ONNX模型以提高性能
+                try:
+                    onnx_path = f"models/{models_name}.onnx"
+                    if not Path(onnx_path).exists():
+                        model.export(format='onnx', dynamic=True, half=True)
+                        logger.info(f"Model exported to ONNX: {onnx_path}")
+                        
+                        # 尝试使用ONNX Runtime
+                        import onnxruntime as ort
+                        providers = ['CUDAExecutionProvider', 'CPUExecutionProvider'] if device == 'cuda' else ['CPUExecutionProvider']
+                        session = ort.InferenceSession(onnx_path, providers=providers)
+                        models_cache[models_name] = {
+                            'type': 'onnx',
+                            'session': session,
+                            'model': model
+                        }
+                        logger.info("Using ONNX Runtime for inference")
+                        return models_cache[models_name]
+                except Exception as e:
+                    logger.warning(f"ONNX optimization failed: {e}")
             
             models_cache[models_name] = {
                 'type': 'pytorch',
@@ -577,7 +577,7 @@ def process_frame(frame, models_info, frame_id, timestamp, total_frames=None, st
         else:
             # 使用PyTorch模型
             with torch.cuda.amp.autocast() if torch.cuda.is_available() else nullcontext():
-                results = models_info['model'](frame, conf=0.5)[0]
+                results = models_info['model'](frame, conf=0.25)[0]
             
             detections = []
             for r in results.boxes.data.tolist():

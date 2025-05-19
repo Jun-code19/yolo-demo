@@ -184,8 +184,8 @@ const backToLogin = () => {
           <div class="logo-box">
             <el-icon :size="64"><Monitor /></el-icon>
           </div>
-          <h1>YOLO Client</h1>
-          <p>智能视频分析系统</p>
+          <h1>智能视频分析系统</h1>
+          <p>YOLO Client</p>
           <div class="feature-list">
             <div class="feature-item">
               <el-icon><VideoCamera /></el-icon>

@@ -197,20 +197,31 @@ class CrowdAnalyzer:
             # 添加总人数
             analysis_results["total_person_count"] = total_person_count
             
+            # 删除preview_image字段
+            def remove_preview_image(camera_counts):
+                processed_camera_counts = []
+                for camera in camera_counts:
+                    camera_copy = camera.copy()
+                    if "preview_image" in camera_copy:
+                        del camera_copy["preview_image"]
+                    processed_camera_counts.append(camera_copy)
+                return processed_camera_counts
+            
+            processed_camera_counts = remove_preview_image(analysis_results["camera_counts"])
             # 检查是否需要发送预警
-            self._check_warning(job_id, total_person_count, analysis_results)
+            self._check_warning(job_id, total_person_count, processed_camera_counts)
             
             # 推送分析结果
             if tags:
                 # 确保标签列表可序列化
                 serializable_tags = [str(tag) for tag in tags] + ["crowd_analysis"]
                 data_pusher.push_data(
-                    data=analysis_results,
+                    data=processed_camera_counts,
                     tags=serializable_tags  # 添加固定标签
                 )
             
             # 保存结果到数据库
-            self._save_analysis_result(job_id, total_person_count, location_info, analysis_results["camera_counts"])
+            self._save_analysis_result(job_id, total_person_count, location_info, processed_camera_counts)
             
             # 更新任务状态
             with self.lock:
@@ -415,12 +426,12 @@ class CrowdAnalyzer:
             }
 
             # 采集图像到本地
-            if True and frame is not None and person_boxes is not None and person_count > 0:
-                save_dir = Path(f"storage/detection/{datetime.now().strftime('%Y-%m-%d')}/{device_id}")
-                save_dir.mkdir(parents=True, exist_ok=True)   
-                # 保存带检测框的截图（原图）
-                thumbnail_path = save_dir / f"{datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}.jpg"
-                cv2.imwrite(str(thumbnail_path), frame)
+            # if True and frame is not None and person_boxes is not None and person_count > 0:
+            #     save_dir = Path(f"storage/detection/{datetime.now().strftime('%Y-%m-%d')}/{device_id}")
+            #     save_dir.mkdir(parents=True, exist_ok=True)   
+            #     # 保存带检测框的截图（原图）
+            #     thumbnail_path = save_dir / f"{datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}.jpg"
+            #     cv2.imwrite(str(thumbnail_path), frame)
             
             # 可选：添加预览图（缩小尺寸以减少数据量）
             if frame is not None:
@@ -630,12 +641,12 @@ class CrowdAnalyzer:
             db = SessionLocal()
             
             # 在保存前移除每个camera_count中的preview_image字段
-            processed_camera_counts = []
-            for camera in camera_counts:
-                camera_copy = camera.copy()
-                if "preview_image" in camera_copy:
-                    del camera_copy["preview_image"]
-                processed_camera_counts.append(camera_copy)
+            # processed_camera_counts = []
+            # for camera in camera_counts:
+            #     camera_copy = camera.copy()
+            #     if "preview_image" in camera_copy:
+            #         del camera_copy["preview_image"]
+            #     processed_camera_counts.append(camera_copy)
             
             # 创建新的分析结果记录
             result = CrowdAnalysisResult(
@@ -644,7 +655,7 @@ class CrowdAnalyzer:
                 timestamp=datetime.now(),
                 total_person_count=total_person_count,
                 location_info=location_info,
-                camera_counts=processed_camera_counts
+                camera_counts=camera_counts
             )
             
             # 保存到数据库
