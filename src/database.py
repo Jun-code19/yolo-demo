@@ -75,6 +75,18 @@ class AnalysisResult(Base):
     end_frame = Column(Integer)
     meta_data = Column(JSONB)
 
+# class Video(Base):
+#     __tablename__ = "video"
+    
+#     video_id = Column(String(64), primary_key=True)
+#     device_id = Column(String(64), ForeignKey('device.device_id'))
+#     start_time = Column(DateTime, nullable=False)
+#     end_time = Column(DateTime)
+#     storage_path = Column(Text, nullable=False)
+#     resolution = Column(String(16))
+#     frame_rate = Column(SmallInteger)
+#     analysis_status = Column(Boolean, default=False)
+
 class Alarm(Base):
     __tablename__ = "alarm"
     
@@ -82,7 +94,7 @@ class Alarm(Base):
     event_type = Column(String(50), nullable=False)
     trigger_time = Column(DateTime, default=datetime.now)
     device_id = Column(String(64), ForeignKey('device.device_id'))
-    video_id = Column(String(64), ForeignKey('video.video_id'))
+    # video_id = Column(String(64), ForeignKey('video.video_id'))
     status = Column(Enum(AlarmStatus), default=AlarmStatus.pending)
     snapshot_path = Column(Text)
 

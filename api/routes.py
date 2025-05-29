@@ -209,7 +209,7 @@ class AlarmCreate(BaseModel):
     alarm_id: str
     event_type: str
     device_id: str
-    video_id: str
+    # video_id: str
     snapshot_path: Optional[str]
 
 @router.post("/alarms/")

@@ -14,15 +14,49 @@
         border
         style="width: 100%"
       >
-        <el-table-column prop="job_name" label="任务名称" width="180" />
-        <el-table-column label="监控设备" min-width="180">
+        <el-table-column prop="job_name" label="任务名称" width="150" />
+        <el-table-column label="监控设备" min-width="250">
           <template #default="scope">
-            <el-tag v-for="id in scope.row.device_ids" :key="id" size="small" style="margin-right: 5px">
-              {{ getDeviceName(id) }}
-            </el-tag>
+            <el-popover
+              placement="top"
+              :width="300"
+              trigger="hover"
+            >
+              <template #default>
+                <div class="device-list">
+                  <el-tag 
+                    v-for="id in scope.row.device_ids" 
+                    :key="id" 
+                    size="small" 
+                    style="margin: 2px"
+                  >
+                    {{ getDeviceName(id) }}
+                  </el-tag>
+                </div>
+              </template>
+              <template #reference>
+                <div class="device-preview">
+                  <el-tag 
+                    v-for="(id, index) in scope.row.device_ids.slice(0, 2)" 
+                    :key="id" 
+                    size="small" 
+                    style="margin-right: 5px"
+                  >
+                    {{ getDeviceName(id) }}
+                  </el-tag>
+                  <el-tag 
+                    v-if="scope.row.device_ids.length > 2" 
+                    size="small" 
+                    type="info"
+                  >
+                    +{{ scope.row.device_ids.length - 2 }}
+                  </el-tag>
+                </div>
+              </template>
+            </el-popover>
           </template>
         </el-table-column>
-        <el-table-column label="检测模型" width="180">
+        <el-table-column label="检测模型" width="150">
           <template #default="scope">
             {{ getModelName(scope.row.models_id) }}
           </template>
@@ -43,7 +77,7 @@
             <el-tag :type="getStatusType(scope.row.status)">{{ scope.row.status }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="最近执行" width="180">
+        <el-table-column label="最近执行" width="150">
           <template #default="scope">
             {{ scope.row.last_run ? formatDate(scope.row.last_run) : '未执行' }}
           </template>
@@ -270,5 +304,13 @@ const handleCurrentChange = (page) => {
   margin-top: 20px;
   display: flex;
   justify-content: flex-end;
+}
+.device-list {
+  max-height: 200px;
+  overflow-y: auto;
+}
+.device-preview {
+  display: flex;
+  align-items: center;
 }
 </style>

@@ -547,7 +547,7 @@ onMounted(() => {
   // 初始化日期范围为最近7天
   const end = new Date()
   const start = new Date()
-  start.setDate(start.getDate() - 7)
+  start.setDate(start.getDate() - 1)
   dateRange.value = [start, end]
   
   // 延迟初始化图表，确保DOM已加载
@@ -1010,7 +1010,7 @@ const refreshHistoryData = async () => {
 
     const end = new Date()
     const start = new Date()
-    start.setDate(start.getDate() - 7)
+    start.setDate(start.getDate() - 1)
     dateRange.value = [start, end]
 
     await fetchHistoryData();
