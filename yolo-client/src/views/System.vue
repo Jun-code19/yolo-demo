@@ -1208,6 +1208,7 @@ onUnmounted(() => {
 
 .filter-card {
   margin-bottom: 20px;
+  border-radius: 8px;
 }
 
 .filter-form {

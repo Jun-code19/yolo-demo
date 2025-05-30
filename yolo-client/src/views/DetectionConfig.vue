@@ -17,21 +17,21 @@
       <!-- 配置列表 -->
       <el-table :data="configList" v-loading="loading" style="width: 100%">
         <!-- 设备名称列 -->
-        <el-table-column label="设备" prop="device_id" min-width="80">
+        <el-table-column label="设备" prop="device_id" min-width="120">
           <template #default="scope">
             {{ getDeviceName(scope.row.device_id) }}
           </template>
         </el-table-column>
 
         <!-- 模型名称列 -->
-        <el-table-column label="模型" prop="models_id" min-width="80">
+        <el-table-column label="模型" prop="models_id" min-width="150">
           <template #default="scope">
             {{ getModelName(scope.row.models_id) }}
           </template>
         </el-table-column>
 
         <!-- 状态列 -->
-        <el-table-column label="状态" prop="enabled" min-width="50">
+        <el-table-column label="状态" prop="enabled" min-width="80">
           <template #default="scope">
             <el-tag :type="scope.row.enabled ? 'success' : 'danger'">
               {{ scope.row.enabled ? '启用' : '禁用' }}
@@ -40,11 +40,11 @@
         </el-table-column>
 
         <!-- 灵敏度列 -->
-        <el-table-column label="灵敏度" prop="sensitivity" min-width="50">
+        <el-table-column label="灵敏度" prop="sensitivity" min-width="80">
         </el-table-column>
 
         <!-- 检测频率列 -->
-        <el-table-column label="检测频率" prop="frequency" min-width="50">
+        <el-table-column label="检测频率" prop="frequency" min-width="100">
           <template #default="scope">
             <el-tag :type="getFrequencyType(scope.row.frequency)">
               {{ getFrequencyLabel(scope.row.frequency) }}
@@ -53,14 +53,14 @@
         </el-table-column>
 
         <!-- 定时检测详细信息列 -->
-        <el-table-column label="定时检测详细信息" prop="schedule_config" min-width="120">
+        <el-table-column label="定时检测详细信息" prop="schedule_config" min-width="250">
           <template #default="scope">
             {{ getScheduleDetail(scope.row) }}
           </template>
         </el-table-column>
 
         <!-- 保存模式列 -->
-        <el-table-column label="保存模式" prop="save_mode" min-width="50">
+        <el-table-column label="保存模式" prop="save_mode" min-width="100">
           <template #default="scope">
             <el-tag :type="getSaveModeType(scope.row.save_mode)">
               {{ getSaveModeLabel(scope.row.save_mode) }}
@@ -69,7 +69,7 @@
         </el-table-column>
 
         <!-- 区域设置列 -->
-        <el-table-column label="区域设置" prop="area_coordinates" min-width="80">
+        <el-table-column label="区域设置" prop="area_coordinates" min-width="150">
           <template #default="scope">
             <el-tag>
               {{ getAreaTypeLabel(scope.row.area_coordinates) }}
@@ -78,9 +78,9 @@
         </el-table-column>
 
         <!-- 操作列 -->
-        <el-table-column label="操作" min-width="120">
+        <el-table-column label="操作" min-width="230" fixed="right">
           <template #default="scope">
-            <el-space>
+          <el-button-group>
               <el-button type="warning" size="small" @click="scope.row.enabled ? null : setInterestArea(scope.row)"
                 :disabled="scope.row.enabled"> <!-- 禁用按钮 -->
                 区域
@@ -100,7 +100,7 @@
                   </el-button>
                 </template>
               </el-popconfirm>
-            </el-space>
+          </el-button-group>
           </template>
         </el-table-column>
       </el-table>

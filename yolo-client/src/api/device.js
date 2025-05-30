@@ -98,8 +98,22 @@ export default {
   },
   
   // 获取所有设备
-  getDevices(params = { skip: 0, limit: 100 }) {
-    return apiClient.get('/devices/', { params });
+  getDevices(params = { skip: 0, limit: 200 }) {
+    // 过滤掉空值参数
+    const filteredParams = Object.fromEntries(
+      Object.entries(params).filter(([_, value]) => value !== null && value !== undefined && value !== '')
+    );
+    return apiClient.get('/devices/', { params: filteredParams });
+  },
+  
+  // 获取筛选后的设备列表
+  getFilteredDevices(filterParams = {}, paginationParams = { skip: 0, limit: 100 }) {
+    const params = { ...paginationParams, ...filterParams };
+    // 过滤掉空值参数
+    const filteredParams = Object.fromEntries(
+      Object.entries(params).filter(([_, value]) => value !== null && value !== undefined && value !== '')
+    );
+    return apiClient.get('/devices/', { params: filteredParams });
   },
   
   // 获取设备在线状态

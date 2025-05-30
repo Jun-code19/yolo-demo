@@ -92,22 +92,24 @@
         </el-table-column>
         <el-table-column label="操作" width="280" fixed="right">
           <template #default="scope">
-            <el-button size="small" @click="viewDetail(scope.row.job_id)">
-              详情
-            </el-button>
-            <el-button size="small" type="success" @click="runJob(scope.row.job_id)">
-              立即执行
-            </el-button>
-            <el-button 
-              size="small" 
-              :type="scope.row.is_active ? 'warning' : 'primary'"
-              @click="toggleJobStatus(scope.row.job_id, scope.row.is_active)"
-            >
-              {{ scope.row.is_active ? '停止' : '启动' }}
-            </el-button>
-            <el-button size="small" type="danger" @click="deleteJob(scope.row.job_id)">
-              删除
-            </el-button>
+            <el-button-group>
+              <el-button size="small" type="info" @click="viewDetail(scope.row.job_id)">
+                详情
+              </el-button>
+              <el-button size="small" type="success" @click="runJob(scope.row.job_id)">
+                立即执行
+              </el-button>
+              <el-button 
+                size="small" 
+                :type="scope.row.is_active ? 'warning' : 'primary'"
+                @click="toggleJobStatus(scope.row.job_id, scope.row.is_active)"
+              >
+                {{ scope.row.is_active ? '停止' : '启动' }}
+              </el-button>
+              <el-button size="small" type="danger" @click="deleteJob(scope.row.job_id)">
+                  删除
+              </el-button>
+            </el-button-group>
           </template>
         </el-table-column>
       </el-table>

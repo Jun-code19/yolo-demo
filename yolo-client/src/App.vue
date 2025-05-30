@@ -1,6 +1,6 @@
 <script setup>
 import { ref, reactive, onMounted, computed, onBeforeUnmount } from 'vue'
-import { HomeFilled, DataLine, VideoCamera, Fold, Expand, Picture, VideoPlay, Monitor, Setting, UserFilled, Tickets, Connection, QuestionFilled, HelpFilled } from '@element-plus/icons-vue'
+import { HomeFilled, DataLine, VideoCamera, Fold, Expand, Picture, VideoPlay, Monitor, UserFilled, Tickets, Connection, QuestionFilled, Tools } from '@element-plus/icons-vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import deviceApi from '@/api/device'
@@ -14,6 +14,11 @@ let tokenCheckInterval = null
 // 是否显示登录页
 const showLogin = computed(() => {
   return !localStorage.getItem('token')
+})
+
+// 是否显示数据大屏
+const isDashboard = computed(() => {
+  return route.path === '/dashboard'
 })
 
 onMounted(async () => {
@@ -80,11 +85,19 @@ const handleDropdownCommand = (command) => {
 const openHelp = () => {
   window.open('/help.html', '_blank')
 }
+
+// 打开数据大屏
+const openDashboard = () => {
+  window.open('/dashboard', '_blank')
+}
 </script>
 
 <template>
+  <!-- 数据大屏独立显示 -->
+  <router-view v-if="isDashboard"></router-view>
+  
   <!-- 使用路由系统显示登录页或主应用界面 -->
-  <router-view v-if="showLogin"></router-view>
+  <router-view v-else-if="showLogin"></router-view>
   
   <!-- 主应用界面 -->
   <el-container v-else class="layout-container">
@@ -129,7 +142,7 @@ const openHelp = () => {
           </el-menu-item>
           
           <el-menu-item index="/detection/config">
-            <el-icon><Setting /></el-icon>
+            <el-icon><Tools /></el-icon>
             <template #title>检测配置</template>
           </el-menu-item>
           
@@ -163,6 +176,11 @@ const openHelp = () => {
         <el-menu-item index="/system">
           <el-icon><Tools /></el-icon>
           <template #title>系统管理</template>
+        </el-menu-item>
+
+        <el-menu-item @click="openDashboard">
+          <el-icon><DataLine /></el-icon>
+          <template #title>数据大屏</template>
         </el-menu-item>
          
       </el-menu>
@@ -212,26 +230,59 @@ const openHelp = () => {
 </template>
 
 <style scoped>
-/* 应用布局样式 */
+/* 应用布局样式 - 方特主题公园风格 */
 .layout-container {
   width: 100%;
   height: 100%;
+  background: linear-gradient(135deg, #f8fbff 0%, #e8f4fd 100%);
 }
 
 .right-container {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  background-color: #f8fafc;
+  background: linear-gradient(135deg, #f8fbff 0%, #ffffff 50%, #fff5f0 100%);
+  position: relative;
+}
+
+.right-container::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: 
+    radial-gradient(circle at 80% 20%, rgba(74, 144, 226, 0.05) 0%, transparent 50%),
+    radial-gradient(circle at 20% 80%, rgba(255, 138, 101, 0.05) 0%, transparent 50%);
+  pointer-events: none;
+  z-index: 1;
 }
 
 .el-aside {
-  background-color: #1e293b;
+  background: linear-gradient(180deg, #1e3c72 0%, #2a4d7a 50%, #4a90e2 100%);
   color: #fff;
   height: 100vh;
   overflow-x: hidden;
   overflow-y: auto;
-  box-shadow: 4px 0 6px rgba(0, 0, 0, 0.05);
+  box-shadow: 
+    4px 0 20px rgba(30, 60, 114, 0.3),
+    inset -1px 0 0 rgba(255, 255, 255, 0.1);
+  position: relative;
+}
+
+.el-aside::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: 
+    radial-gradient(circle at 20% 30%, rgba(255, 138, 101, 0.1) 0%, transparent 50%),
+    radial-gradient(circle at 80% 70%, rgba(255, 255, 255, 0.05) 0%, transparent 50%);
+  pointer-events: none;
+  z-index: 1;
 }
 
 .transition-width {
@@ -243,59 +294,296 @@ const openHelp = () => {
   display: flex;
   align-items: center;
   padding: 0 20px;
-  background-color: #0f172a;
+  background: linear-gradient(135deg, #0f1a2e 0%, #1e3c72 100%);
   overflow: hidden;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  border-bottom: 2px solid rgba(255, 138, 101, 0.3);
+  position: relative;
+  z-index: 2;
+}
+
+.logo-container::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #ff8a65, #4a90e2, transparent);
+  animation: logoGlow 3s ease-in-out infinite alternate;
+}
+
+@keyframes logoGlow {
+  0% { opacity: 0.5; transform: scaleX(0.8); }
+  100% { opacity: 1; transform: scaleX(1); }
 }
 
 .logo-img {
   width: 32px;
   height: 32px;
   margin-right: 16px;
-  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.1));
+  filter: 
+    drop-shadow(0 2px 4px rgba(0, 0, 0, 0.2))
+    drop-shadow(0 0 8px rgba(255, 138, 101, 0.3));
+  transition: all 0.3s ease;
+}
+
+.logo-img:hover {
+  transform: scale(1.1) rotate(5deg);
+  filter: 
+    drop-shadow(0 4px 8px rgba(0, 0, 0, 0.3))
+    drop-shadow(0 0 12px rgba(255, 138, 101, 0.5));
 }
 
 .logo-text {
-  color: #ffffff;
+  background: linear-gradient(135deg, #ffffff, #ffe0b5, #ff8a65);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
   font-size: 16px;
-  font-weight: 500;
+  font-weight: 600;
   white-space: nowrap;
   letter-spacing: 0.5px;
-  opacity: 0.95;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 .el-menu {
   border-right: none;
   width: 100%;
+  background: transparent !important;
+  position: relative;
+  z-index: 2;
 }
 
 :deep(.el-menu-item) {
   height: 50px;
   line-height: 50px;
-  margin: 4px 0;
+  margin: 6px 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(10px);
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.9) !important;
 }
 
-:deep(.el-menu-item.is-active) {
-  background-color: #2d3a4f !important;
-  border-right: 3px solid #409EFF;
+:deep(.el-menu-item::before) {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 138, 101, 0.2), transparent);
+  transition: left 0.5s ease;
 }
 
 :deep(.el-menu-item:hover) {
-  background-color: #2d3a4f !important;
+  background: linear-gradient(135deg, rgba(255, 138, 101, 0.2), rgba(255, 255, 255, 0.15)) !important;
+  border-color: rgba(255, 138, 101, 0.4);
+  box-shadow: 0 4px 15px rgba(255, 138, 101, 0.3);
+  color: #ffffff !important;
+}
+
+:deep(.el-menu-item:hover::before) {
+  left: 100%;
+}
+
+:deep(.el-menu-item.is-active) {
+  background: linear-gradient(135deg, #ff8a65, #4a90e2) !important;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  box-shadow: 
+    0 6px 20px rgba(255, 138, 101, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  color: #ffffff !important;
 }
 
 :deep(.el-menu-item .el-icon) {
   font-size: 18px;
+  margin-right: 8px;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.1));
+}
+
+:deep(.el-sub-menu) {
+  margin: 6px 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(10px);
+  overflow: hidden;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+}
+
+:deep(.el-sub-menu::before) {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 138, 101, 0.1), transparent);
+  transition: left 0.5s ease;
+  z-index: 0;
+}
+
+:deep(.el-sub-menu:hover) {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 138, 101, 0.3);
+  box-shadow: 0 4px 15px rgba(255, 138, 101, 0.2);
+}
+
+:deep(.el-sub-menu:hover::before) {
+  left: 100%;
+}
+
+:deep(.el-sub-menu.is-opened) {
+  background: linear-gradient(135deg, rgba(255, 138, 101, 0.1), rgba(255, 255, 255, 0.12));
+  border-color: rgba(255, 138, 101, 0.4);
+  box-shadow: 
+    0 6px 20px rgba(255, 138, 101, 0.25),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+:deep(.el-sub-menu__title) {
+  height: 50px;
+  line-height: 50px;
+  color: rgba(255, 255, 255, 0.9) !important;
+  background: transparent !important;
+  border-radius: 12px;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  z-index: 2;
+  padding: 0 20px !important;
+}
+
+:deep(.el-sub-menu__title::before) {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 138, 101, 0.15), transparent);
+  transition: left 0.4s ease;
+  border-radius: 12px;
+}
+
+:deep(.el-sub-menu__title:hover) {
+  background: linear-gradient(135deg, rgba(255, 138, 101, 0.2), rgba(255, 255, 255, 0.15)) !important;
+  color: #ffffff !important;
+  border-radius: 12px;
+}
+
+:deep(.el-sub-menu__title:hover::before) {
+  left: 100%;
+}
+
+:deep(.el-sub-menu.is-opened .el-sub-menu__title) {
+  background: linear-gradient(135deg, rgba(255, 138, 101, 0.25), rgba(74, 144, 226, 0.15)) !important;
+  color: #ffffff !important;
+}
+
+:deep(.el-sub-menu__title .el-icon) {
+  font-size: 18px;
+  margin-right: 8px;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.1));
+  transition: transform 0.3s ease;
+}
+
+:deep(.el-sub-menu__title:hover .el-icon) {
+  transform: scale(1.1);
+}
+
+:deep(.el-sub-menu .el-sub-menu__icon-arrow) {
+  font-size: 14px;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  color: rgba(255, 255, 255, 0.7);
+}
+
+:deep(.el-sub-menu.is-opened .el-sub-menu__icon-arrow) {
+  transform: rotate(180deg);
+  color: #ffffff;
+}
+
+:deep(.el-menu--inline) {
+  background: rgba(0, 0, 0, 0.1) !important;
+  border-radius: 0 0 8px 8px;
+  padding: 8px 0;
+  margin-top: 4px;
+}
+
+:deep(.el-menu--inline .el-menu-item) {
+  margin: 2px 8px;
+  padding-left: 24px !important;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  height: 42px;
+  line-height: 42px;
+  color: rgba(255, 255, 255, 0.8) !important;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  overflow: hidden;
+}
+
+:deep(.el-menu--inline .el-menu-item::before) {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(74, 144, 226, 0.15), transparent);
+  transition: left 0.4s ease;
+}
+
+:deep(.el-menu--inline .el-menu-item:hover) {
+  background: linear-gradient(135deg, rgba(74, 144, 226, 0.2), rgba(255, 255, 255, 0.1)) !important;
+  border-color: rgba(74, 144, 226, 0.4);
+  color: #ffffff !important;
+  box-shadow: 0 2px 8px rgba(74, 144, 226, 0.2);
+}
+
+:deep(.el-menu--inline .el-menu-item:hover::before) {
+  left: 100%;
+}
+
+:deep(.el-menu--inline .el-menu-item.is-active) {
+  background: linear-gradient(135deg, #4a90e2, #ff8a65) !important;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: #ffffff !important;
+  box-shadow: 
+    0 4px 12px rgba(74, 144, 226, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
 
 .el-header {
-  background-color: #ffffff;
-  border-bottom: 1px solid #e2e8f0;
+  background: linear-gradient(90deg, #ffffff 0%, #f8fbff 50%, #fff5f0 100%);
+  border-bottom: 2px solid rgba(74, 144, 226, 0.1);
   padding: 0 24px;
   position: relative;
   z-index: 999;
   height: 64px !important;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.02);
+  box-shadow: 
+    0 2px 20px rgba(74, 144, 226, 0.1),
+    0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+.el-header::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #4a90e2, #ff8a65, transparent);
+  animation: headerGlow 4s ease-in-out infinite alternate;
+}
+
+@keyframes headerGlow {
+  0% { opacity: 0.3; }
+  100% { opacity: 0.7; }
 }
 
 .header-content {
@@ -303,6 +591,8 @@ const openHelp = () => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  position: relative;
+  z-index: 2;
 }
 
 .header-left {
@@ -317,64 +607,202 @@ const openHelp = () => {
 }
 
 .collapse-btn {
-  height: 32px;
-  width: 32px;
+  height: 36px;
+  width: 36px;
   padding: 0;
   font-size: 15px;
-  border: 1px solid #e2e8f0;
-  background-color: #f8fafc;
-  color: #1e293b;
+  border: 2px solid rgba(74, 144, 226, 0.2);
+  background: linear-gradient(135deg, #ffffff, #f8fbff);
+  color: #1e3c72;
+  border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
   transition: all 0.3s ease;
+  box-shadow: 0 2px 8px rgba(74, 144, 226, 0.1);
+  position: relative;
+  overflow: hidden;
+}
+
+.collapse-btn::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(74, 144, 226, 0.1), transparent);
+  transition: left 0.3s ease;
 }
 
 .collapse-btn:hover {
-  background-color: #1e293b;
+  background: linear-gradient(135deg, #4a90e2, #1e3c72);
   color: #ffffff;
-  border-color: #1e293b;
-  transform: scale(1.05);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  border-color: #4a90e2;
+  transform: scale(1.1);
+  box-shadow: 0 4px 15px rgba(74, 144, 226, 0.3);
+}
+
+.collapse-btn:hover::before {
+  left: 100%;
 }
 
 .help-btn {
-  height: 32px;
+  height: 36px;
   padding: 0 16px;
   font-size: 14px;
-  border: 1px solid #e2e8f0;
-  background-color: #f8fafc;
-  color: #1e293b;
+  border: 2px solid rgba(255, 138, 101, 0.2);
+  background: linear-gradient(135deg, #ffffff, #fff5f0);
+  color: #ff8a65;
+  border-radius: 10px;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   transition: all 0.3s ease;
+  box-shadow: 0 2px 8px rgba(255, 138, 101, 0.1);
+  position: relative;
+  overflow: hidden;
+}
+
+.help-btn::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 138, 101, 0.1), transparent);
+  transition: left 0.3s ease;
 }
 
 .help-btn:hover {
-  background-color: #1e293b;
+  background: linear-gradient(135deg, #ff8a65, #ff6b6b);
   color: #ffffff;
-  border-color: #1e293b;
+  border-color: #ff8a65;
   transform: scale(1.05);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 4px 15px rgba(255, 138, 101, 0.3);
+}
+
+.help-btn:hover::before {
+  left: 100%;
 }
 
 .user-info {
   display: flex;
   align-items: center;
   cursor: pointer;
-  padding: 4px 8px;
-  border-radius: 6px;
-  transition: background-color 0.3s ease;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(74, 144, 226, 0.1), rgba(255, 255, 255, 0.8));
+  border: 1px solid rgba(74, 144, 226, 0.2);
+  transition: all 0.3s ease;
+  backdrop-filter: blur(10px);
 }
 
 .user-info:hover {
-  background-color: #f1f5f9;
+  background: linear-gradient(135deg, rgba(74, 144, 226, 0.2), rgba(255, 255, 255, 0.9));
+  border-color: #4a90e2;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 15px rgba(74, 144, 226, 0.2);
 }
 
 .username {
   margin-right: 8px;
-  font-weight: 500;
-  color: #334155;
+  font-weight: 600;
+  color: #1e3c72;
+  text-shadow: 0 1px 2px rgba(255, 255, 255, 0.8);
+}
+
+:deep(.el-avatar) {
+  background: linear-gradient(135deg, #4a90e2, #ff8a65) !important;
+  border: 2px solid rgba(255, 255, 255, 0.8);
+  box-shadow: 0 2px 8px rgba(74, 144, 226, 0.2);
+}
+
+/* El-main 样式优化 - 主页面背景方案 */
+:deep(.el-main) {
+  position: relative;
+  z-index: 2;
+  background: linear-gradient(135deg, 
+    rgba(248, 251, 255, 0.8) 0%, 
+    rgba(255, 255, 255, 0.9) 30%, 
+    rgba(255, 245, 240, 0.8) 70%, 
+    rgba(240, 247, 255, 0.9) 100%
+  );
+  padding: 20px;
+  min-height: calc(100vh - 64px);
+  backdrop-filter: blur(10px);
+}
+
+:deep(.el-main::before) {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: 
+    radial-gradient(circle at 15% 25%, rgba(74, 144, 226, 0.08) 0%, transparent 40%),
+    radial-gradient(circle at 85% 75%, rgba(255, 138, 101, 0.08) 0%, transparent 40%),
+    radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.5) 0%, transparent 60%);
+  pointer-events: none;
+  z-index: -1;
+}
+
+:deep(.el-main::after) {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-image: 
+    linear-gradient(rgba(74, 144, 226, 0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 138, 101, 0.02) 1px, transparent 1px);
+  background-size: 60px 60px;
+  pointer-events: none;
+  z-index: -1;
+  opacity: 0.6;
+}
+
+/* 响应式设计 */
+@media screen and (max-width: 768px) {
+  .logo-container {
+    padding: 0 12px;
+  }
+  
+  .logo-img {
+    width: 28px;
+    height: 28px;
+    margin-right: 12px;
+  }
+  
+  .logo-text {
+    font-size: 14px;
+  }
+  
+  :deep(.el-menu-item) {
+    margin: 4px 8px;
+    height: 45px;
+    line-height: 45px;
+  }
+  
+  :deep(.el-sub-menu) {
+    margin: 4px 8px;
+  }
+  
+  .header-content {
+    padding: 0 12px;
+  }
+  
+  .collapse-btn,
+  .help-btn {
+    height: 32px;
+    font-size: 12px;
+  }
+  
+  .help-btn {
+    padding: 0 12px;
+  }
 }
 </style>

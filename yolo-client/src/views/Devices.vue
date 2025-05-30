@@ -5,8 +5,12 @@
       <el-space>
         <el-dropdown @command="handleExport">
           <el-button type="primary">
-            <el-icon><Download /></el-icon>导出
-            <el-icon><ArrowDown /></el-icon>
+            <el-icon>
+              <Download />
+            </el-icon>导出
+            <el-icon>
+              <ArrowDown />
+            </el-icon>
           </el-button>
           <template #dropdown>
             <el-dropdown-menu>
@@ -16,16 +20,72 @@
           </template>
         </el-dropdown>
         <el-button type="primary" @click="handleImport">
-          <el-icon><Upload /></el-icon>导入
+          <el-icon>
+            <Upload />
+          </el-icon>导入
         </el-button>
         <el-button type="primary" @click="handleAdd">
-          <el-icon><Plus /></el-icon>添加设备
+          <el-icon>
+            <Plus />
+          </el-icon>添加设备
         </el-button>
       </el-space>
     </div>
+    <!-- 筛选区域 -->
+    <el-card class="filter-section">
+        <el-form :model="filterForm" inline>
+          <el-form-item label="设备类型">
+            <el-select v-model="filterForm.device_type" placeholder="请选择设备类型" clearable style="width: 150px;">
+              <el-option label="摄像头" value="camera" />
+              <el-option label="硬盘录像机" value="nvr" />
+              <el-option label="边缘服务器" value="edge_server" />
+              <el-option label="存储节点" value="storage_node" />
+            </el-select>
+          </el-form-item>
+
+          <el-form-item label="设备状态">
+            <el-select v-model="filterForm.status" placeholder="请选择状态" clearable style="width: 120px;">
+              <el-option label="在线" :value="true" />
+              <el-option label="离线" :value="false" />
+            </el-select>
+          </el-form-item>
+
+          <el-form-item label="设备名称">
+            <el-input v-model="filterForm.device_name" placeholder="请输入设备名称" clearable style="width: 150px;" />
+          </el-form-item>
+
+          <!-- <el-form-item label="IP地址">
+            <el-input v-model="filterForm.ip_address" placeholder="请输入IP地址" clearable style="width: 150px;" />
+          </el-form-item> -->
+
+          <el-form-item label="位置">
+            <el-input v-model="filterForm.location" placeholder="请输入位置" clearable style="width: 120px;" />
+          </el-form-item>
+
+          <!-- <el-form-item label="区域">
+            <el-input v-model="filterForm.area" placeholder="请输入区域" clearable style="width: 120px;" />
+          </el-form-item> -->
+
+          <el-form-item>
+            <el-space>
+              <el-button type="primary" @click="handleFilter" :loading="loading">
+                <el-icon>
+                  <Search />
+                </el-icon>搜索
+              </el-button>
+              <el-button @click="handleResetFilter">
+                <el-icon>
+                  <Refresh />
+                </el-icon>重置
+              </el-button>
+            </el-space>
+        </el-form-item>
+      </el-form>
+    </el-card>
 
     <!-- 设备列表 -->
     <el-card class="device-list">
+      <!-- 设备表格 -->
       <el-table :data="devices" style="width: 100%" v-loading="loading">
         <el-table-column prop="device_id" label="设备ID" min-width="120" />
         <el-table-column prop="device_name" label="设备名称" min-width="150" />
@@ -36,9 +96,9 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="ip_address" label="IP地址" min-width="150" />
+        <el-table-column prop="ip_address" label="IP地址" min-width="120" />
         <el-table-column prop="port" label="端口" width="100" />
-        <el-table-column prop="username" label="用户名" min-width="120" />
+        <el-table-column prop="username" label="用户名" min-width="100" />
         <el-table-column prop="status" label="状态" width="100">
           <template #default="{ row }">
             <el-tag :type="row.status ? 'success' : 'danger'">
@@ -51,6 +111,7 @@
             {{ formatDateTime(row.last_heartbeat) }}
           </template>
         </el-table-column>
+        <el-table-column prop="location" label="位置" min-width="100" />
         <el-table-column label="操作" width="200" fixed="right">
           <template #default="{ row }">
             <el-button-group>
@@ -69,31 +130,15 @@
       </el-table>
 
       <div class="pagination">
-        <el-pagination
-          v-model:current-page="currentPage"
-          v-model:page-size="pageSize"
-          :total="total"
-          :page-sizes="[10, 20, 50, 100]"
-          layout="prev, pager, next, jumper, ->, total, sizes"
-          @size-change="handleSizeChange"
-          @current-change="handleCurrentChange"
-        />
+        <el-pagination v-model:current-page="currentPage" v-model:page-size="pageSize" :total="total"
+          :page-sizes="[10, 20, 50, 100]" layout="prev, pager, next, jumper, ->, total, sizes"
+          @size-change="handleSizeChange" @current-change="handleCurrentChange" />
       </div>
     </el-card>
 
     <!-- 添加/编辑设备对话框 -->
-    <el-dialog
-      v-model="dialogVisible"
-      :title="dialogType === 'add' ? '添加设备' : '编辑设备'"
-      width="500px"
-      destroy-on-close
-    >
-      <el-form
-        ref="deviceFormRef"
-        :model="deviceForm"
-        :rules="deviceRules"
-        label-width="100px"
-      >
+    <el-dialog v-model="dialogVisible" :title="dialogType === 'add' ? '添加设备' : '编辑设备'" width="500px" destroy-on-close>
+      <el-form ref="deviceFormRef" :model="deviceForm" :rules="deviceRules" label-width="100px">
         <el-form-item label="设备ID" prop="device_id">
           <el-input v-model="deviceForm.device_id" placeholder="请输入设备ID" :disabled="dialogType === 'edit'" />
         </el-form-item>
@@ -127,24 +172,13 @@
           <el-input v-model="deviceForm.ip_address" placeholder="请输入IP地址" />
         </el-form-item>
         <el-form-item label="端口" prop="port">
-          <el-input-number
-            v-model="deviceForm.port"
-            :min="1"
-            :max="65535"
-            placeholder="请输入端口号"
-            style="width: 100%"
-          />
+          <el-input-number v-model="deviceForm.port" :min="1" :max="65535" placeholder="请输入端口号" style="width: 100%" />
         </el-form-item>
         <el-form-item label="用户名" prop="username">
           <el-input v-model="deviceForm.username" placeholder="请输入用户名" />
         </el-form-item>
         <el-form-item label="密码" prop="password">
-          <el-input
-            v-model="deviceForm.password"
-            type="password"
-            placeholder="请输入密码"
-            show-password
-          />
+          <el-input v-model="deviceForm.password" type="password" placeholder="请输入密码" show-password />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -158,45 +192,33 @@
     </el-dialog>
 
     <!-- 预览对话框 -->
-    <el-dialog
-      v-model="previewVisible"
-      title="设备预览"
-      width="800px"
-      destroy-on-close
-      @close="stopPreview"
-    >
+    <el-dialog v-model="previewVisible" title="设备预览" width="800px" destroy-on-close @close="stopPreview">
       <div class="preview-container">
         <div v-if="previewLoading" class="loading-wrapper">
           <el-skeleton animated :rows="8" />
           <div class="loading-text">正在连接设备，请稍候...</div>
         </div>
         <div v-else-if="previewError" class="error-wrapper">
-          <el-icon :size="64"><CircleClose /></el-icon>
+          <el-icon :size="64">
+            <CircleClose />
+          </el-icon>
           <p>{{ previewError }}</p>
           <el-button @click="retryPreview">重试</el-button>
         </div>
         <div v-else-if="!previewStream" class="video-placeholder">
-          <el-icon :size="64"><VideoCamera /></el-icon>
+          <el-icon :size="64">
+            <VideoCamera />
+          </el-icon>
           <p>等待视频流连接...</p>
         </div>
         <div v-else class="video-wrapper">
           <!-- 视频元素 -->
-          <video 
-            ref="videoRef" 
-            class="video-player" 
-            autoplay 
-            muted
-            @loadedmetadata="onVideoLoaded"
-          ></video>
-          
+          <video ref="videoRef" class="video-player" autoplay muted @loadedmetadata="onVideoLoaded"></video>
+
           <!-- 备用图像显示 -->
-          <img 
-            v-if="currentFrame" 
-            :src="currentFrame" 
-            class="fallback-image" 
-            :style="{ display: showFallbackImage ? 'block' : 'none' }"
-          />
-          
+          <img v-if="currentFrame" :src="currentFrame" class="fallback-image"
+            :style="{ display: showFallbackImage ? 'block' : 'none' }" />
+
           <div class="stream-info">
             <span>{{ currentDevice?.device_name || '未知设备' }}</span>
             <span v-if="streamResolution">{{ streamResolution }}</span>
@@ -206,7 +228,9 @@
       <div class="preview-controls">
         <el-space>
           <el-button @click="takeSnapshot" :disabled="!previewStream">
-            <el-icon><Camera /></el-icon>截图
+            <el-icon>
+              <Camera />
+            </el-icon>截图
           </el-button>
           <el-button @click="toggleFallbackMode" v-if="previewStream">
             切换显示模式
@@ -219,23 +243,11 @@
         </span>
       </template>
     </el-dialog>
-    
+
     <!-- 导入对话框 -->
-    <el-dialog
-      v-model="importDialogVisible"
-      title="导入设备"
-      width="500px"
-      destroy-on-close
-    >
-      <el-upload
-        class="upload-demo"
-        drag
-        action="#"
-        :auto-upload="false"
-        :on-change="handleFileChange"
-        :limit="1"
-        accept=".xlsx,.xls,.csv"
-      >
+    <el-dialog v-model="importDialogVisible" title="导入设备" width="500px" destroy-on-close>
+      <el-upload class="upload-demo" drag action="#" :auto-upload="false" :on-change="handleFileChange" :limit="1"
+        accept=".xlsx,.xls,.csv">
         <el-icon class="el-icon--upload"><upload-filled /></el-icon>
         <div class="el-upload__text">
           拖拽文件到此处或 <em>点击上传</em>
@@ -246,7 +258,7 @@
           </div>
         </template>
       </el-upload>
-      
+
       <template #footer>
         <span class="dialog-footer">
           <el-button @click="importDialogVisible = false">取消</el-button>
@@ -261,7 +273,7 @@
 
 <script setup>
 import { ref, reactive, onMounted, onUnmounted } from 'vue'
-import { Plus, VideoCamera, CircleClose, Camera, Download, ArrowDown, Upload, UploadFilled } from '@element-plus/icons-vue'
+import { Plus, VideoCamera, CircleClose, Camera, Download, ArrowDown, Upload, UploadFilled, Search, Refresh } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import deviceApi from '@/api/device'
 
@@ -327,14 +339,37 @@ const importDialogVisible = ref(false)
 const importFile = ref(null)
 const importing = ref(false)
 
+// 筛选相关
+const filterForm = reactive({
+  device_type: '',
+  status: '',
+  device_name: '',
+  ip_address: '',
+  location: '',
+  area: ''
+})
+
+// 跟踪当前是否在筛选状态
+const isFiltering = ref(false)
+
 // 加载设备数据
-const loadData = async () => {
+const loadData = async (useFilter = false) => {
   loading.value = true
   try {
     const skip = (currentPage.value - 1) * pageSize.value
-    const response = await deviceApi.getDevices({ skip, limit: pageSize.value })
+    const paginationParams = { skip, limit: pageSize.value }
+
+    let response
+    if (useFilter) {
+      // 使用筛选参数
+      response = await deviceApi.getFilteredDevices(filterForm, paginationParams)
+    } else {
+      // 不使用筛选，获取所有数据
+      response = await deviceApi.getDevices(paginationParams)
+    }
+
     devices.value = response.data.data
-    total.value = response.data.total // 实际应用中应从后端获取总数
+    total.value = response.data.total
   } catch (error) {
     ElMessage.error('加载设备数据失败，请检查网络连接或服务器状态')
   } finally {
@@ -347,11 +382,11 @@ const refreshStatus = async () => {
   try {
     // 获取设备在线状态
     const response = await deviceApi.getDevicesStatus()
-    if (response.status === 200) {      
+    if (response.status === 200) {
       loadData()  // 刷新数据
     } else {
       ElMessage.error('获取设备在线状态失败')
-    }   
+    }
   } catch (error) {
     ElMessage.error('获取设备在线状态失败')
   }
@@ -376,12 +411,12 @@ onUnmounted(() => {
 // 分页处理
 const handleSizeChange = (val) => {
   pageSize.value = val
-  loadData()
+  loadData(isFiltering.value)
 }
 
 const handleCurrentChange = (val) => {
   currentPage.value = val
-  loadData()
+  loadData(isFiltering.value)
 }
 
 // 添加设备
@@ -425,10 +460,10 @@ const handleEdit = (row) => {
 // 提交表单
 const handleSubmit = async () => {
   if (!deviceFormRef.value) return
-  
+
   await deviceFormRef.value.validate(async (valid) => {
     if (!valid) return
-    
+
     submitting.value = true
     try {
       if (dialogType.value === 'add') {
@@ -470,7 +505,7 @@ const handleDelete = (row) => {
       console.error('删除失败:', error)
       ElMessage.error(`删除失败: ${error.response?.data?.detail || error.message}`)
     }
-  }).catch(() => {})
+  }).catch(() => { })
 }
 
 // 预览设备
@@ -483,14 +518,14 @@ const handlePreview = (row) => {
   currentFrame.value = null
   showFallbackImage.value = true
   streamResolution.value = ''
-  
+
   // 清除之前的预览状态
   if (videoRef.value && videoRef.value.srcObject) {
     const tracks = videoRef.value.srcObject.getTracks()
     tracks.forEach(track => track.stop())
     videoRef.value.srcObject = null
   }
-  
+
   // 延迟一帧，确保DOM加载完成再开始预览
   setTimeout(() => {
     startPreview()
@@ -503,20 +538,20 @@ const startPreview = async () => {
     if (!currentDevice.value) {
       throw new Error('设备信息不完整')
     }
-    
+
     // 构建流地址
     const { device_type, ip_address, port, username, password } = currentDevice.value
-    
+
     if (device_type === 'camera' || device_type === 'nvr') {
       // 构建RTSP URL（根据摄像头类型可能需要调整URL格式）
       // const rtspUrl = `rtsp://${username}:${password}@${ip_address}:${port}/cam/realmonitor?channel=1&subtype=0`
-      
+
       // 使用WebSocket连接服务器请求代理流
       await connectToWebSocket()
     } else {
       throw new Error('不支持的设备类型')
     }
-    
+
     previewLoading.value = false
   } catch (error) {
     console.error('预览失败:', error)
@@ -533,34 +568,34 @@ const connectToWebSocket = async () => {
       if (ws.value && ws.value.readyState === WebSocket.OPEN) {
         ws.value.close()
       }
-      
+
       // 创建新的WebSocket连接
       ws.value = new WebSocket(`ws://${window.location.host}/ws/rtsp/preview`)
-      
+
       // 连接超时
       const connectionTimeout = setTimeout(() => {
         reject(new Error('连接超时'))
       }, 10000)
-      
+
       ws.value.onopen = () => {
         clearTimeout(connectionTimeout)
         console.log('WebSocket已连接，正在发送连接请求...')
-        
+
         // 发送连接请求
         ws.value.send(JSON.stringify({
           type: 'connect',
           client_type: 'preview_client'
         }))
       }
-      
+
       ws.value.onmessage = handleWsMessage
-      
+
       ws.value.onerror = (error) => {
         clearTimeout(connectionTimeout)
         console.error('WebSocket错误:', error)
         reject(new Error('WebSocket连接错误'))
       }
-      
+
       ws.value.onclose = () => {
         console.log('WebSocket已关闭')
         if (previewVisible.value && !previewError.value) {
@@ -579,12 +614,12 @@ const handleWsMessage = (event) => {
   try {
     const message = JSON.parse(event.data)
     // console.log('接收到WebSocket消息:', message.type)
-    
+
     // 根据消息类型处理
     switch (message.type) {
       case 'connect_confirm':
         console.log('WebSocket连接确认')
-        
+
         // 发送预览请求
         if (ws.value && ws.value.readyState === WebSocket.OPEN && currentDevice.value) {
           console.log('发送预览请求')
@@ -597,29 +632,29 @@ const handleWsMessage = (event) => {
           )
         }
         break
-        
+
       case 'preview_start':
         console.log('预览流已开始', message)
         previewLoading.value = false
-        
+
         // 如果预览流还未开始，则启动
         if (!previewStream.value) {
           // 确保状态被正确设置
           startVideoStream()
         }
         break
-        
+
       case 'stream_data':
         // 处理流数据
         handleStreamData(message)
         break
-        
+
       case 'error':
         console.error('服务器错误:', message.message)
         previewLoading.value = false
         previewError.value = `服务器错误: ${message.message}`
         break
-        
+
       default:
         console.log('未处理的消息类型:', message.type)
     }
@@ -631,19 +666,19 @@ const handleWsMessage = (event) => {
 // 开始视频流播放
 const startVideoStream = () => {
   console.log('开始初始化视频流播放...');
-  
+
   try {
     // 无论videoRef是否存在，都先将预览状态设置为true
     previewLoading.value = false;
     previewStream.value = true;
     console.log('视频预览状态已更新: previewStream =', previewStream.value);
-    
+
     // 检查浏览器支持
     if (!window.MediaSource) {
       console.warn('浏览器不支持MediaSource API，将使用备用显示模式');
       showFallbackImage.value = true;
     }
-    
+
     // 如果videoRef已存在，可以进行其他初始化
     if (videoRef.value) {
       console.log('videoRef已存在，可以初始化视频元素');
@@ -659,42 +694,42 @@ const startVideoStream = () => {
 // 处理流数据
 const handleStreamData = (data) => {
   console.log('收到流数据:', data.type, data.format || '(无格式信息)');
-  
+
   // 确保预览状态已初始化（双重保险）
   if (!previewStream.value) {
     console.log('预览流状态未初始化，自动初始化');
     previewLoading.value = false;
     previewStream.value = true;
   }
-  
+
   try {
     // 检查数据格式
     if (data.format === 'jpeg' && data.data) {
       console.log(`处理JPEG图像数据: ${data.width}x${data.height}, 帧ID:${data.frame_id}`);
-      
+
       // 基于Base64图像创建图像URL
       const imageData = `data:image/jpeg;base64,${data.data}`;
-      
+
       // 更新当前帧，用于备用显示方式
       currentFrame.value = imageData;
-      
+
       // 更新分辨率信息（无论显示模式如何）
       if (!streamResolution.value && data.width && data.height) {
         streamResolution.value = `${data.width}x${data.height}`;
       }
-      
+
       // 默认使用备用图像显示方式，简单可靠
       if (!videoRef.value || !videoRef.value.parentElement) {
         console.log('使用备用图像显示模式 - videoRef不可用');
         showFallbackImage.value = true;
         return;
       }
-      
+
       // 如果明确使用备用图像显示方式，则直接返回
       if (showFallbackImage.value) {
         return;
       }
-      
+
       // 使用IMG元素更新视频帧
       const img = new Image();
       img.onload = () => {
@@ -704,7 +739,7 @@ const handleStreamData = (data) => {
           showFallbackImage.value = true;
           return;
         }
-        
+
         try {
           // 使用Canvas绘制图像
           const canvas = document.createElement('canvas');
@@ -712,7 +747,7 @@ const handleStreamData = (data) => {
           canvas.height = data.height;
           const ctx = canvas.getContext('2d');
           ctx.drawImage(img, 0, 0);
-          
+
           // 直接将canvas内容显示在video元素上
           if (!videoRef.value.srcObject) {
             // 首次创建流
@@ -731,7 +766,7 @@ const handleStreamData = (data) => {
               const newStream = canvas.captureStream(15);
               const oldStream = videoRef.value.srcObject;
               videoRef.value.srcObject = newStream;
-              
+
               // 停止旧流的轨道
               if (oldStream && oldStream.getTracks) {
                 oldStream.getTracks().forEach(track => track.stop());
@@ -746,12 +781,12 @@ const handleStreamData = (data) => {
           showFallbackImage.value = true;
         }
       };
-      
+
       img.onerror = (err) => {
         console.error('图像加载失败:', err);
         previewError.value = '图像加载失败，请检查网络连接';
       };
-      
+
       img.src = imageData;
     } else if (data.data && !data.format) {
       console.log('收到二进制数据，尝试作为MP4片段处理');
@@ -782,7 +817,7 @@ const handleStreamData = (data) => {
 // 视频加载完成
 const onVideoLoaded = () => {
   if (!videoRef.value) return
-  
+
   const { videoWidth, videoHeight } = videoRef.value
   streamResolution.value = `${videoWidth}x${videoHeight}`
 }
@@ -790,23 +825,23 @@ const onVideoLoaded = () => {
 // 截图功能
 const takeSnapshot = () => {
   if (!videoRef.value || !previewStream.value) return
-  
+
   try {
     // 创建Canvas并绘制当前视频帧
     const canvas = document.createElement('canvas')
     canvas.width = videoRef.value.videoWidth
     canvas.height = videoRef.value.videoHeight
-    
+
     const ctx = canvas.getContext('2d')
     ctx.drawImage(videoRef.value, 0, 0)
-    
+
     // 将Canvas转换为图片并下载
     const image = canvas.toDataURL('image/png')
     const link = document.createElement('a')
     link.href = image
     link.download = `${currentDevice.value?.device_name || 'device'}_snapshot_${new Date().toISOString().replace(/:/g, '-')}.png`
     link.click()
-    
+
     ElMessage.success('截图已保存')
   } catch (error) {
     console.error('截图失败:', error)
@@ -831,14 +866,14 @@ const stopPreview = () => {
     ws.value.close()
     ws.value = null
   }
-  
+
   // 停止视频流
   if (videoRef.value && videoRef.value.srcObject) {
     const tracks = videoRef.value.srcObject.getTracks()
     tracks.forEach(track => track.stop())
     videoRef.value.srcObject = null
   }
-  
+
   // 重置状态
   previewStream.value = null
   streamResolution.value = ''
@@ -881,7 +916,7 @@ const toggleFallbackMode = () => {
 // 构建RTSP URL
 const buildRtspUrl = () => {
   if (!currentDevice.value) return '';
-  
+
   if (currentDevice.value.device_type === 'nvr') {
     // NVR设备，包含通道号
     return `rtsp://${currentDevice.value.username}:${currentDevice.value.password}@${currentDevice.value.ip_address}:${currentDevice.value.port}/cam/realmonitor?channel=${currentDevice.value.channel || 1}&subtype=${currentDevice.value.stream_type === 'sub' ? 1 : 0}`
@@ -899,26 +934,26 @@ const handleImport = () => {
 
 const handleFileChange = (file) => {
   if (!file) return
-  
+
   // 检查文件类型
   const validTypes = [
     'application/vnd.ms-excel',
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     'text/csv'
   ]
-  
+
   if (!validTypes.includes(file.raw.type)) {
     ElMessage.error('请上传Excel或CSV格式的文件')
     return false
   }
-  
+
   // 检查文件大小，不超过10MB
   const isLt10M = file.size / 1024 / 1024 < 10
   if (!isLt10M) {
     ElMessage.error('文件大小不能超过10MB')
     return false
   }
-  
+
   importFile.value = file.raw
 }
 
@@ -927,14 +962,14 @@ const submitImport = async () => {
     ElMessage.warning('请先选择要导入的文件')
     return
   }
-  
+
   importing.value = true
   try {
     const formData = new FormData()
     formData.append('file', importFile.value)
-    
+
     const response = await deviceApi.importDevices(formData)
-    
+
     if (response.status === 200) {
       ElMessage.success('导入成功')
       importDialogVisible.value = false
@@ -955,7 +990,7 @@ const handleExport = async (command) => {
   try {
     let response
     let filename
-    
+
     if (command === 'template') {
       // 导出模板
       response = await deviceApi.exportDeviceTemplate()
@@ -965,10 +1000,10 @@ const handleExport = async (command) => {
       response = await deviceApi.exportDevices()
       filename = `设备数据_${new Date().toISOString().split('T')[0]}.xlsx`
     }
-    
+
     // 处理文件下载
     if (response && response.data) {
-      const blob = new Blob([response.data], { 
+      const blob = new Blob([response.data], {
         type: response.headers['content-type'] 
       })
       const url = window.URL.createObjectURL(blob)
@@ -986,6 +1021,27 @@ const handleExport = async (command) => {
     console.error('导出失败:', error)
     ElMessage.error(`导出失败: ${error.response?.data?.detail || error.message}`)
   }
+}
+
+// 筛选功能
+const handleFilter = () => {
+  currentPage.value = 1 // 重置到第一页
+  isFiltering.value = true
+  loadData(true)
+}
+
+const handleResetFilter = () => {
+  Object.assign(filterForm, {
+    device_type: '',
+    status: '',
+    device_name: '',
+    ip_address: '',
+    location: '',
+    area: ''
+  })
+  currentPage.value = 1 // 重置到第一页
+  isFiltering.value = false
+  loadData(false)
 }
 </script>
 
@@ -1111,6 +1167,22 @@ const handleExport = async (command) => {
 .el-icon--upload {
   font-size: 48px;
   color: #409eff;
+  margin-bottom: 10px;
+}
+
+.filter-section {
+  margin-bottom: 20px;
+  /* padding: 20px; */
+  /* background-color: #f8f9fa; */
+  border-radius: 8px;
+  /* border: 1px solid #e9ecef; */
+}
+
+.filter-section .el-form {
+  margin-bottom: 0;
+}
+
+.filter-section .el-form-item {
   margin-bottom: 10px;
 }
 </style> 

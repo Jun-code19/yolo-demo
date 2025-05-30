@@ -116,7 +116,7 @@
             <div v-else>-</div>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="250">
+        <el-table-column label="操作" width="220" fixed="right">
           <template #default="scope">
             <el-button-group>
               <el-button size="small" type="primary" @click="openEditDialog(scope.row)">

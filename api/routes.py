@@ -87,14 +87,69 @@ def create_device(device: DeviceCreate, db: Session = Depends(get_db), current_u
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.get("/devices/", tags=["设备管理"])
-def get_devices(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    devices = db.query(Device)
-    total_count = devices.count()
-    result = devices.offset(skip).limit(limit).all()
+def get_devices(
+    skip: int = 0, 
+    limit: int = 100, 
+    device_type: Optional[str] = None,
+    status: Optional[bool] = None,
+    device_name: Optional[str] = None,
+    ip_address: Optional[str] = None,
+    location: Optional[str] = None,
+    area: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """
+    获取设备列表，支持筛选参数
+    
+    参数:
+    - skip: 跳过记录数（分页）
+    - limit: 限制记录数（分页）
+    - device_type: 设备类型筛选（camera, nvr, edge_server, storage_node）
+    - status: 设备状态筛选（True=在线, False=离线）
+    - device_name: 设备名称筛选（模糊搜索）
+    - ip_address: IP地址筛选（模糊搜索）
+    - location: 位置筛选（模糊搜索）
+    - area: 区域筛选（模糊搜索）
+    """
+    query = db.query(Device)
+    
+    # 应用筛选条件
+    if device_type:
+        query = query.filter(Device.device_type == device_type)
+    
+    if status is not None:
+        query = query.filter(Device.status == status)
+    
+    if device_name:
+        query = query.filter(Device.device_name.ilike(f"%{device_name}%"))
+    
+    if ip_address:
+        query = query.filter(Device.ip_address.ilike(f"%{ip_address}%"))
+    
+    if location:
+        query = query.filter(Device.location.ilike(f"%{location}%"))
+    
+    if area:
+        query = query.filter(Device.area.ilike(f"%{area}%"))
+    
+    # 获取总数（应用筛选条件后的）
+    total_count = query.count()
+    
+    # 应用分页
+    result = query.offset(skip).limit(limit).all()
+    
     # 返回包含总数的响应
     return {
         "data": result,
-        "total": total_count
+        "total": total_count,
+        "filters": {
+            "device_type": device_type,
+            "status": status,
+            "device_name": device_name,
+            "ip_address": ip_address,
+            "location": location,
+            "area": area
+        }
     }
 
 @router.get("/devices/{device_id}", response_model=DeviceResponse)

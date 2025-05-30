@@ -37,8 +37,9 @@
                   </el-tag>
                 </template>
               </el-table-column>
-              <el-table-column label="操作" width="240">
+              <el-table-column label="操作" width="200" fixed="right">
                 <template #default="scope">
+                  <el-button-group>
                   <el-button type="primary" size="small" @click="viewModelDetails(scope.row)">
                     查看详情
                   </el-button>
@@ -52,6 +53,7 @@
                   <el-button type="danger" size="small" @click="confirmDelete(scope.row)">
                     删除
                   </el-button>
+                  </el-button-group>
                 </template>
               </el-table-column>
             </el-table>
