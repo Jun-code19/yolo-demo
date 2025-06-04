@@ -1,14 +1,12 @@
 <template>
   <div class="detection-events-page">
-    <el-card class="main-card">
-      <template #header>
-        <div class="card-header">
-          <span>检测事件记录</span>
-        </div>
-      </template>
+    <div class="page-header">
+      <h2>检测事件记录</h2>
+    </div>
       
+    <el-card class="filter-section">
       <!-- 筛选条件 -->
-      <el-form :model="filterForm" inline class="filter-form">
+      <el-form :model="filterForm" inline>
         <el-form-item label="设备">
           <el-select
             v-model="filterForm.device_id"
@@ -60,7 +58,7 @@
           </el-select>
         </el-form-item>
         
-        <el-form-item label="最小置信度">
+        <!-- <el-form-item label="最小置信度">
           <el-slider
             v-model="filterForm.min_confidence"
             :min="0"
@@ -69,7 +67,7 @@
             :show-tooltip="true"
             style="width: 150px"
           />
-        </el-form-item>
+        </el-form-item> -->
         
         <el-form-item label="日期范围">
           <el-date-picker
@@ -91,7 +89,8 @@
           </el-button>
         </el-form-item>
       </el-form>
-      
+    </el-card>
+    <el-card class="main-card">
       <!-- 事件列表 -->
       <el-table
         :data="eventList"
@@ -768,15 +767,31 @@ export default defineComponent({
 
 <style scoped>
 .detection-events-page {
-  padding: 24px;
+  padding: 20px;
 }
 
 .main-card {
-  margin-bottom: 24px;
+  margin-bottom: 20px;
 }
 
-.filter-form {
-  margin-bottom: 24px;
+.page-header {
+  margin-bottom: 20px;
+}
+
+.filter-section {
+  margin-bottom: 20px;
+  /* padding: 20px; */
+  /* background-color: #f8f9fa; */
+  border-radius: 8px;
+  /* border: 1px solid #e9ecef; */
+}
+
+.filter-section .el-form {
+  margin-bottom: 0;
+}
+
+.filter-section .el-form-item {
+  margin-bottom: 10px;
 }
 
 .pagination {
@@ -786,7 +801,7 @@ export default defineComponent({
 
 .event-detail {
   display: flex;
-  gap: 24px;
+  gap: 20px;
 }
 
 .event-image {

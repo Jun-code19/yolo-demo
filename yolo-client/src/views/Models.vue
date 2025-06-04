@@ -517,8 +517,8 @@ const formatParameters = (params) => {
 
 .card-header h2 {
   margin: 0;
-  font-size: 18px;
-  color: #303133;
+  /* font-size: 18px;
+  color: #303133; */
 }
 
 .model-upload {

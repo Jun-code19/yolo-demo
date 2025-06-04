@@ -137,6 +137,24 @@ const routes = [
         meta: { title: '任务详情' }
       }
     ]
+  },
+  {
+    path: '/edge-servers',
+    name: 'EdgeServers',
+    component: () => import('@/views/edgeServer/EdgeServers.vue'),
+    meta: {
+      requiresAuth: true,
+      title: '边缘服务器管理'
+    }
+  },
+  {
+    path: '/edge-servers/:serverId',
+    name: 'EdgeServerDetail',
+    component: () => import('@/views/edgeServer/EdgeServerDetail.vue'),
+    meta: {
+      requiresAuth: true,
+      title: '边缘服务器详情'
+    }
   }
 ]
 

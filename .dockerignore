@@ -28,6 +28,7 @@ wheels/
 storage/
 docker-image/
 models/
+docs/
 
 # Node
 node_modules/

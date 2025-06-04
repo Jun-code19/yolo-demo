@@ -78,6 +78,8 @@ class AnalysisJobUpdate(BaseModel):
     description: Optional[str] = None
     is_active: Optional[bool] = None
     detect_classes: Optional[List[str]] = None
+    warning_threshold: Optional[int] = None
+    warning_message: Optional[str] = None
 
 class AnalysisJobResponse(BaseModel):
     job_id: str

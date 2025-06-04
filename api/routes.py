@@ -2,8 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File,
 from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
-from src.database import get_db, Device, AnalysisResult, Alarm, User, SysLog, DetectionModel, DetectionConfig, DetectionEvent, DetectionSchedule, DetectionStat, DetectionPerformance, SaveMode, EventStatus, DetectionFrequency, DetectionLog, CrowdAnalysisJob, DataPushConfig
-from pydantic import BaseModel
+from src.database import get_db, Device, AnalysisResult, Alarm, User, SysLog, DetectionModel, DetectionConfig, DetectionEvent, DetectionSchedule, DetectionStat, DetectionPerformance, SaveMode, EventStatus, DetectionFrequency, DetectionLog, CrowdAnalysisJob, DataPushConfig, EdgeServer
+from pydantic import BaseModel,Field
 from fastapi.security import OAuth2PasswordRequestForm
 from api.auth import authenticate_user, create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES, get_current_user, check_admin_permission, get_password_hash, verify_password
 from api.logger import log_action
@@ -2625,3 +2625,256 @@ def get_dashboard_overview(db: Session = Depends(get_db), current_user: User = D
         return response
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取仪表盘数据失败: {str(e)}")
+    
+class EdgeServerBase(BaseModel):
+    """边缘服务器基础模型"""
+    name: str = Field(..., min_length=1, max_length=100, description="服务器名称")
+    ip_address: str = Field(..., description="IP地址")
+    port: int = Field(default=80, ge=1, le=65535, description="端口号")
+    description: Optional[str] = Field(None, description="服务器描述")
+    is_active: bool = Field(default=True, description="是否启用")
+
+class EdgeServerCreate(EdgeServerBase):
+    """创建边缘服务器模型"""
+    pass
+
+class EdgeServerUpdate(BaseModel):
+    """更新边缘服务器模型"""
+    name: Optional[str] = Field(None, min_length=1, max_length=100, description="服务器名称")
+    ip_address: Optional[str] = Field(None, description="IP地址")
+    port: Optional[int] = Field(None, ge=1, le=65535, description="端口号")
+    description: Optional[str] = Field(None, description="服务器描述")
+    is_active: Optional[bool] = Field(None, description="是否启用")
+    status: Optional[str] = Field(None, description="状态")
+    system_info: Optional[Dict[str, Any]] = Field(None, description="系统信息")
+    version_info: Optional[Dict[str, Any]] = Field(None, description="版本信息")
+    device_info: Optional[Dict[str, Any]] = Field(None, description="设备信息")
+
+class EdgeServerResponse(EdgeServerBase):
+    """边缘服务器响应模型"""
+    id: int
+    status: str
+    last_checked: Optional[datetime]
+    system_info: Optional[Dict[str, Any]]
+    version_info: Optional[Dict[str, Any]]
+    device_info: Optional[Dict[str, Any]]
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class EdgeServerListResponse(BaseModel):
+    """边缘服务器列表响应模型"""
+    total: int
+    items: List[EdgeServerResponse]
+
+class EdgeServerStatusUpdate(BaseModel):
+    """边缘服务器状态更新模型"""
+    status: str = Field(..., description="状态")
+    system_info: Optional[Dict[str, Any]] = Field(None, description="系统信息")
+    version_info: Optional[Dict[str, Any]] = Field(None, description="版本信息")
+    device_info: Optional[Dict[str, Any]] = Field(None, description="设备信息") 
+
+
+@router.post("/edge-servers", response_model=EdgeServerResponse, summary="创建边缘服务器")
+async def create_edge_server(
+    server_data: EdgeServerCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(check_admin_permission)
+):
+    """创建新的边缘服务器"""
+    try:
+        # 检查IP是否已存在
+        existing_server = db.query(EdgeServer).filter(
+            and_(
+                EdgeServer.ip_address == server_data.ip_address,
+                EdgeServer.port == server_data.port
+            )
+        ).first()
+        
+        if existing_server:
+            raise ValueError(f"服务器 {server_data.ip_address}:{server_data.port} 已存在")
+        
+        db_server = EdgeServer(
+            name=server_data.name,
+            ip_address=server_data.ip_address,
+            port=server_data.port,
+            description=server_data.description,
+            is_active=server_data.is_active,
+            status="unknown"
+        )
+        
+        db.add(db_server)
+        db.commit()
+        db.refresh(db_server)
+        
+        log_action(db, current_user.user_id, "create_edge_server", db_server.name, f"创建边缘服务器成功: {db_server.name} ({db_server.ip_address}:{db_server.port})")
+        return db_server
+            
+    except Exception as e:
+        db.rollback()
+        raise
+
+@router.get("/edge-servers", response_model=EdgeServerListResponse, summary="获取边缘服务器列表")
+async def get_edge_servers(
+    skip: int = Query(0, ge=0, description="跳过的记录数"),
+    limit: int = Query(100, ge=1, le=1000, description="返回的记录数"),
+    status: Optional[str] = Query(None, description="状态筛选"),
+    is_active: Optional[bool] = Query(None, description="是否启用"),
+    db: Session = Depends(get_db)
+):
+    """获取边缘服务器列表"""
+    try:
+        servers = db.query(EdgeServer)
+        if status:
+            servers = servers.filter(EdgeServer.status == status)
+        if is_active:
+            servers = servers.filter(EdgeServer.is_active == is_active)
+
+        total = servers.count()
+        servers = servers.offset(skip).limit(limit).all()
+        
+        return EdgeServerListResponse(total=total, items=servers)
+
+    except Exception as e:
+        # logger.error(f"获取边缘服务器列表失败: {str(e)}")
+        raise HTTPException(status_code=500, detail="获取边缘服务器列表失败")
+
+@router.get("/edge-servers/{server_id}", response_model=EdgeServerResponse, summary="获取边缘服务器详情")
+async def get_edge_server(
+    server_id: int,
+    db: Session = Depends(get_db)
+):
+    """根据ID获取边缘服务器详情"""
+    server = db.query(EdgeServer).filter(EdgeServer.id == server_id).first()
+    if not server:
+        raise HTTPException(status_code=404, detail="边缘服务器不存在")
+    return server
+
+@router.put("/edge-servers/{server_id}", response_model=EdgeServerResponse, summary="更新边缘服务器")
+async def update_edge_server(
+    server_id: int,
+    server_data: EdgeServerUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(check_admin_permission)
+):
+    """更新边缘服务器信息"""
+    try:
+            db_server = db.query(EdgeServer).filter(EdgeServer.id == server_id).first()
+            if not db_server:
+                return None
+            
+            # 如果更新IP和端口，检查是否与其他服务器冲突
+            if server_data.ip_address or server_data.port:
+                new_ip = server_data.ip_address or db_server.ip_address
+                new_port = server_data.port or db_server.port
+                
+                existing_server = db.query(EdgeServer).filter(
+                    and_(
+                        EdgeServer.ip_address == new_ip,
+                        EdgeServer.port == new_port,
+                        EdgeServer.id != server_id
+                    )
+                ).first()
+                
+                if existing_server:
+                    raise ValueError(f"服务器 {new_ip}:{new_port} 已存在")
+            
+            # 更新字段
+            update_data = server_data.model_dump(exclude_unset=True)
+            for field, value in update_data.items():
+                setattr(db_server, field, value)
+            
+            db_server.updated_at = datetime.now()
+            db.commit()
+            db.refresh(db_server)
+            
+            log_action(db, current_user.user_id, "update_edge_server", db_server.name, f"更新边缘服务器成功: {db_server.name} ({db_server.ip_address}:{db_server.port})")
+            return db_server
+            
+    except Exception as e:
+        db.rollback()
+        raise
+
+@router.patch("/edge-servers/{server_id}/status", response_model=EdgeServerResponse, summary="更新边缘服务器状态")
+async def update_edge_server_status(
+    server_id: int,
+    status_data: EdgeServerStatusUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(check_admin_permission)
+):
+    """更新边缘服务器状态和系统信息"""
+    try:
+        db_server = db.query(EdgeServer).filter(EdgeServer.id == server_id).first()
+        if not db_server:
+            return None
+        
+        db_server.status = status_data.status
+        db_server.last_checked = datetime.now()
+        
+        if status_data.system_info:
+            db_server.system_info = status_data.system_info
+        if status_data.version_info:
+            db_server.version_info = status_data.version_info
+        if status_data.device_info:
+            db_server.device_info = status_data.device_info
+        
+        db_server.updated_at = datetime.now()
+        db.commit()
+        db.refresh(db_server)
+        
+        log_action(db, current_user.user_id, "update_edge_server_status", db_server.name, f"更新边缘服务器状态成功: {db_server.name} -> {status_data.status}")
+        return db_server
+            
+    except Exception as e:
+        db.rollback()
+        raise
+
+@router.delete("/edge-servers/{server_id}", summary="删除边缘服务器")
+async def delete_edge_server(
+    server_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(check_admin_permission)
+):
+    """删除边缘服务器"""
+    try:
+        db_server = db.query(EdgeServer).filter(EdgeServer.id == server_id).first()
+        if not db_server:
+            return False
+        
+        db.delete(db_server)
+        db.commit()
+        
+        log_action(db, current_user.user_id, "delete_edge_server", db_server.name, f"删除边缘服务器成功: {db_server.name} ({db_server.ip_address}:{db_server.port})")
+        return True
+            
+    except Exception as e:
+        db.rollback()
+        raise
+
+@router.get("/edge-servers/online/list", response_model=List[EdgeServerResponse], summary="获取在线边缘服务器")
+async def get_online_edge_servers(db: Session = Depends(get_db)):
+    """获取所有在线的边缘服务器"""
+    try:
+        return db.query(EdgeServer).filter(
+            and_(
+                EdgeServer.status == "online",
+                EdgeServer.is_active == True
+            )
+        ).all()
+    except Exception as e:
+        # logger.error(f"获取在线边缘服务器失败: {str(e)}")
+        raise HTTPException(status_code=500, detail="获取在线边缘服务器失败")
+
+@router.get("/edge-servers/status/{status}", response_model=List[EdgeServerResponse], summary="根据状态获取边缘服务器")
+async def get_edge_servers_by_status(
+    status: str,
+    db: Session = Depends(get_db)
+):
+    """根据状态获取边缘服务器列表"""
+    try:
+        return db.query(EdgeServer).filter(EdgeServer.status == status).all() 
+    except Exception as e:
+        # logger.error(f"根据状态获取边缘服务器失败: {str(e)}")
+        raise HTTPException(status_code=500, detail="根据状态获取边缘服务器失败") 

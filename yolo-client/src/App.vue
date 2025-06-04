@@ -146,10 +146,7 @@ const openDashboard = () => {
             <template #title>检测配置</template>
           </el-menu-item>
           
-          <el-menu-item index="/detection/events">
-            <el-icon><Tickets /></el-icon>
-            <span>检测事件</span>
-          </el-menu-item>
+          
           
         </el-sub-menu>
 
@@ -158,9 +155,19 @@ const openDashboard = () => {
           <template #title>人群分析</template>
         </el-menu-item>
 
+        <el-menu-item index="/detection/events">
+            <el-icon><Tickets /></el-icon>
+            <template #title>历史事件</template>
+        </el-menu-item>
+
         <el-menu-item index="/devices">
           <el-icon><VideoCamera /></el-icon>
-          <template #title>设备管理</template>
+          <template #title>视频设备</template>
+        </el-menu-item>
+
+        <el-menu-item index="/edge-servers">
+          <el-icon><Monitor /></el-icon>
+          <template #title>边缘AI设备</template>
         </el-menu-item>
         
         <el-menu-item index="/models">

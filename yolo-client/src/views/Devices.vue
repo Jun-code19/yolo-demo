@@ -1,7 +1,7 @@
 <template>
   <div class="devices-container">
     <div class="page-header">
-      <h2>设备管理</h2>
+      <h2>视频设备管理</h2>
       <el-space>
         <el-dropdown @command="handleExport">
           <el-button type="primary">

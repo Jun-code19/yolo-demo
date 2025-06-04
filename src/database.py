@@ -2,6 +2,7 @@ from sqlalchemy import create_engine, Column, String, Boolean, DateTime, Integer
 from sqlalchemy.dialects.postgresql import INET, JSONB
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
+from sqlalchemy.sql import func
 import enum
 from datetime import datetime
 import uuid
@@ -352,3 +353,32 @@ class DetectionLog(Base):
     config = relationship("DetectionConfig")
     device = relationship("Device")
     user = relationship("User", foreign_keys=[created_by]) 
+
+class EdgeServer(Base):
+    """边缘服务器模型"""
+    __tablename__ = "edge_servers"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    name = Column(String(100), nullable=False, comment="服务器名称")
+    ip_address = Column(String(45), nullable=False, unique=True, comment="IP地址")
+    port = Column(Integer, default=80, nullable=False, comment="端口号")
+    description = Column(Text, comment="服务器描述")
+    
+    # 状态信息
+    status = Column(String(20), default="unknown", comment="状态: online/offline/checking/unknown")
+    last_checked = Column(DateTime(timezone=True), comment="最后检查时间")
+    
+    # 系统信息 (JSON格式存储)
+    system_info = Column(JSONB, comment="系统信息")
+    version_info = Column(JSONB, comment="版本信息")
+    device_info = Column(JSONB, comment="设备信息")
+    
+    # 创建和更新时间
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), comment="创建时间")
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), comment="更新时间")
+    
+    # 是否启用
+    is_active = Column(Boolean, default=True, comment="是否启用")
+    
+    def __repr__(self):
+        return f"<EdgeServer(id={self.id}, name='{self.name}', ip='{self.ip_address}')>" 
