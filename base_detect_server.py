@@ -37,12 +37,18 @@ from src.crowd_analyzer import crowd_analyzer
 from src.database import (
     SessionLocal, DetectionConfig, DetectionEvent, Device, 
     DetectionModel, DetectionPerformance, SaveMode,
-    EventStatus, Base, engine, get_db
+    EventStatus, Base, engine, get_db, ListenerType
 )
 # 导入认证模块
 from api.auth import get_current_user, User
 # 导入日志模块
 from api.logger import log_action, log_detection_action
+
+# 导入数据监听器模块
+from src.data_listener_manager import data_listener_manager
+from src.listeners.tcp_listener import TCPListener
+from src.listeners.mqtt_listener import MQTTListener
+from src.listeners.http_listener import HTTPListener
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -52,6 +58,25 @@ logger = logging.getLogger(__name__)
 scheduler = BackgroundScheduler(timezone=utc)
 scheduler.add_jobstore(MemoryJobStore(), 'default')
 scheduler.start()
+
+# 注册监听器类型
+def register_listener_types():
+    """注册所有支持的监听器类型"""
+    try:
+        data_listener_manager.register_listener_type(ListenerType.tcp, TCPListener)
+        data_listener_manager.register_listener_type(ListenerType.http, HTTPListener)
+        
+        # MQTT监听器需要额外检查依赖
+        try:
+            data_listener_manager.register_listener_type(ListenerType.mqtt, MQTTListener)
+            logger.info("已注册MQTT监听器")
+        except ImportError:
+            logger.warning("MQTT监听器不可用，请安装 paho-mqtt 库")
+        
+        logger.info("数据监听器类型注册完成")
+        
+    except Exception as e:
+        logger.error(f"注册监听器类型失败: {e}")
 
 # 检测任务类，管理单个摄像机的检测过程
 class DetectionTask:
@@ -1142,6 +1167,7 @@ class DetectionServer:
             # 确保客户端被移除
             if config_id in self.tasks:
                 self.tasks[config_id].remove_client(websocket)
+                logger.info(f"WebSocket客户端已从检测任务移除: {config_id}")
 
     # 创建并启动检测任务
     async def _create_and_start_task(self, config: DetectionConfig, model: DetectionModel, db: Session, reset_enabled=True):
@@ -1548,13 +1574,19 @@ async def lifespan(app: FastAPI):
     # 创建数据库表（如果不存在）
     Base.metadata.create_all(bind=engine)
     
-    # 1.启动数据推送服务
+    # 1. 注册数据监听器类型
+    try:
+        register_listener_types()
+    except Exception as e:
+        logger.error(f"注册监听器类型失败: {e}")
+
+    # 2.启动数据推送服务
     try:
         data_pusher.startup_push_service()
     except Exception as e:
         logger.error(f"启动数据推送服务失败: {e}")
 
-    # 2. 启动检测服务
+    # 3. 启动检测服务
     try:
         db = SessionLocal()
         await detection_server.start_all_enabled(db)
@@ -1562,7 +1594,7 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"启动检测服务失败: {e}")
 
-    # 3. 启动人群分析服务
+    # 4. 启动人群分析服务
     try:       
         # 加载所有活跃的人群分析任务
         crowd_analyzer.load_all_active_jobs()
@@ -1570,26 +1602,42 @@ async def lifespan(app: FastAPI):
         crowd_analyzer.start()
     except Exception as e:
         logger.error(f"启动人群分析服务失败: {e}")
+
+    # 5. 启动数据监听服务
+    try:
+        db = SessionLocal()
+        await data_listener_manager.start_all_enabled(db)
+        db.close()
+        logger.info("数据监听服务已启动")
+    except Exception as e:
+        logger.error(f"启动数据监听服务失败: {e}")
     
     yield
     
     # 关闭服务（顺序与启动相反）
     logger.info("检测服务器关闭中...")
     
-    # 1. 停止人群分析服务
+    # 1. 停止数据监听服务
+    try:
+        await data_listener_manager.stop_all()
+        logger.info("数据监听服务已停止")
+    except Exception as e:
+        logger.error(f"停止数据监听服务失败: {e}")
+    
+    # 2. 停止人群分析服务
     try:
         crowd_analyzer.stop()
     except Exception as e:
         logger.error(f"停止人群分析服务失败: {e}")
     
-    # 2. 停止检测任务
+    # 3. 停止检测任务
     for config_id, task in list(detection_server.tasks.items()):
         try:
             task.stop()
         except Exception as e:
             logger.error(f"停止检测任务 {config_id} 失败: {e}")
     
-    # 3. 停止数据推送服务
+    # 4. 停止数据推送服务
     try:
         data_pusher.shutdown_push_service()
     except Exception as e:
@@ -1743,6 +1791,10 @@ app.include_router(data_push_router, prefix="/api/v2")
 # 添加RTSP相关的API接口
 from api.rtsp_server import router as rtsp_router
 app.include_router(rtsp_router, prefix="/ws")
+
+# 添加数据监听相关的API接口
+from api.data_listener_routes import router as data_listener_router
+app.include_router(data_listener_router, prefix="/api/v2")
 
 # 主函数
 if __name__ == "__main__":

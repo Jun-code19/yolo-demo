@@ -145,19 +145,17 @@ const openDashboard = () => {
             <el-icon><Tools /></el-icon>
             <template #title>检测配置</template>
           </el-menu-item>
-          
-          
-          
+
+          <el-menu-item index="/detection/events">
+            <el-icon><Tickets /></el-icon>
+            <template #title>检测事件</template>
+        </el-menu-item>
+             
         </el-sub-menu>
 
         <el-menu-item index="/crowd-analysis">
           <el-icon><DataLine /></el-icon>
           <template #title>人群分析</template>
-        </el-menu-item>
-
-        <el-menu-item index="/detection/events">
-            <el-icon><Tickets /></el-icon>
-            <template #title>历史事件</template>
         </el-menu-item>
 
         <el-menu-item index="/devices">
@@ -177,7 +175,17 @@ const openDashboard = () => {
 
         <el-menu-item index="/push/config">
             <el-icon><Connection /></el-icon>
-            <span>数据推送</span>
+            <template #title>数据推送器</template>
+        </el-menu-item>
+
+        <el-menu-item index="/data-listeners">
+          <el-icon><DataLine /></el-icon>
+          <template #title>数据监听器</template>
+        </el-menu-item>
+
+        <el-menu-item index="/data-events">
+          <el-icon><DataLine /></el-icon>
+          <template #title>数据事件</template>
         </el-menu-item>
 
         <el-menu-item index="/system">
@@ -372,6 +380,181 @@ const openDashboard = () => {
   position: relative;
   overflow: hidden;
   color: rgba(255, 255, 255, 0.9) !important;
+}
+
+/* 折叠状态下的菜单整体样式 */
+:deep(.el-menu--collapse) {
+  width: 64px !important;
+}
+
+/* 折叠状态下的菜单项样式 - 使用更高优先级选择器 */
+:deep(.el-aside .el-menu--collapse .el-menu-item) {
+  width: 40px !important;
+  margin: 6px 12px !important;
+  padding: 0 !important;
+  text-align: center !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  min-width: 40px !important;
+  overflow: hidden !important;
+  position: relative !important;
+}
+
+/* 折叠状态下菜单项的所有子元素都居中 */
+:deep(.el-aside .el-menu--collapse .el-menu-item *) {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 100% !important;
+  text-align: center !important;
+}
+
+/* 折叠状态下的图标样式 */
+:deep(.el-aside .el-menu--collapse .el-menu-item .el-icon) {
+  margin: 0 !important;
+  font-size: 18px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 18px !important;
+  height: 18px !important;
+  position: relative !important;
+  z-index: 10 !important;
+}
+
+/* 隐藏所有文本内容 */
+:deep(.el-aside .el-menu--collapse .el-menu-item span:not(.el-icon)) {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  width: 0 !important;
+  height: 0 !important;
+  overflow: hidden !important;
+}
+
+/* 折叠状态下的子菜单样式 */
+:deep(.el-aside .el-menu--collapse .el-sub-menu) {
+  width: 40px !important;
+  margin: 6px 12px !important;
+  min-width: 40px !important;
+  overflow: hidden !important;
+}
+
+:deep(.el-aside .el-menu--collapse .el-sub-menu .el-sub-menu__title) {
+  padding: 0 !important;
+  text-align: center !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 40px !important;
+  min-width: 40px !important;
+  overflow: hidden !important;
+}
+
+:deep(.el-aside .el-menu--collapse .el-sub-menu .el-sub-menu__title .el-icon) {
+  margin: 0 !important;
+  font-size: 18px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 18px !important;
+  height: 18px !important;
+}
+
+:deep(.el-aside .el-menu--collapse .el-sub-menu .el-sub-menu__title span:not(.el-icon)) {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+}
+
+/* 隐藏子菜单箭头 - 多种可能的类名 */
+:deep(.el-aside .el-menu--collapse .el-sub-menu .el-sub-menu__icon-arrow) {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
+:deep(.el-aside .el-menu--collapse .el-sub-menu__icon-arrow) {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+}
+
+:deep(.el-aside .el-menu--collapse .el-icon-arrow-down) {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+}
+
+:deep(.el-aside .el-menu--collapse .el-icon-arrow-right) {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+}
+
+:deep(.el-aside .el-menu--collapse [class*="arrow"]) {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+}
+
+/* 强制隐藏所有子菜单标题中的箭头相关元素 */
+:deep(.el-aside .el-menu--collapse .el-sub-menu__title > .el-icon:last-child) {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+}
+
+:deep(.el-aside .el-menu--collapse .el-sub-menu__title > *:last-child:not(.el-icon:first-child)) {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+}
+
+/* 额外的箭头隐藏策略 - 如果上面的方法不行，用覆盖层遮盖 */
+:deep(.el-aside .el-menu--collapse .el-sub-menu__title) {
+  overflow: hidden !important;
+  position: relative !important;
+}
+
+:deep(.el-aside .el-menu--collapse .el-sub-menu__title::after) {
+  content: '' !important;
+  position: absolute !important;
+  right: 0 !important;
+  top: 0 !important;
+  width: 15px !important;
+  height: 100% !important;
+  background: linear-gradient(135deg, rgba(255, 138, 101, 0.08), rgba(255, 255, 255, 0.08)) !important;
+  z-index: 999 !important;
+  pointer-events: none !important;
+}
+
+/* Element Plus Tooltip 包装器处理 */
+:deep(.el-aside .el-menu--collapse .el-tooltip) {
+  width: 100% !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+:deep(.el-aside .el-menu--collapse .el-tooltip__trigger) {
+  width: 100% !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 0 !important;
+}
+
+/* 强制所有内容居中 */
+:deep(.el-aside .el-menu--collapse) {
+  text-align: center !important;
+}
+
+:deep(.el-aside .el-menu--collapse > *) {
+  text-align: center !important;
 }
 
 :deep(.el-menu-item::before) {

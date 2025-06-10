@@ -1803,4 +1803,30 @@ const handleImageError = () => {
 .image-preview-dialog .el-overlay {
   z-index: 9999 !important;
 }
+
+/* 确保下拉框选项在对话框中正常显示 */
+.el-select-dropdown {
+  z-index: 10001 !important;
+}
+
+.el-popper {
+  z-index: 10001 !important;
+}
+
+.el-picker-panel {
+  z-index: 10001 !important;
+}
+
+/* 针对图片预览对话框中的下拉框 */
+.image-preview-dialog .el-select-dropdown {
+  z-index: 10002 !important;
+}
+
+.image-preview-dialog .el-popper {
+  z-index: 10002 !important;
+}
+
+.image-preview-dialog .el-picker-panel {
+  z-index: 10002 !important;
+}
 </style> 

@@ -426,12 +426,12 @@ class CrowdAnalyzer:
             }
 
             # 采集图像到本地
-            if True and frame is not None and person_boxes is not None and person_count > 0:
-                save_dir = Path(f"storage/detection/{datetime.now().strftime('%Y-%m-%d')}/{device_id}")
-                save_dir.mkdir(parents=True, exist_ok=True)   
-                # 保存带检测框的截图（原图）
-                thumbnail_path = save_dir / f"{datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}.jpg"
-                cv2.imwrite(str(thumbnail_path), frame)
+            # if True and frame is not None and person_boxes is not None and person_count > 0:
+            #     save_dir = Path(f"storage/detection/{datetime.now().strftime('%Y-%m-%d')}/{device_id}")
+            #     save_dir.mkdir(parents=True, exist_ok=True)   
+            #     # 保存带检测框的截图（原图）
+            #     thumbnail_path = save_dir / f"{datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}.jpg"
+            #     cv2.imwrite(str(thumbnail_path), frame)
             
             # 可选：添加预览图（缩小尺寸以减少数据量）
             if frame is not None:
@@ -456,6 +456,15 @@ class CrowdAnalyzer:
                 cv2.putText(frame_with_boxes, f"People: {person_count}", (10, 30), 
                             font, 1, (0, 0, 255), 2, cv2.LINE_AA)
                 
+                # 保存带检测框的截图（原图）
+                if True and person_boxes is not None and person_count > 0:
+                    save_dir = Path(f"storage/detection/{datetime.now().strftime('%Y-%m-%d')}/{device_id}")
+                    save_dir.mkdir(parents=True, exist_ok=True)   
+                    # 保存带检测框的截图（原图）
+                    thumbnail_path = save_dir / f"{datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}.jpg"
+                    cv2.imwrite(str(thumbnail_path), frame_with_boxes)
+
+
                 # 调整图像大小以减少数据量
                 preview_frame = cv2.resize(frame_with_boxes, (640, 360))
                 

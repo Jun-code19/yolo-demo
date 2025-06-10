@@ -115,6 +115,24 @@ const routes = [
     }
   },
   {
+    path: '/data-listeners',
+    name: 'DataListeners',
+    component: () => import('../views/DataListeners.vue'),
+    meta: {
+      requiresAuth: true,
+      title: '数据监听器配置'
+    }
+  },
+  {
+    path:'/data-events',
+    name:'DataEvents',
+    component:()=>import('../views/DataEvents.vue'),
+    meta:{
+      requiresAuth:true,
+      title:'数据事件'
+    }
+  },
+  {
     path: '/crowd-analysis',
     component: () => import('@/views/crowd-analysis/Layout.vue'),
     children: [

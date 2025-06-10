@@ -185,18 +185,9 @@
       <el-alert type="error" :title="job.last_error" :closable="false" show-icon />
     </el-card>
 
-     <!-- 全屏预览对话框 -->
-     <el-dialog 
-       v-model="fullImageVisible" 
-       title="检测结果详情" 
-       width="60%" 
-       :before-close="handleCloseFullImage"
-       :close-on-click-modal="true" 
-       :z-index="9999"
-       :modal="true"
-       :append-to-body="true"
-       class="full-image-dialog"
-     >
+    <!-- 全屏预览对话框 -->
+    <el-dialog v-model="fullImageVisible" title="检测结果详情" width="60%" :before-close="handleCloseFullImage"
+      :close-on-click-modal="true" :z-index="9999" :modal="true" :append-to-body="true" class="full-image-dialog">
       <div class="full-image-container">
         <div class="image-info">
           <h3>{{ currentImage.device_name }}</h3>
@@ -234,16 +225,8 @@
     </el-dialog>
 
     <!-- 编辑任务对话框 -->
-    <el-dialog 
-      v-model="editDialogVisible" 
-      title="编辑任务" 
-      width="50%" 
-      :before-close="handleCloseEditDialog"
-      :z-index="9999"
-      :modal="true"
-      :append-to-body="true"
-      class="edit-dialog"
-    >
+    <el-dialog v-model="editDialogVisible" title="编辑任务" width="50%" :before-close="handleCloseEditDialog"
+      :z-index="9999" :modal="true" :append-to-body="true" class="edit-dialog">
       <el-alert v-if="editFormError" title="保存失败" :description="editFormError" type="error" show-icon :closable="true"
         @close="editFormError = ''" style="margin-bottom: 15px;" />
 
@@ -253,7 +236,13 @@
         </el-form-item>
 
         <el-form-item label="监控设备" prop="device_ids">
-          <el-select v-model="editForm.device_ids" multiple placeholder="请选择监控设备" style="width: 100%">
+          <el-select 
+            v-model="editForm.device_ids" 
+            multiple 
+            placeholder="请选择监控设备" 
+            style="width: 100%"
+            popper-class="edit-dialog-select"
+          >
             <el-option v-for="device in availableDevices" :key="device.device_id" :label="device.device_name"
               :value="device.device_id">
               <span>{{ device.device_name }}</span>
@@ -265,7 +254,13 @@
         </el-form-item>
 
         <el-form-item label="检测模型" prop="models_id">
-          <el-select v-model="editForm.models_id" placeholder="请选择检测模型" style="width: 100%" @change="handleModelChange">
+          <el-select 
+            v-model="editForm.models_id" 
+            placeholder="请选择检测模型" 
+            style="width: 100%" 
+            @change="handleModelChange"
+            popper-class="edit-dialog-select"
+          >
             <el-option v-for="model in availableModels" :key="model.model_id"
               :label="`${model.model_name} (${getModelTypeName(model.model_type)})`" :value="model.model_id">
               <div class="model-option">
@@ -278,8 +273,16 @@
         </el-form-item>
 
         <el-form-item label="检测类别" v-if="modelClasses.length > 0" prop="detect_classes">
-          <el-select v-model="editForm.detect_classes" multiple placeholder="请选择要检测的目标类别" style="width: 100%"
-            collapse-tags collapse-tags-tooltip :max-collapse-tags="4">
+          <el-select 
+            v-model="editForm.detect_classes" 
+            multiple 
+            placeholder="请选择要检测的目标类别" 
+            style="width: 100%"
+            collapse-tags 
+            collapse-tags-tooltip 
+            :max-collapse-tags="4"
+            popper-class="edit-dialog-select"
+          >
             <el-option v-for="(classItem, index) in modelClasses" :key="classItem.value" :label="classItem.label"
               :value="classItem.value">
               <div class="class-option">
@@ -1249,6 +1252,7 @@ const submitEditForm = async () => {
   align-items: center;
   margin-bottom: 10px;
 }
+
 .table-controls {
   display: flex;
   align-items: center;
@@ -1273,6 +1277,7 @@ const submitEditForm = async () => {
   align-items: center;
   gap: 8px;
 }
+
 .class-id {
   color: #909399;
   font-size: 12px;
@@ -1312,5 +1317,37 @@ const submitEditForm = async () => {
 
 .el-overlay {
   z-index: 9998 !important;
+}
+
+/* 确保下拉框选项在对话框中正常显示 */
+.el-select-dropdown {
+  z-index: 10001 !important;
+}
+
+.el-popper {
+  z-index: 10001 !important;
+}
+
+/* 特别针对编辑对话框中的下拉框 */
+.edit-dialog .el-select-dropdown {
+  z-index: 10002 !important;
+}
+
+.edit-dialog .el-popper {
+  z-index: 10002 !important;
+}
+
+/* 专门针对编辑对话框的下拉框弹出层 */
+.edit-dialog-select {
+  z-index: 10003 !important;
+}
+
+/* 日期选择器等其他popper元素 */
+.el-picker-panel {
+  z-index: 10001 !important;
+}
+
+.edit-dialog .el-picker-panel {
+  z-index: 10002 !important;
 }
 </style>

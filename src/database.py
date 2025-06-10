@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, String, Boolean, DateTime, Integer, Float, Enum, ForeignKey, ARRAY, Text, SmallInteger
+from sqlalchemy import create_engine, Column, String, Boolean, DateTime, Integer, Float, Enum, ForeignKey, ARRAY, Text, SmallInteger, Index
 from sqlalchemy.dialects.postgresql import INET, JSONB
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
@@ -382,3 +382,106 @@ class EdgeServer(Base):
     
     def __repr__(self):
         return f"<EdgeServer(id={self.id}, name='{self.name}', ip='{self.ip_address}')>" 
+
+class ListenerType(enum.Enum):
+    tcp = "tcp"
+    mqtt = "mqtt"
+    sdk = "sdk"
+    http = "http"
+    websocket = "websocket"
+
+class ExternalEventType(enum.Enum):
+    detection = "detection"
+    alarm = "alarm"
+    status = "status"
+    command = "command"
+    heartbeat = "heartbeat"
+    other = "other"
+
+class ListenerConfig(Base):
+    __tablename__ = "listener_configs"
+    
+    config_id = Column(String, primary_key=True)
+    name = Column(String(100), nullable=False)
+    description = Column(Text)
+    listener_type = Column(Enum(ListenerType), nullable=False)
+    connection_config = Column(JSONB, nullable=False)  # 连接配置
+    data_mapping = Column(JSONB)  # 数据映射规则
+    filter_rules = Column(JSONB)  # 过滤规则
+    
+    # 新增：边缘设备和算法字段映射
+    edge_device_mappings = Column(JSONB)  # 关联的边缘设备列表
+    algorithm_field_mappings = Column(JSONB)  # 算法字段映射配置 {device_id: [engine_ids]}
+    algorithm_specific_fields = Column(JSONB)  # 算法特定字段配置 {device_id: {engine_id: {field_configs}}}
+    
+    # 新增：设备和引擎名称映射（用于数据标准化时获取名称）
+    device_name_mappings = Column(JSONB)  # 设备SN到名称的映射 {device_sn: device_name}
+    engine_name_mappings = Column(JSONB)  # 引擎ID到名称的映射 {engine_id: engine_name}
+    
+    storage_enabled = Column(Boolean, default=True)
+    push_enabled = Column(Boolean, default=False)
+    push_config = Column(JSONB)  # 推送配置
+    enabled = Column(Boolean, default=False)
+    created_by = Column(String, ForeignKey('users.user_id'))
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    
+    creator = relationship("User")
+
+class ExternalEvent(Base):
+    __tablename__ = "external_events"
+    
+    event_id = Column(String, primary_key=True)
+    config_id = Column(String, ForeignKey('listener_configs.config_id'), nullable=False)
+    source_type = Column(Enum(ListenerType), nullable=False)
+    event_type = Column(Enum(ExternalEventType), nullable=False)
+    
+    # 设备相关信息
+    device_id = Column(String(64))  # 可选关联设备（保持向后兼容）
+    device_sn = Column(String(100))  # 新增：设备SN码
+    device_name = Column(String(200))  # 新增：设备名称
+    channel_id = Column(String(50))  # 新增：视频通道ID
+    engine_id = Column(String(50))   # 新增：算法引擎ID
+    engine_name = Column(String(200))  # 新增：算法引擎名称
+    
+    location = Column(String(200))
+    confidence = Column(Float)
+    original_data = Column(JSONB, nullable=False)  # 原始数据
+    normalized_data = Column(JSONB)  # 标准化数据
+    algorithm_data = Column(JSONB)   # 新增：算法特定数据
+    event_metadata = Column(JSONB)  # 元数据
+    status = Column(Enum(EventStatus), default=EventStatus.new)
+    processed = Column(Boolean, default=False)
+    timestamp = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, default=datetime.now)
+    
+    config = relationship("ListenerConfig")
+    # device = relationship("Device")
+
+class ListenerStatus(Base):
+    __tablename__ = "listener_status"
+    
+    config_id = Column(String, ForeignKey('listener_configs.config_id'), primary_key=True)
+    status = Column(String(20), default='stopped')  # running, stopped, error
+    last_event_time = Column(DateTime)
+    events_count = Column(Integer, default=0)
+    error_count = Column(Integer, default=0)
+    last_error = Column(Text)
+    started_at = Column(DateTime)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    
+    config = relationship("ListenerConfig")
+
+# 添加索引
+Index('idx_external_events_timestamp', ExternalEvent.timestamp)
+Index('idx_external_events_type', ExternalEvent.event_type)
+Index('idx_external_events_config', ExternalEvent.config_id)
+Index('idx_listener_configs_type', ListenerConfig.listener_type)
+
+# 数据库依赖注入
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close() 
