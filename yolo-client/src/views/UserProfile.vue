@@ -87,7 +87,7 @@ onMounted(async () => {
     localStorage.setItem('userInfo', JSON.stringify(data))
     
   } catch (error) {
-    console.error('加载用户信息失败:', error)
+    // console.error('加载用户信息失败:', error)
     ElMessage.error('加载用户信息失败')
   } finally {
     loading.value = false
@@ -116,7 +116,7 @@ const updateUserInfo = async () => {
       
       ElMessage.success('用户信息更新成功，页面将自动刷新')
     } catch (error) {
-      console.error('更新用户信息失败:', error)
+      // console.error('更新用户信息失败:', error)
       ElMessage.error(`更新用户信息失败: ${error.response?.data?.detail || error.message}`)
     } finally {
       loading.value = false
@@ -162,7 +162,7 @@ const updatePassword = async () => {
         window.location.href = '/'
       })
     } catch (error) {
-      console.error('更新密码失败:', error)
+      // console.error('更新密码失败:', error)
       ElMessage.error(`更新密码失败: ${error.response?.data?.detail || error.message}`)
     } finally {
       passwordLoading.value = false

@@ -817,7 +817,7 @@ const initForm = async () => {
       }
       
     } catch (error) {
-      console.error('加载配置数据失败:', error)
+      // console.error('加载配置数据失败:', error)
       ElMessage.error('加载配置数据失败')
     } finally {
       loading.value = false
@@ -881,7 +881,7 @@ const loadAvailableEdgeDevices = async () => {
     const response = await edgeServerAPI.getOnlineServers()
     availableEdgeDevices.value = response || []
   } catch (error) {
-    console.error('加载边缘设备失败:', error)
+    // console.error('加载边缘设备失败:', error)
     ElMessage.warning('加载边缘设备列表失败')
   }
 }
@@ -933,10 +933,10 @@ const loadEdgeDevicesAndEngines = async (deviceIds) => {
             }
           })
         }
-        console.log(selectedDeviceEngines.value)
+        // console.log(selectedDeviceEngines.value)
       }
     } catch (error) {
-      console.error(`加载设备${deviceId}算法引擎失败:`, error)
+      // console.error(`加载设备${deviceId}算法引擎失败:`, error)
     }
   }
 }
@@ -1105,7 +1105,7 @@ const handleSave = async () => {
       ElMessage.error(response.data.message || '保存失败')
     }
   } catch (error) {
-    console.error('保存配置失败:', error)
+    // console.error('保存配置失败:', error)
     ElMessage.error('保存配置失败')
   } finally {
     saving.value = false

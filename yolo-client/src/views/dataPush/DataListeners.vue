@@ -282,8 +282,8 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Refresh, Plus, Monitor, VideoPlay, Bell, DataAnalysis, Search
 } from '@element-plus/icons-vue'
-import ListenerConfigDialog from '../components/ListenerConfigDialog.vue'
-import { dataListenerApi } from '../api/dataListener'
+import ListenerConfigDialog from '../../components/ListenerConfigDialog.vue'
+import { dataListenerApi } from '../../api/dataListener'
 
 // 响应式数据
 const loading = ref(false)
@@ -343,7 +343,7 @@ const loadData = async () => {
       pagination.total = response.data.data.pagination.total
     }
   } catch (error) {
-    console.error('加载数据失败:', error)
+    // console.error('加载数据失败:', error)
     ElMessage.error('加载数据失败')
   } finally {
     loading.value = false
@@ -357,7 +357,7 @@ const loadStats = async () => {
       stats.value = response.data.data
     }
   } catch (error) {
-    console.error('加载统计数据失败:', error)
+    // console.error('加载统计数据失败:', error)
   }
 }
 
@@ -402,7 +402,7 @@ const startListener = async (config) => {
       ElMessage.error(response.data.message || '启动失败')
     }
   } catch (error) {
-    console.error('启动监听器失败:', error)
+    // console.error('启动监听器失败:', error)
     ElMessage.error('启动监听器失败')
   } finally {
     config.starting = false
@@ -422,7 +422,7 @@ const stopListener = async (config) => {
       ElMessage.error(response.data.message || '停止失败')
     }
   } catch (error) {
-    console.error('停止监听器失败:', error)
+    // console.error('停止监听器失败:', error)
     ElMessage.error('停止监听器失败')
   } finally {
     config.stopping = false
@@ -451,7 +451,7 @@ const deleteConfig = async (config) => {
     }
   } catch (error) {
     if (error !== 'cancel') {
-      console.error('删除配置失败:', error)
+      // console.error('删除配置失败:', error)
       ElMessage.error('删除配置失败')
     }
   }
@@ -470,7 +470,7 @@ const batchStart = async () => {
       await refreshData()
     }
   } catch (error) {
-    console.error('批量启动失败:', error)
+    // console.error('批量启动失败:', error)
     ElMessage.error('批量启动失败')
   } finally {
     batchLoading.value = false
@@ -490,7 +490,7 @@ const batchStop = async () => {
       await refreshData()
     }
   } catch (error) {
-    console.error('批量停止失败:', error)
+    // console.error('批量停止失败:', error)
     ElMessage.error('批量停止失败')
   } finally {
     batchLoading.value = false

@@ -203,8 +203,7 @@ async def create_analysis_job(
 
 @router.get("/jobs", response_model=List[AnalysisJobResponse])
 async def get_analysis_jobs(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    db: Session = Depends(get_db)
 ):
     """获取所有人群分析任务"""
     # 从内存中获取运行中的任务
@@ -266,8 +265,7 @@ async def get_analysis_jobs(
 @router.get("/jobs/{job_id}", response_model=AnalysisJobResponse)
 async def get_analysis_job(
     job_id: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    db: Session = Depends(get_db)
 ):
     """获取特定分析任务的详情"""
     # 从内存中查找任务
@@ -440,8 +438,7 @@ async def run_analysis_job_now(
 
 @router.get("/available-devices")
 async def get_available_devices(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    db: Session = Depends(get_db)
 ):
     """获取可用于人群分析的设备列表"""
     # 查询所有有效的设备（必须有检测配置）
@@ -537,8 +534,7 @@ async def export_analysis_results(
 
 @router.get("/available-models")
 async def get_available_models(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    db: Session = Depends(get_db)
 ):
     """获取可用于人群分析的模型列表"""
     # 查询所有可用于人体检测的模型
@@ -560,8 +556,7 @@ async def get_available_models(
 @router.get("/info-devices")
 async def get_devices_details(
     device_ids: Optional[str] = None,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    db: Session = Depends(get_db)
 ):
     """获取设备详情，可以通过device_ids查询参数过滤设备列表"""
     query = db.query(Device)
@@ -580,6 +575,7 @@ async def get_devices_details(
             "device_name": device.device_name,
             "ip_address": device.ip_address,
             "port": device.port,
+            "channel": device.channel,
             "location": device.location or "",
             "area": device.area or "",
             "status": "online" if device.status else "offline"
@@ -592,8 +588,7 @@ async def get_analysis_history(
     job_id: str,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    db: Session = Depends(get_db)
 ):
     """获取分析任务的历史数据，用于展示趋势图"""
     # 检查任务是否存在
@@ -779,8 +774,7 @@ async def update_analysis_job(
 @router.get("/model-classes/{model_id}")
 async def get_model_classes(
     model_id: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    db: Session = Depends(get_db)
 ):
     """获取特定模型支持的类别信息"""
     model = db.query(DetectionModel).filter(DetectionModel.models_id == model_id, DetectionModel.is_active == True).first()

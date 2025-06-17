@@ -478,7 +478,7 @@ const handleSubmit = async () => {
       dialogVisible.value = false
       loadData()
     } catch (error) {
-      console.error('操作失败:', error)
+      // console.error('操作失败:', error)
       ElMessage.error(`操作失败: ${error.response?.data?.detail || error.message}`)
     } finally {
       submitting.value = false
@@ -502,7 +502,7 @@ const handleDelete = (row) => {
       ElMessage.success('删除成功')
       loadData()
     } catch (error) {
-      console.error('删除失败:', error)
+      // console.error('删除失败:', error)
       ElMessage.error(`删除失败: ${error.response?.data?.detail || error.message}`)
     }
   }).catch(() => { })
@@ -554,7 +554,7 @@ const startPreview = async () => {
 
     previewLoading.value = false
   } catch (error) {
-    console.error('预览失败:', error)
+    // console.error('预览失败:', error)
     previewLoading.value = false
     previewError.value = `连接设备失败: ${error.message}`
   }
@@ -579,7 +579,7 @@ const connectToWebSocket = async () => {
 
       ws.value.onopen = () => {
         clearTimeout(connectionTimeout)
-        console.log('WebSocket已连接，正在发送连接请求...')
+        // console.log('WebSocket已连接，正在发送连接请求...')
 
         // 发送连接请求
         ws.value.send(JSON.stringify({
@@ -592,18 +592,18 @@ const connectToWebSocket = async () => {
 
       ws.value.onerror = (error) => {
         clearTimeout(connectionTimeout)
-        console.error('WebSocket错误:', error)
+        // console.error('WebSocket错误:', error)
         reject(new Error('WebSocket连接错误'))
       }
 
       ws.value.onclose = () => {
-        console.log('WebSocket已关闭')
+        // console.log('WebSocket已关闭')
         if (previewVisible.value && !previewError.value) {
           previewError.value = '视频流连接已断开'
         }
       }
     } catch (error) {
-      console.error('创建WebSocket连接失败:', error)
+      // console.error('创建WebSocket连接失败:', error)
       reject(error)
     }
   })
@@ -618,11 +618,11 @@ const handleWsMessage = (event) => {
     // 根据消息类型处理
     switch (message.type) {
       case 'connect_confirm':
-        console.log('WebSocket连接确认')
+        // console.log('WebSocket连接确认')
 
         // 发送预览请求
         if (ws.value && ws.value.readyState === WebSocket.OPEN && currentDevice.value) {
-          console.log('发送预览请求')
+          // console.log('发送预览请求')
           ws.value.send(
             JSON.stringify({
               type: 'preview_request',
@@ -634,7 +634,7 @@ const handleWsMessage = (event) => {
         break
 
       case 'preview_start':
-        console.log('预览流已开始', message)
+        // console.log('预览流已开始', message)
         previewLoading.value = false
 
         // 如果预览流还未开始，则启动
@@ -650,54 +650,54 @@ const handleWsMessage = (event) => {
         break
 
       case 'error':
-        console.error('服务器错误:', message.message)
+        // console.error('服务器错误:', message.message)
         previewLoading.value = false
         previewError.value = `服务器错误: ${message.message}`
         break
 
       default:
-        console.log('未处理的消息类型:', message.type)
+        // console.log('未处理的消息类型:', message.type)
     }
   } catch (error) {
-    console.error('处理WebSocket消息错误:', error)
+    // console.error('处理WebSocket消息错误:', error)
   }
 }
 
 // 开始视频流播放
 const startVideoStream = () => {
-  console.log('开始初始化视频流播放...');
+  // console.log('开始初始化视频流播放...');
 
   try {
     // 无论videoRef是否存在，都先将预览状态设置为true
     previewLoading.value = false;
     previewStream.value = true;
-    console.log('视频预览状态已更新: previewStream =', previewStream.value);
+    // console.log('视频预览状态已更新: previewStream =', previewStream.value);
 
     // 检查浏览器支持
     if (!window.MediaSource) {
-      console.warn('浏览器不支持MediaSource API，将使用备用显示模式');
+      // console.warn('浏览器不支持MediaSource API，将使用备用显示模式');
       showFallbackImage.value = true;
     }
 
     // 如果videoRef已存在，可以进行其他初始化
     if (videoRef.value) {
-      console.log('videoRef已存在，可以初始化视频元素');
+      // console.log('videoRef已存在，可以初始化视频元素');
     } else {
-      console.log('videoRef尚未就绪，将在收到第一帧时初始化');
+      // console.log('videoRef尚未就绪，将在收到第一帧时初始化');
     }
   } catch (error) {
-    console.error('启动视频流失败:', error);
+    // console.error('启动视频流失败:', error);
     previewError.value = `启动视频流失败: ${error.message}`;
   }
 }
 
 // 处理流数据
 const handleStreamData = (data) => {
-  console.log('收到流数据:', data.type, data.format || '(无格式信息)');
+  // console.log('收到流数据:', data.type, data.format || '(无格式信息)');
 
   // 确保预览状态已初始化（双重保险）
   if (!previewStream.value) {
-    console.log('预览流状态未初始化，自动初始化');
+    // console.log('预览流状态未初始化，自动初始化');
     previewLoading.value = false;
     previewStream.value = true;
   }
@@ -705,7 +705,7 @@ const handleStreamData = (data) => {
   try {
     // 检查数据格式
     if (data.format === 'jpeg' && data.data) {
-      console.log(`处理JPEG图像数据: ${data.width}x${data.height}, 帧ID:${data.frame_id}`);
+      // console.log(`处理JPEG图像数据: ${data.width}x${data.height}, 帧ID:${data.frame_id}`);
 
       // 基于Base64图像创建图像URL
       const imageData = `data:image/jpeg;base64,${data.data}`;
@@ -720,7 +720,7 @@ const handleStreamData = (data) => {
 
       // 默认使用备用图像显示方式，简单可靠
       if (!videoRef.value || !videoRef.value.parentElement) {
-        console.log('使用备用图像显示模式 - videoRef不可用');
+        // console.log('使用备用图像显示模式 - videoRef不可用');
         showFallbackImage.value = true;
         return;
       }
@@ -735,7 +735,7 @@ const handleStreamData = (data) => {
       img.onload = () => {
         // 确保videoRef仍然存在
         if (!videoRef.value) {
-          console.warn('videoRef在图像加载过程中消失，切换到备用模式');
+          // console.warn('videoRef在图像加载过程中消失，切换到备用模式');
           showFallbackImage.value = true;
           return;
         }
@@ -751,13 +751,13 @@ const handleStreamData = (data) => {
           // 直接将canvas内容显示在video元素上
           if (!videoRef.value.srcObject) {
             // 首次创建流
-            console.log('创建新的Canvas流');
+            // console.log('创建新的Canvas流');
             try {
               const canvasStream = canvas.captureStream(15); // 15fps
               videoRef.value.srcObject = canvasStream;
-              console.log('视频流已连接到video元素');
+              // console.log('视频流已连接到video元素');
             } catch (e) {
-              console.error('创建Canvas流失败，切换到备用模式:', e);
+              // console.error('创建Canvas流失败，切换到备用模式:', e);
               showFallbackImage.value = true;
             }
           } else {
@@ -772,43 +772,43 @@ const handleStreamData = (data) => {
                 oldStream.getTracks().forEach(track => track.stop());
               }
             } catch (e) {
-              console.warn('更新Canvas流失败，切换到备用模式:', e);
+              // console.warn('更新Canvas流失败，切换到备用模式:', e);
               showFallbackImage.value = true;
             }
           }
         } catch (e) {
-          console.error('Canvas操作失败，切换到备用模式:', e);
+          // console.error('Canvas操作失败，切换到备用模式:', e);
           showFallbackImage.value = true;
         }
       };
 
       img.onerror = (err) => {
-        console.error('图像加载失败:', err);
+        // console.error('图像加载失败:', err);
         previewError.value = '图像加载失败，请检查网络连接';
       };
 
       img.src = imageData;
     } else if (data.data && !data.format) {
-      console.log('收到二进制数据，尝试作为MP4片段处理');
+      // console.log('收到二进制数据，尝试作为MP4片段处理');
       // 二进制数据处理 (PyAV版本的后端)
       if (window.appendVideoData) {
         try {
           const videoData = new Uint8Array(data.data);
           window.appendVideoData(videoData);
-          console.log('成功处理视频数据片段');
+          // console.log('成功处理视频数据片段');
         } catch (e) {
-          console.error('处理视频片段失败:', e);
+          // console.error('处理视频片段失败:', e);
           previewError.value = '视频解码失败';
         }
       } else {
-        console.warn('window.appendVideoData未定义，无法处理MP4片段，切换到备用模式');
+        // console.warn('window.appendVideoData未定义，无法处理MP4片段，切换到备用模式');
         showFallbackImage.value = true;
       }
     } else {
-      console.warn('收到未知格式的数据:', data);
+      // console.warn('收到未知格式的数据:', data);
     }
   } catch (error) {
-    console.error('处理视频数据错误:', error);
+    // console.error('处理视频数据错误:', error);
     previewError.value = `视频处理错误: ${error.message}`;
     showFallbackImage.value = true;  // 出错时默认使用备用模式
   }
@@ -844,7 +844,7 @@ const takeSnapshot = () => {
 
     ElMessage.success('截图已保存')
   } catch (error) {
-    console.error('截图失败:', error)
+    // console.error('截图失败:', error)
     ElMessage.error('截图失败')
   }
 }
@@ -978,7 +978,7 @@ const submitImport = async () => {
       ElMessage.error(`导入失败: ${response.data.detail || '未知错误'}`)
     }
   } catch (error) {
-    console.error('导入设备失败:', error)
+    // console.error('导入设备失败:', error)
     ElMessage.error(`导入失败: ${error.response?.data?.detail || error.message}`)
   } finally {
     importing.value = false
@@ -1018,7 +1018,7 @@ const handleExport = async (command) => {
       ElMessage.success('导出成功')
     }
   } catch (error) {
-    console.error('导出失败:', error)
+    // console.error('导出失败:', error)
     ElMessage.error(`导出失败: ${error.response?.data?.detail || error.message}`)
   }
 }

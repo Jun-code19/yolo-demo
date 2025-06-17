@@ -664,7 +664,7 @@ export default defineComponent({
           const thumbnailUrl = await detectionEventApi.fetchThumbnail(eventId);            
           return thumbnailUrl; // 返回图像 URL         
       } catch (error) {
-          console.error('加载缩略图失败:', error);
+          // console.error('加载缩略图失败:', error);
       }
     };
 

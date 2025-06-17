@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File,
 from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
-from src.database import get_db, Device, AnalysisResult, Alarm, User, SysLog, DetectionModel, DetectionConfig, DetectionEvent, DetectionSchedule, DetectionStat, DetectionPerformance, SaveMode, EventStatus, DetectionFrequency, DetectionLog, CrowdAnalysisJob, DataPushConfig, EdgeServer
+from src.database import get_db, Device, AnalysisResult, Alarm, User, SysLog, DetectionModel, DetectionConfig, DetectionEvent, DetectionSchedule, DetectionStat, DetectionPerformance, SaveMode, EventStatus, DetectionFrequency, DetectionLog, CrowdAnalysisJob,CrowdAnalysisResult, DataPushConfig, EdgeServer,ExternalEvent
 from pydantic import BaseModel,Field
 from fastapi.security import OAuth2PasswordRequestForm
 from api.auth import authenticate_user, create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES, get_current_user, check_admin_permission, get_password_hash, verify_password
@@ -558,15 +558,13 @@ class ModelResponse(ModelBase):
 
 # 模型管理API
 @router.get("/models/", response_model=List[ModelResponse])
-def get_models(skip: int = 0, limit: int = 100, db: Session = Depends(get_db),
-              current_user: User = Depends(get_current_user)):
+def get_models(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
     """获取所有检测模型列表"""
     models = db.query(DetectionModel).offset(skip).limit(limit).all()
     return models
 
 @router.get("/models/{models_id}", response_model=ModelResponse)
-def get_model(models_id: str, db: Session = Depends(get_db),
-             current_user: User = Depends(get_current_user)):
+def get_model(models_id: str, db: Session = Depends(get_db)):
     """获取特定模型详情"""
     model = db.query(DetectionModel).filter(DetectionModel.models_id == models_id).first()
     if not model:
@@ -845,7 +843,7 @@ class DetectionEventResponse(DetectionEventBase):
         from_attributes = True
 
 # 获取检测配置列表
-@router.get("/detection/configs", response_model=List[DetectionConfigDetailResponse])
+@router.get("/detection/configs", tags=["检测配置"])
 async def get_detection_configs(
     device_id: Optional[str] = None,
     enabled: Optional[bool] = None,
@@ -865,6 +863,10 @@ async def get_detection_configs(
     if frequency is not None:
         query = query.filter(DetectionConfig.frequency == frequency)
     
+    total_count = query.count()
+
+    query = query.order_by(desc(DetectionConfig.created_at))
+  
     configs = query.offset(skip).limit(limit).all()
     
     # 数据转换，确保枚举值被正确处理
@@ -901,7 +903,10 @@ async def get_detection_configs(
         }
         result.append(config_dict)
     
-    return result
+    return {
+        "data": result,
+        "total": total_count
+    }
 
 # 获取单个检测配置
 @router.get("/detection/configs/{config_id}", response_model=DetectionConfigInfoResponse, tags=["检测配置"])
@@ -1757,8 +1762,7 @@ def get_detection_logs(
     status: Optional[str] = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    db: Session = Depends(get_db)
 ):
     """获取检测日志"""
     query = db.query(DetectionLog).order_by(DetectionLog.created_at.desc())
@@ -2249,7 +2253,7 @@ def clear_detection_logs(
 
 # 系统状态监控API
 @router.get("/system/status")
-def get_system_status(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def get_system_status(db: Session = Depends(get_db)):
     """获取系统状态信息（CPU、内存、磁盘、GPU等）"""
     try:
         import psutil
@@ -2462,7 +2466,7 @@ def control_service(
 
 # 首页仪表盘API
 @router.get("/dashboard/overview")
-def get_dashboard_overview(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def get_dashboard_overview(db: Session = Depends(get_db)):
     """获取首页仪表盘概览数据"""
     try:
         # 获取当前日期（用于今日数据统计）
@@ -2878,3 +2882,289 @@ async def get_edge_servers_by_status(
     except Exception as e:
         # logger.error(f"根据状态获取边缘服务器失败: {str(e)}")
         raise HTTPException(status_code=500, detail="根据状态获取边缘服务器失败") 
+    
+#数据大屏API
+@router.get("/dashboard/overview-data")
+def get_dashboard_data(db: Session = Depends(get_db)):
+    """获取数据大屏数据"""
+    try:
+        device_count = db.query(Device).count()
+        detection_event_count = db.query(DetectionEvent).count()
+        detection_config_count = db.query(DetectionConfig).count()
+        crowd_analysis_job_count = db.query(CrowdAnalysisJob).count()
+        edge_server_count = db.query(EdgeServer).count()
+        external_event_count = db.query(ExternalEvent).count()
+        return {
+            "data": {
+                "device_count": device_count,
+                "detection_event_count": detection_event_count,
+                "detection_config_count": detection_config_count,
+                "crowd_analysis_job_count": crowd_analysis_job_count, 
+                "edge_server_count": edge_server_count,
+                "external_event_count": external_event_count
+            }
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="获取数据大屏数据失败")
+    
+@router.get("/dashboard/crowd-analysis-data")
+def get_dashboard_crowd_analysis_data(db: Session = Depends(get_db)):
+    """获取数据大屏人群分析数据"""
+    try:
+        # 方法1：获取每个任务的最新分析结果
+        # 使用子查询获取每个job_id的最新timestamp
+        from sqlalchemy import func
+        
+        subquery = db.query(
+            CrowdAnalysisResult.job_id,
+            func.max(CrowdAnalysisResult.timestamp).label('latest_timestamp')
+        ).group_by(CrowdAnalysisResult.job_id).subquery()
+        
+        # 主查询：关联获取最新结果
+        latest_results = db.query(
+            CrowdAnalysisJob.job_name,
+            CrowdAnalysisResult.total_person_count,
+            CrowdAnalysisResult.timestamp
+        ).join(
+            CrowdAnalysisResult, 
+            CrowdAnalysisJob.job_id == CrowdAnalysisResult.job_id
+        ).join(
+            subquery,
+            (CrowdAnalysisResult.job_id == subquery.c.job_id) & 
+            (CrowdAnalysisResult.timestamp == subquery.c.latest_timestamp)
+        ).all()
+        
+        result = []
+        for job_name, people_count, timestamp in latest_results:
+            result.append({
+                "job_name": job_name,
+                "people_count": people_count or 0,
+                "last_update": timestamp.isoformat() if timestamp else None
+            })
+        return {
+            "data": result
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="获取数据大屏人群分析数据失败")
+    
+@router.get("/dashboard/alert-history-data")
+def get_dashboard_alert_history_data(db: Session = Depends(get_db)):
+    """获取数据大屏告警历史数据"""
+    try:
+        events = db.query(ExternalEvent).order_by(ExternalEvent.timestamp.desc()).limit(10).all()
+        return {
+            "data": events
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="获取数据大屏告警历史数据失败")
+    
+# @router.get("/dashboard/project-queue-data")
+# def get_dashboard_project_queue_data(db: Session = Depends(get_db)):
+#     """获取数据大屏项目排队时长数据"""
+#     try:
+#         return {
+#             "data": []
+#         }
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail="获取数据大屏项目排队时长数据失败")
+    
+@router.get("/dashboard/historical-stats-data")
+def get_dashboard_historical_stats_data(db: Session = Depends(get_db)):
+    """获取数据大屏历史数据事件数据"""
+    try:
+        from sqlalchemy import func
+        
+        # 获取最近5天的每天的数据条数
+        events = db.query(
+            func.date(ExternalEvent.timestamp).label('date'), 
+            func.count(ExternalEvent.event_id).label('count')
+        ).filter(
+            ExternalEvent.timestamp >= datetime.now() - timedelta(days=5)
+        ).group_by(
+            func.date(ExternalEvent.timestamp)
+        ).all()
+        # 升序
+        events = sorted(events, key=lambda x: x.date)
+        # 转换为字典格式
+        result = []
+        for date, count in events:
+            result.append({
+                "date": date.isoformat() if date else None,
+                "count": count
+            })
+        
+        return {
+            "data": result
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="获取数据大屏历史数据事件数据失败")
+    
+@router.get("/dashboard/detection-event-data")
+def get_dashboard_detection_event_data(db: Session = Depends(get_db)):
+    """获取数据大屏检测事件数据"""
+    try:
+        from sqlalchemy import func
+        
+        # 获取检测总数
+        detection_count = db.query(ExternalEvent).count()
+        
+        # 根据引擎名称统计检测数量
+        engine_count_query = db.query(
+            ExternalEvent.engine_name,
+            func.count(ExternalEvent.event_id).label('count')
+        ).filter(
+            ExternalEvent.engine_name.isnot(None)
+        ).group_by(
+            ExternalEvent.engine_name
+        ).all()
+        
+        # 转换为列表格式
+        engine_count = []
+        for engine_name, count in engine_count_query:
+            engine_count.append({
+                "engine_name": engine_name or "未知引擎",
+                "detection_count": count
+            })
+        
+        # engine_count只保留前5个
+        engine_count = engine_count[:5]
+        
+        engine_count.append({
+            "engine_name": "异常事件",
+            "detection_count": detection_count
+        })
+
+        return {
+            "data": engine_count
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="获取数据大屏检测事件数据失败")
+    
+@router.get("/dashboard/detection-type-data")
+def get_dashboard_detection_type_data(db: Session = Depends(get_db)):
+    """获取数据大屏检测类型数据"""
+    try:
+        from sqlalchemy import func, and_
+        
+        # 计算时间范围
+        now = datetime.now()
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        yesterday_start = today_start - timedelta(days=1)
+        day_before_yesterday_start = today_start - timedelta(days=2)
+        
+        # 优化的查询：分别统计总数、昨天、前天的数据
+        # 总数统计
+        total_count_query = db.query(
+            ExternalEvent.engine_name,
+            func.count(ExternalEvent.event_id).label('total_count')
+        ).filter(
+            ExternalEvent.engine_name.isnot(None)
+        ).group_by(ExternalEvent.engine_name)
+        
+        # 昨天数据统计
+        yesterday_count_query = db.query(
+            ExternalEvent.engine_name,
+            func.count(ExternalEvent.event_id).label('yesterday_count')
+        ).filter(
+            and_(
+                ExternalEvent.engine_name.isnot(None),
+                ExternalEvent.timestamp >= yesterday_start,
+                ExternalEvent.timestamp < today_start
+            )
+        ).group_by(ExternalEvent.engine_name)
+        
+        # 前天数据统计
+        day_before_yesterday_count_query = db.query(
+            ExternalEvent.engine_name,
+            func.count(ExternalEvent.event_id).label('day_before_yesterday_count')
+        ).filter(
+            and_(
+                ExternalEvent.engine_name.isnot(None),
+                ExternalEvent.timestamp >= day_before_yesterday_start,
+                ExternalEvent.timestamp < yesterday_start
+            )
+        ).group_by(ExternalEvent.engine_name)
+        
+        # 执行查询
+        total_counts = {row.engine_name: row.total_count for row in total_count_query.all()}
+        yesterday_counts = {row.engine_name: row.yesterday_count for row in yesterday_count_query.all()}
+        day_before_yesterday_counts = {row.engine_name: row.day_before_yesterday_count for row in day_before_yesterday_count_query.all()}
+        
+        # 合并数据并计算同比率
+        detection_type_count = []
+        for engine_name in total_counts.keys():
+            total = total_counts.get(engine_name, 0)
+            yesterday = yesterday_counts.get(engine_name, 0)
+            day_before_yesterday = day_before_yesterday_counts.get(engine_name, 0)
+            
+            # 计算同比率（昨天相比前天的变化率）
+            if day_before_yesterday > 0:
+                rate = round((yesterday - day_before_yesterday) / day_before_yesterday * 100, 2)
+            else:
+                rate = 0 if yesterday == 0 else 100  # 如果前天没有数据，昨天有数据则为100%增长
+            
+            detection_type_count.append({
+                "engine_name": engine_name,
+                "count": total,
+                "count_yesterday": yesterday,
+                "count_day_before_yesterday": day_before_yesterday,
+                "count_yesterday_rate": rate
+            })
+        
+        # 按总数排序，取前6个（为本地引擎留一个位置）
+        detection_type_count.sort(key=lambda x: x["count"], reverse=True)
+        detection_type_count = detection_type_count[:6]
+        
+        # 添加本地检测引擎数据（从DetectionEvent表查询）
+        try:
+            local_total = db.query(DetectionEvent).count()
+            local_yesterday = db.query(DetectionEvent).filter(
+                and_(
+                    DetectionEvent.timestamp >= yesterday_start,
+                    DetectionEvent.timestamp < today_start
+                )
+            ).count()
+            local_day_before_yesterday = db.query(DetectionEvent).filter(
+                and_(
+                    DetectionEvent.timestamp >= day_before_yesterday_start,
+                    DetectionEvent.timestamp < yesterday_start
+                )
+            ).count()
+            
+            # 计算本地引擎同比率
+            if local_day_before_yesterday > 0:
+                local_rate = round((local_yesterday - local_day_before_yesterday) / local_day_before_yesterday * 100, 2)
+            else:
+                local_rate = 0 if local_yesterday == 0 else 100
+            
+            detection_type_count.append({
+                "engine_name": "本地引擎",
+                "count": local_total,
+                "count_yesterday": local_yesterday,
+                "count_day_before_yesterday": local_day_before_yesterday,
+                "count_yesterday_rate": local_rate
+            })
+        except Exception as local_error:
+            # 如果本地引擎数据查询失败，添加默认数据
+            detection_type_count.append({
+                "engine_name": "本地引擎",
+                "count": 0,
+                "count_yesterday": 0,
+                "count_day_before_yesterday": 0,
+                "count_yesterday_rate": 0
+            })
+        
+        return {
+            "data": detection_type_count,
+            "meta": {
+                "query_time": now.isoformat(),
+                "time_ranges": {
+                    "today_start": today_start.isoformat(),
+                    "yesterday_start": yesterday_start.isoformat(),
+                    "day_before_yesterday_start": day_before_yesterday_start.isoformat()
+                }
+            }
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="获取数据大屏检测类型数据失败")
+

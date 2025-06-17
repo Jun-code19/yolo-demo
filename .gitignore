@@ -16,3 +16,4 @@ storage
 docker-image
 models/
 docs/
+uploads/

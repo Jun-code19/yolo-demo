@@ -316,8 +316,9 @@ class TCPListener(BaseListener):
             # 标准化数据格式
             event = self.normalize_data(data)
             
-            # 触发事件处理
-            await self.emit_event(event)
+            if event and event.event_type != ExternalEventType.heartbeat:
+                # 触发事件处理
+                await self.emit_event(event)
             
         except Exception as e:
             logger.error(f"处理消息失败: {e}")

@@ -401,10 +401,10 @@ const refreshStatus = async () => {
 
       // 不显示通知，避免频繁刷新时打扰用户
     } else {
-      console.error('获取系统状态失败:', response)
+      // console.error('获取系统状态失败:', response)
     }
   } catch (error) {
-    console.error('获取系统状态失败:', error)
+    // console.error('获取系统状态失败:', error)
     ElMessage.error('获取系统状态失败，请检查网络连接')
   }
 }
@@ -482,7 +482,7 @@ const startService = async (service) => {
       ElMessage.error(`${service.name}启动失败`)
     }
   } catch (error) {
-    console.error('启动服务失败:', error)
+    // console.error('启动服务失败:', error)
     service.status = 'stopped'
     addLog('ERROR', `服务 ${service.name} 启动失败: ${error.message}`)
     ElMessage.error(`${service.name}启动失败: ${error.response?.data?.detail || error.message}`)
@@ -522,7 +522,7 @@ const stopService = async (service) => {
       ElMessage.error(`${service.name}停止失败`)
     }
   } catch (error) {
-    console.error('停止服务失败:', error)
+    // console.error('停止服务失败:', error)
     service.status = 'running'
     addLog('ERROR', `服务 ${service.name} 停止失败: ${error.message}`)
     ElMessage.error(`${service.name}停止失败: ${error.response?.data?.detail || error.message}`)
@@ -1033,7 +1033,7 @@ const handleExportDetectionLogs = async () => {
 
     ElMessage.success('检测日志导出成功')
   } catch (error) {
-    console.error('导出检测日志失败:', error)
+    // console.error('导出检测日志失败:', error)
     ElMessage.error('检测日志导出失败')
   }
 }
@@ -1052,7 +1052,7 @@ const confirmClearDetectionLog = async () => {
     clearDetectionLogDialogVisible.value = false
     loadDetectionLogData()
   } catch (error) {
-    console.error('清除检测日志失败:', error)
+    // console.error('清除检测日志失败:', error)
     ElMessage.error('检测日志清除失败')
   } finally {
     clearingDetectionLog.value = false

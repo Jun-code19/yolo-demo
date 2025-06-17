@@ -619,7 +619,7 @@ import {
   Refresh, Download, Notification, CircleCheck, Clock, Warning,
   Search, RefreshLeft, Delete, ZoomIn, FullScreen
 } from '@element-plus/icons-vue'
-import { dataListenerApi } from '../api/dataListener'
+import { dataListenerApi } from '../../api/dataListener'
 
 // 响应式数据
 const loading = ref(false)
@@ -705,7 +705,7 @@ const loadData = async () => {
       pagination.total = response.data.data.pagination.total
     }
   } catch (error) {
-    console.error('加载事件数据失败:', error)
+    // console.error('加载事件数据失败:', error)
     ElMessage.error('加载事件数据失败')
   } finally {
     loading.value = false
@@ -724,7 +724,7 @@ const loadListenerConfigs = async () => {
       engine_name_mappings.value = deviceEngineNameMappingsResponse.data.data.engine_name_mappings || {}
     }
   } catch (error) {
-    console.error('加载监听器配置失败:', error)
+    // console.error('加载监听器配置失败:', error)
   }
 }
 
@@ -753,7 +753,7 @@ const loadRealtimeStats = async () => {
       alarms_today: Math.floor((todayResponse.data.data?.pagination?.total || 0) * 0.1)
     }
   } catch (error) {
-    console.error('加载统计数据失败:', error)
+    // console.error('加载统计数据失败:', error)
   }
 }
 
@@ -799,7 +799,7 @@ const showEventDetail = async (event) => {
       detailDialogVisible.value = true
     }
   } catch (error) {
-    console.error('获取事件详情失败:', error)
+    // console.error('获取事件详情失败:', error)
     ElMessage.error('获取事件详情失败')
   }
 }
@@ -845,7 +845,7 @@ const handleSingleDelete = async (event) => {
     await loadData() // 重新加载数据
   } catch (error) {
     if (error !== 'cancel') {
-      console.error('删除事件失败:', error)
+      // console.error('删除事件失败:', error)
       ElMessage.error('删除事件失败')
     }
   }
@@ -876,7 +876,7 @@ const handleBatchDelete = async () => {
     await loadData() // 重新加载数据
   } catch (error) {
     if (error !== 'cancel') {
-      console.error('批量删除事件失败:', error)
+      // console.error('批量删除事件失败:', error)
       ElMessage.error('批量删除事件失败')
     }
   }

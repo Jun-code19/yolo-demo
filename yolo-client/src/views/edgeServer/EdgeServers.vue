@@ -242,7 +242,7 @@ const loadServers = async () => {
     const response = await edgeServerAPI.getServerList()
     servers.value = response.items || []
   } catch (error) {
-    console.error('加载服务器列表失败:', error)
+    // console.error('加载服务器列表失败:', error)
     ElMessage.error('加载服务器列表失败')
   } finally {
     loading.value = false
@@ -259,7 +259,7 @@ const refreshAllServers = async () => {
       try {
         await edgeServerAPI.testAndUpdateServerStatus(server.id, server.ip_address, server.port)
       } catch (error) {
-        console.error(`更新服务器 ${server.name} 状态失败:`, error)
+        // console.error(`更新服务器 ${server.name} 状态失败:`, error)
       }
     })
     
@@ -371,7 +371,7 @@ const saveServer = async () => {
       // 表单验证失败
       return
     }
-    console.error('保存服务器失败:', error)
+    // console.error('保存服务器失败:', error)
   } finally {
     saving.value = false
   }
@@ -393,7 +393,7 @@ const deleteServer = async (server) => {
     await loadServers()
   } catch (error) {
     if (error !== 'cancel') {
-      console.error('删除服务器失败:', error)
+      // console.error('删除服务器失败:', error)
     }
   }
 }

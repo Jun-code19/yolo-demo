@@ -108,7 +108,7 @@ const routes = [
   {
     path: '/push/config',
     name: 'PushConfig',
-    component: () => import('../views/PushConfig.vue'),
+    component: () => import('../views/dataPush/PushConfig.vue'),
     meta: {
       requiresAuth: true,
       title: '数据推送配置'
@@ -117,7 +117,7 @@ const routes = [
   {
     path: '/data-listeners',
     name: 'DataListeners',
-    component: () => import('../views/DataListeners.vue'),
+    component: () => import('../views/dataPush/DataListeners.vue'),
     meta: {
       requiresAuth: true,
       title: '数据监听器配置'
@@ -126,7 +126,7 @@ const routes = [
   {
     path:'/data-events',
     name:'DataEvents',
-    component:()=>import('../views/DataEvents.vue'),
+    component:()=>import('../views/dataPush/DataEvents.vue'),
     meta:{
       requiresAuth:true,
       title:'数据事件'
@@ -140,19 +140,19 @@ const routes = [
         path: '',
         name: 'CrowdAnalysis',
         component: () => import('@/views/crowd-analysis/List.vue'),
-        meta: { title: '人群分析' }
+        meta: { title: '人群分析', requiresAuth: true }
       },
       {
         path: 'create',
         name: 'CreateCrowdAnalysis',
         component: () => import('@/views/crowd-analysis/Create.vue'),
-        meta: { title: '创建人群分析任务' }
+        meta: { title: '创建人群分析任务', requiresAuth: true }
       },
       {
         path: 'detail/:id',
         name: 'CrowdAnalysisDetail',
         component: () => import('@/views/crowd-analysis/Detail.vue'),
-        meta: { title: '任务详情' }
+        meta: { title: '任务详情', requiresAuth: true }
       }
     ]
   },
@@ -173,6 +173,16 @@ const routes = [
       requiresAuth: true,
       title: '边缘服务器详情'
     }
+  },
+  {
+    path: '/heatmap-management',
+    name: 'HeatMapManagement',
+    component: () => import('../views/HeatMapManagement.vue'),
+    meta: {
+      requiresAuth: false,
+      title: '人数热力图管理',
+      layout: 'fullscreen'
+    }
   }
 ]
 
@@ -190,11 +200,11 @@ router.beforeEach((to, from, next) => {
   
   if (to.meta.requiresAuth && !isAuthenticated) {
     // 需要认证但未登录，重定向到登录页
-    console.log('需要认证但未登录，重定向到登录页')
+    // console.log('需要认证但未登录，重定向到登录页')
     next({ path: '/login', replace: true })
   } else if (to.path === '/login' && isAuthenticated) {
     // 已登录但访问登录页，重定向到首页
-    console.log('已登录但访问登录页，重定向到首页')
+    // console.log('已登录但访问登录页，重定向到首页')
     next({ path: '/', replace: true })
   } else {
     // 正常导航

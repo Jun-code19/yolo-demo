@@ -261,8 +261,8 @@
 
 <script>
 import { ref, reactive, onMounted, computed } from 'vue';
-import { dataPushApi } from '../api/data_push';
-import { detectionConfigApi } from '../api/detection';
+import { dataPushApi } from '../../api/data_push';
+import { detectionConfigApi } from '../../api/detection';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { Plus, Edit, Delete, Refresh, Connection } from '@element-plus/icons-vue';
 
@@ -353,7 +353,7 @@ export default {
       try {
         if (detectionConfigs.value.length === 0) {
           const configResponse = await detectionConfigApi.getConfigs();
-          detectionConfigs.value = configResponse.data || [];
+          detectionConfigs.value = configResponse.data.data || [];
         }
         
         const response = await dataPushApi.getPushConfigs(filterConfigId.value || null);
@@ -363,7 +363,7 @@ export default {
           await loadPushStats();
         }
       } catch (error) {
-        console.error('加载推送配置失败:', error);
+        // console.error('加载推送配置失败:', error);
         ElMessage.error('加载推送配置失败');
       } finally {
         loading.value = false;
@@ -375,7 +375,7 @@ export default {
         const response = await dataPushApi.getPushStats();
         pushStats.value = response.data || {};
       } catch (error) {
-        console.error('加载推送统计信息失败:', error);
+        // console.error('加载推送统计信息失败:', error);
       }
     };
     
@@ -461,7 +461,7 @@ export default {
               dialogVisible.value = false;
               await loadPushConfigs();
             } catch (error) {
-              console.error('保存推送配置失败:', error);
+              // console.error('保存推送配置失败:', error);
               ElMessage.error(`保存推送配置失败: ${error.response?.data?.detail || error.message}`);
             } finally {
               saving.value = false;
@@ -476,7 +476,7 @@ export default {
         ElMessage.success(`已${row.enabled ? '启用' : '禁用'}推送配置`);
         await loadPushConfigs();
       } catch (error) {
-        console.error('更新推送配置状态失败:', error);
+        // console.error('更新推送配置状态失败:', error);
         ElMessage.error('更新推送配置状态失败');
         row.enabled = !row.enabled;
       }
@@ -493,7 +493,7 @@ export default {
         }
         await loadPushStats();
       } catch (error) {
-        console.error('测试推送配置失败:', error);
+        // console.error('测试推送配置失败:', error);
         ElMessage.error(`测试推送配置失败: ${error.response?.data?.detail || error.message}`);
       } finally {
         loading.value = false;
@@ -516,7 +516,7 @@ export default {
             ElMessage.success('推送配置已删除');
             await loadPushConfigs();
           } catch (error) {
-            console.error('删除推送配置失败:', error);
+            // console.error('删除推送配置失败:', error);
             ElMessage.error('删除推送配置失败');
           }
         })

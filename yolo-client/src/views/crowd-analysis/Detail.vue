@@ -78,7 +78,7 @@
       </div>
 
       <!-- 摄像头分析结果表格 -->
-      <h3 class="sub-title">摄像头分析明细</h3>
+      <!-- <h3 class="sub-title">摄像头分析明细</h3>
       <el-table :data="cameraCounts" border style="width: 100%">
         <el-table-column prop="device_name" label="摄像头" width="180" />
         <el-table-column prop="location" label="位置" width="180" />
@@ -91,7 +91,7 @@
             <span v-else>无预览图</span>
           </template>
         </el-table-column>
-      </el-table>
+      </el-table> -->
     </el-card>
 
     <el-card class="devices-card" v-if="job.device_ids && job.device_ids.length > 0">
@@ -101,10 +101,25 @@
         </div>
       </template>
       <el-table :data="devicesList" border style="width: 100%">
+        <el-table-column prop="device_id" label="设备ID" width="180" />
         <el-table-column prop="device_name" label="设备名称" width="180" />
         <el-table-column prop="ip_address" label="IP地址" width="180" />
-        <el-table-column prop="location" label="位置信息" min-width="200" />
-        <el-table-column prop="status" label="状态" width="120">
+        <el-table-column prop="channel" label="通道号" width="180" />
+        <el-table-column prop="location" label="位置信息" width="180" />
+        <el-table-column v-if="job.last_result" label="人数" width="180">
+          <template #default="scope">
+            {{ job.last_result.camera_counts.find(item => item.device_id === scope.row.device_id)?.person_count || 0 }}
+          </template>
+        </el-table-column>
+        <el-table-column v-if="job.last_result" label="预览图" width="150">
+          <template #default="scope">
+            <el-image v-if="cameraCounts.find(item => item.device_id === scope.row.device_id)?.preview_image" :src="getImageUrl(cameraCounts.find(item => item.device_id === scope.row.device_id)?.preview_image)"
+              style="max-height: 160px; max-width: 280px; cursor: pointer;" fit="contain" :initial-index="0"
+              :z-index="3000" @click="showFullImage(cameraCounts.find(item => item.device_id === scope.row.device_id))" />
+            <span v-else>无预览图</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="status" label="状态" min-width="180">
           <template #default="scope">
             <el-tag :type="scope.row.status === 'online' ? 'success' : 'danger'">
               {{ scope.row.status === 'online' ? '在线' : '离线' }}
@@ -487,7 +502,7 @@ const fetchJobDetail = async () => {
     }
 
   } catch (error) {
-    console.error(error)
+    // console.error(error)
     ElMessage.error('获取任务详情失败')
   } finally {
     loading.value = false
@@ -504,7 +519,7 @@ const fetchDevicesInfo = async () => {
       devicesList.value = res.data;
     }
   } catch (error) {
-    console.error('获取设备信息失败', error);
+    // console.error('获取设备信息失败', error);
     // 出错时使用备用模拟数据
     const devicePromises = job.value.device_ids.map(id =>
       new Promise(resolve => {
@@ -532,7 +547,7 @@ const fetchModelInfo = async () => {
     const models = res.data || []
     modelInfo.value = models.find(m => m.model_id === job.value.models_id) || null
   } catch (error) {
-    console.error('获取模型信息失败:', error)
+    // console.error('获取模型信息失败:', error)
   }
 }
 
@@ -610,7 +625,7 @@ const runJob = async () => {
     fetchJobDetail()
   } catch (error) {
     ElMessage.error('执行任务失败')
-    console.error(error)
+    // console.error(error)
   }
 }
 
@@ -629,7 +644,7 @@ const toggleJobStatus = async () => {
     fetchJobDetail()
   } catch (error) {
     ElMessage.error(`${job.value.is_active ? '暂停' : '恢复'}任务失败`)
-    console.error(error)
+    // console.error(error)
   }
 }
 
@@ -658,7 +673,7 @@ const handleExport = async (days) => {
     }
   } catch (error) {
     ElMessage.error('导出失败')
-    console.error(error)
+    // console.error(error)
   }
 }
 
@@ -731,7 +746,7 @@ const initChart = () => {
           title: '数据筛选',
           icon: 'path://M192 809.472a21.333333 21.333333 0 0 1-19.029333-30.976l183.552-363.52a21.333333 21.333333 0 1 1 38.101333 19.285333l-183.594667 363.52a21.333333 21.333333 0 0 1-19.029333 11.690667 M551.68 794.453333a21.248 21.248 0 0 1-18.986667-11.690666l-176.128-348.501334a21.333333 21.333333 0 1 1 38.058667-19.285333l176.128 348.501333a21.333333 21.333333 0 0 1-19.029333 31.018667 M551.68 794.453333a21.290667 21.290667 0 0 1-18.176-32.426666l269.781333-442.154667a21.333333 21.333333 0 1 1 36.437334 22.186667L569.941333 784.213333a21.290667 21.290667 0 0 1-18.218666 10.24 M641.706667 394.752a21.290667 21.290667 0 0 1-6.144-41.813333l179.626666-53.376a21.290667 21.290667 0 1 1 12.16 40.874666L647.765333 393.813333a21.76 21.76 0 0 1-6.101333 0.853334 M874.666667 520.917333a21.290667 21.290667 0 0 1-20.437334-15.232L800.853333 326.101333a21.333333 21.333333 0 0 1 40.96-12.202666l53.333334 179.626666a21.333333 21.333333 0 0 1-20.437334 27.392',
           onclick: function () {
-            console.log('数据筛选,功能开发中...')
+            // console.log('数据筛选,功能开发中...')
           }
         }
       }
@@ -872,7 +887,7 @@ const fetchHistoryData = async () => {
       });
     }
   } catch (error) {
-    console.error('获取历史数据失败', error);
+    // console.error('获取历史数据失败', error);
     ElMessage.error('获取历史数据失败');
   } finally {
     historyLoading.value = false;
@@ -917,7 +932,7 @@ const refreshHistoryData = async () => {
 
     await fetchHistoryData();
   } catch (error) {
-    console.error('刷新历史数据失败', error);
+    // console.error('刷新历史数据失败', error);
     ElMessage.error('刷新历史数据失败');
   }
 }
@@ -939,7 +954,7 @@ const handleModelChange = async (modelId) => {
     }));
 
   } catch (error) {
-    console.error('获取模型类别失败:', error)
+    // console.error('获取模型类别失败:', error)
     ElMessage.error('获取模型支持的类别失败')
     modelClasses.value = []
   }
@@ -1035,7 +1050,7 @@ const fetchAvailableDevices = async () => {
     availableDevices.value = res.data
   } catch (error) {
     ElMessage.error('获取监控设备列表失败')
-    console.error(error)
+    // console.error(error)
   }
 }
 
@@ -1093,7 +1108,7 @@ const submitEditForm = async () => {
       // 关闭对话框
       editDialogVisible.value = false
     } catch (error) {
-      console.error('更新任务失败:', error)
+      // console.error('更新任务失败:', error)
 
       let errorMessage = '更新失败'
       if (error.response) {

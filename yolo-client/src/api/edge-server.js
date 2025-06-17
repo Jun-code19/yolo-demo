@@ -17,7 +17,7 @@ class EdgeServerAPI {
     this.client.interceptors.response.use(
       response => response,
       error => {
-        console.error('边缘服务器请求错误:', error);
+        // console.error('边缘服务器请求错误:', error);
         if (error.code === 'ECONNABORTED') {
           ElMessage.error('连接超时，请检查服务器地址和网络连接');
         } else if (error.response) {
@@ -160,7 +160,7 @@ backendAPI.interceptors.request.use(
 backendAPI.interceptors.response.use(
   response => response,
   error => {
-    console.error('后端API请求错误:', error);
+    // console.error('后端API请求错误:', error);
     if (error.response?.status === 401) {
       ElMessage.error('认证失败，请重新登录');
       // 可以在这里触发登出逻辑

@@ -291,7 +291,7 @@ const loadModels = async () => {
     const { data } = await deviceApi.getModels()
     models.value = data
   } catch (error) {
-    console.error('加载模型列表失败:', error)
+    // console.error('加载模型列表失败:', error)
     ElMessage.error('加载模型列表失败')
   } finally {
     loading.value = false
@@ -383,7 +383,7 @@ const uploadModel = async () => {
       uploadDialogVisible.value = false
       loadModels() // 重新加载模型列表
     } catch (error) {
-      console.error('上传模型失败:', error)
+      // console.error('上传模型失败:', error)
       ElMessage.error(`上传模型失败: ${error.response?.data?.detail || error.message}`)
     } finally {
       uploading.value = false
@@ -421,7 +421,7 @@ const toggleModelActive = async (model) => {
     model.is_active = newStatus
     ElMessage.success(`模型已${newStatus ? '激活' : '停用'}`)
   } catch (error) {
-    console.error('更新模型状态失败:', error)
+    // console.error('更新模型状态失败:', error)
     ElMessage.error(`更新模型状态失败: ${error.response?.data?.detail || error.message}`)
   }
 }
@@ -442,7 +442,7 @@ const confirmDelete = (model) => {
       ElMessage.success('模型删除成功')
       loadModels() // 重新加载模型列表
     } catch (error) {
-      console.error('删除模型失败:', error)
+      // console.error('删除模型失败:', error)
       ElMessage.error(`删除模型失败: ${error.response?.data?.detail || error.message}`)
     }
   }).catch(() => {

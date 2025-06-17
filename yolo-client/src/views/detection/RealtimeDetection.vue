@@ -268,7 +268,7 @@ const loadConfigurations = async () => {
     // 替换为实际的API端点
     const response = await detectionConfigApi.getConfigs(null, 'realtime');
     // 转换配置数据
-    configs.value = response.data.map(config => ({
+    configs.value = response.data.data.map(config => ({
       config_id: config.config_id,
       device_id: config.device_id,
       device_name: config.device_name || config.device_id,
@@ -278,7 +278,7 @@ const loadConfigurations = async () => {
     }))
     
   } catch (error) {
-    console.error('加载检测配置失败:', error)
+    // console.error('加载检测配置失败:', error)
     ElMessage.error('加载检测配置失败')
   }
 }
@@ -346,7 +346,7 @@ const connectWebSocket = () => {
   
   ws.onerror = (error) => {
     clearTimeout(connectionTimeout)
-    console.error('WebSocket错误:', error)
+    // console.error('WebSocket错误:', error)
     handleDisconnection('WebSocket连接出错')
   }
   
@@ -416,7 +416,7 @@ const connectWebSocket = () => {
         }
       }
     } catch (error) {
-      console.error('处理WebSocket消息失败:', error);
+      // console.error('处理WebSocket消息失败:', error);
     }
   }
 }
@@ -443,7 +443,7 @@ const startDetectionTask = async () => {
       throw new Error(response.message || '启动任务失败')
     }
   } catch (error) {
-    console.error('启动检测任务失败:', error)
+    // console.error('启动检测任务失败:', error)
     throw error
   }
 }
@@ -701,9 +701,9 @@ onUnmounted(() => {
 const stopDetectionTask = async () => {
   try {
     await stopDetection(selectedConfig.value)
-    console.log('检测任务已停止')
+    // console.log('检测任务已停止')
   } catch (error) {
-    console.error('停止检测任务失败:', error)
+    // console.error('停止检测任务失败:', error)
     throw error
   }
 }

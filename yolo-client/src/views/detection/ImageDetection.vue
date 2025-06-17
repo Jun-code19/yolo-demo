@@ -309,7 +309,7 @@ const initWebSocket = () => {
         ws = new WebSocket(`ws://${window.location.host}/ws/rtsp/preview`)
         
         ws.onopen = () => {
-          console.log('WebSocket connection established, sending handshake...')
+          // console.log('WebSocket connection established, sending handshake...')
           // 发送连接请求
           ws.send(JSON.stringify({
             type: 'connect',
@@ -322,21 +322,21 @@ const initWebSocket = () => {
         // 设置连接超时
         const connectionTimeout = setTimeout(() => {
           if (!isWsConnected) {
-            console.error('WebSocket connection timeout')
+            // console.error('WebSocket connection timeout')
             ws.close()
             reject(new Error('WebSocket连接超时'))
           }
         }, 5000)
 
         ws.onerror = (error) => {
-          console.error('WebSocket error:', error)
+          // console.error('WebSocket error:', error)
           isWsConnected = false
           clearTimeout(connectionTimeout)
           reject(error)
         }
 
         ws.onclose = () => {
-          console.log('WebSocket closed')
+          // console.log('WebSocket closed')
           isWsConnected = false
           clearTimeout(connectionTimeout)
           if (isDetecting.value && !isReconnecting) {
@@ -344,7 +344,7 @@ const initWebSocket = () => {
           }
         }
       } catch (error) {
-        console.error('Failed to create WebSocket:', error)
+        // console.error('Failed to create WebSocket:', error)
         reject(error)
       }
     }
@@ -361,7 +361,7 @@ const handleReconnect = async () => {
   reconnectAttempts++
 
   try {
-    console.log(`尝试重新连接 (${reconnectAttempts}/${maxReconnectAttempts})...`)
+    // console.log(`尝试重新连接 (${reconnectAttempts}/${maxReconnectAttempts})...`)
     addDetectionRecord('info', `尝试重新连接 (${reconnectAttempts}/${maxReconnectAttempts})...`)
     
     await initWebSocket()
@@ -375,7 +375,7 @@ const handleReconnect = async () => {
       startBatchDetection()
     }
   } catch (error) {
-    console.error('Reconnection failed:', error)
+    // console.error('Reconnection failed:', error)
     isReconnecting = false
     
     if (reconnectAttempts < maxReconnectAttempts) {
@@ -424,7 +424,7 @@ const startBatchDetection = async () => {
     try {
       await sendModelConfig()
     } catch (error) {
-      console.error('Model configuration failed:', error)
+      // console.error('Model configuration failed:', error)
       throw new Error(`模型配置失败: ${error.message}`)
     }
     
@@ -513,7 +513,7 @@ const startBatchDetection = async () => {
                 resolve()
               }
             } catch (error) {
-              console.error('处理响应失败:', error)
+              // console.error('处理响应失败:', error)
             }
           }
           
@@ -521,7 +521,7 @@ const startBatchDetection = async () => {
         })
         
       } catch (error) {
-        console.error('处理图片失败:', error)
+        // console.error('处理图片失败:', error)
         image.status = 'error'
         addDetectionRecord('error', `处理图片 ${image.name} 失败: ${error.message}`)
       }
@@ -531,7 +531,7 @@ const startBatchDetection = async () => {
     addDetectionRecord('success', '批量检测完成')
     
   } catch (error) {
-    console.error('批量检测失败:', error)
+    // console.error('批量检测失败:', error)
     ElMessage.error('批量检测失败: ' + error.message)
     addDetectionRecord('error', '批量检测失败: ' + error.message)
   } finally {
@@ -568,7 +568,7 @@ const stopDetection = () => {
     try {
       ws.send(JSON.stringify({ type: 'stop' }))
     } catch (error) {
-      console.error('发送停止消息失败:', error)
+      // console.error('发送停止消息失败:', error)
     }
   }
 }
@@ -578,7 +578,7 @@ const handleDetectionResult = (result) => {
   try {
     // 检查结果有效性
     if (!result || !result.image_id || !Array.isArray(result.objects)) {
-      console.warn('收到无效的检测结果:', result)
+      // console.warn('收到无效的检测结果:', result)
       return
     }
     
@@ -587,7 +587,7 @@ const handleDetectionResult = (result) => {
     const image = imageList.value[imageIndex]
     
     if (!image) {
-      console.warn(`未找到ID为${imageIndex}的图片`, imageList.value)
+      // console.warn(`未找到ID为${imageIndex}的图片`, imageList.value)
       return
     }
     
@@ -622,7 +622,7 @@ const handleDetectionResult = (result) => {
       drawDetectionBoxes(result.objects)
     }
   } catch (error) {
-    console.error('处理检测结果失败:', error)
+    // console.error('处理检测结果失败:', error)
     ElMessage.error('处理检测结果失败')
   }
 }
@@ -642,7 +642,7 @@ const drawDetectionBoxes = (objects) => {
     // 获取绘图上下文
     const ctx = canvas.getContext('2d')
     if (!ctx) {
-      console.error('无法获取canvas上下文')
+      // console.error('无法获取canvas上下文')
       return
     }
     
@@ -679,7 +679,7 @@ const drawDetectionBoxes = (objects) => {
       ctx.fillText(label, x + 5, y - 5)
     })
   }).catch(error => {
-    console.error('绘制检测框失败:', error)
+    // console.error('绘制检测框失败:', error)
   })
 }
 
@@ -709,7 +709,7 @@ const getColorForClass = (() => {
 
 // 处理图片选择
 const handleImageChange = async (file) => {
-  console.log('Selected image file:', file)
+  // console.log('Selected image file:', file)
   
   // 检查文件类型和大小
   const allowedTypes = ['image/jpeg', 'image/png', 'image/bmp', 'image/webp']
@@ -741,13 +741,13 @@ const handleImageChange = async (file) => {
       results: []
     }
 
-    console.log('Image info created:', imageInfo)
+    // console.log('Image info created:', imageInfo)
     imageList.value.push(imageInfo)
     if (currentImageIndex.value === -1) {
       currentImage.value = imageInfo
     }
   } catch (error) {
-    console.error('Error processing image file:', error)
+    // console.error('Error processing image file:', error)
     ElMessage.error('处理图片文件时出错：' + error.message)
   }
 }
@@ -822,7 +822,7 @@ const downloadResult = () => {
     ElMessage.success('检测结果导出成功')
     addDetectionRecord('success', `检测结果已导出为JSON文件`)
   } catch (error) {
-    console.error('导出检测结果失败:', error)
+    // console.error('导出检测结果失败:', error)
     ElMessage.error('导出检测结果失败: ' + error.message)
     addDetectionRecord('error', '导出检测结果失败: ' + error.message)
   }
@@ -902,12 +902,12 @@ const downloadImage = () => {
     }
     
     drawExportImage().catch(error => {
-      console.error('导出图片失败:', error)
+      // console.error('导出图片失败:', error)
       ElMessage.error('导出图片失败: ' + error.message)
       addDetectionRecord('error', '导出图片失败: ' + error.message)
     })
   } catch (error) {
-    console.error('导出图片失败:', error)
+    // console.error('导出图片失败:', error)
     ElMessage.error('导出图片失败: ' + error.message)
     addDetectionRecord('error', '导出图片失败: ' + error.message)
   }
@@ -987,30 +987,30 @@ const addDetectionRecord = (type, message) => {
 const handleWsMessage = (event) => {
   try {
     const data = JSON.parse(event.data)
-    console.log('Received WebSocket message:', data.type)
+    // console.log('Received WebSocket message:', data.type)
     
     switch (data.type) {
       case 'detection_result':
         handleDetectionResult(data)
         break
       case 'connect_confirm':
-        console.log('Connection confirmed by server')
+        // console.log('Connection confirmed by server')
         isWsConnected = true
         reconnectAttempts = 0
         break
       case 'config_confirm':
-        console.log('Model configuration confirmed by server')
+        // console.log('Model configuration confirmed by server')
         break
       case 'error':
-        console.error('Server error:', data.message)
+        // console.error('Server error:', data.message)
         addDetectionRecord('error', `服务器错误: ${data.message}`)
         ElMessage.error(`服务器错误: ${data.message}`)
         break
       default:
-        console.log('Unhandled message type:', data.type)
+        // console.log('Unhandled message type:', data.type)
     }
   } catch (error) {
-    console.error('Error handling WebSocket message:', error)
+    // console.error('Error handling WebSocket message:', error)
   }
 }
 
@@ -1049,7 +1049,7 @@ const sendModelConfig = () => {
             }
           }
         } catch (error) {
-          console.error('处理模型配置响应失败:', error)
+          // console.error('处理模型配置响应失败:', error)
         }
       }
 
@@ -1057,7 +1057,7 @@ const sendModelConfig = () => {
       ws.addEventListener('message', configConfirmHandler)
 
       // 发送模型配置
-      console.log('Sending model config:', modelConfig)
+      // console.log('Sending model config:', modelConfig)
       ws.send(JSON.stringify(modelConfig))
 
       // 设置超时，防止无限等待
@@ -1085,7 +1085,7 @@ watch(selectedModel, async (modelId) => {
     modelDetails.value = data
     addDetectionRecord('info', `已选择模型: ${data.models_name}`)
   } catch (error) {
-    console.error('获取模型详情失败:', error)
+    // console.error('获取模型详情失败:', error)
     addDetectionRecord('error', '获取模型详情失败: ' + (error.response?.data?.detail || error.message))
   }
 })
@@ -1100,7 +1100,7 @@ onMounted(async () => {
     await initWebSocket()
     addDetectionRecord('success', 'WebSocket连接成功')
   } catch (error) {
-    console.error('WebSocket连接失败:', error)
+    // console.error('WebSocket连接失败:', error)
     addDetectionRecord('error', 'WebSocket连接失败: ' + error.message)
   }
 })
@@ -1117,7 +1117,7 @@ onUnmounted(() => {
       ws.close()
       ws = null
     } catch (error) {
-      console.error('关闭WebSocket连接失败:', error)
+      // console.error('关闭WebSocket连接失败:', error)
     }
   }
   

@@ -60,7 +60,7 @@ export default {
     params.append('username', username);
     params.append('password', password);
     
-    console.log("发送登录请求:", params.toString());
+    // console.log("发送登录请求:", params.toString());
     
     // 直接使用axios.post，完整控制Headers
     return axios.post('/api/v1/token', params, {

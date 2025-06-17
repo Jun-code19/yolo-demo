@@ -79,7 +79,7 @@ export const detectionConfigApi = {
 // 检测事件相关 API
 export const detectionEventApi = {
   // 获取检测事件列表
-  getEvents(params = { skip: 0, limit: 10 }) {
+  getEvents(params = { skip: 0, limit: 100 }) {
     return apiClient.get('/detection/events', { params });
   },
   
@@ -130,7 +130,7 @@ export const detectionEventApi = {
          
         //  return img.src;  // 返回已验证的URL
     } catch (error) {
-        console.error('获取缩略图失败:', error);
+        // console.error('获取缩略图失败:', error);
         throw error; // 抛出错误以便后续处理
     }
   },

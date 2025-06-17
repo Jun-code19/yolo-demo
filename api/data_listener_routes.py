@@ -148,8 +148,7 @@ async def get_listener_configs(
     enabled: Optional[bool] = Query(None, description="启用状态过滤"),
     page: int = Query(1, ge=1, description="页码"),
     size: int = Query(20, ge=1, le=100, description="每页大小"),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    db: Session = Depends(get_db)
 ):
     """获取数据监听器配置列表"""
     try:
@@ -205,8 +204,7 @@ async def get_listener_configs(
 @router.get("/configs/{config_id}")
 async def get_listener_config(
     config_id: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    db: Session = Depends(get_db)
 ):
     """获取单个监听器配置详情"""
     try:
@@ -251,8 +249,7 @@ async def get_listener_config(
 #获取所有配置中的device_name_mappings以及engine_name_mappings，去重，返回一个列表
 @router.get("/device_engine_name_mappings")
 async def get_device_engine_name_mappings(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    db: Session = Depends(get_db)
     ):
     """获取所有配置中的device_name_mappings以及engine_name_mappings，去重，返回一个字典，key为device_name_mappings或者engine_name_mappings，value为对应的值"""
     try:
@@ -485,9 +482,7 @@ async def restart_listener(
 # 状态和监控接口
 
 @router.get("/status")
-async def get_all_listener_status(
-    current_user: User = Depends(get_current_user)
-):
+async def get_all_listener_status():
     """获取所有监听器状态"""
     try:
         status = data_listener_manager.get_all_status()
@@ -500,8 +495,7 @@ async def get_all_listener_status(
 
 @router.get("/configs/{config_id}/status")
 async def get_listener_status(
-    config_id: str,
-    current_user: User = Depends(get_current_user)
+    config_id: str
 ):
     """获取单个监听器状态"""
     try:
@@ -527,8 +521,7 @@ async def get_external_events(
     end_time: Optional[datetime] = Query(None, description="结束时间"),
     page: int = Query(1, ge=1, description="页码"),
     size: int = Query(20, ge=1, le=100, description="每页大小"),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    db: Session = Depends(get_db)
 ):
     """获取外部事件列表"""
     try:
@@ -602,8 +595,7 @@ async def get_external_events(
 @router.get("/events/{event_id}")
 async def get_external_event(
     event_id: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    db: Session = Depends(get_db)
 ):
     """获取单个外部事件详情"""
     try:
@@ -781,8 +773,7 @@ async def batch_delete_external_events(
 
 @router.get("/stats/summary")
 async def get_listener_stats_summary(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    db: Session = Depends(get_db)
 ):
     """获取监听器统计摘要"""
     try:
@@ -912,86 +903,3 @@ async def batch_stop_listeners(
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"批量停止失败: {str(e)}")
-
-# 配置模板接口
-
-# @router.get("/templates")
-# async def get_listener_templates():
-#     """获取监听器配置模板"""
-#     templates = {
-#         "tcp": {
-#             "name": "TCP监听器模板",
-#             "description": "TCP Socket数据监听",
-#             "connection_config": {
-#                 "mode": "server",  # server or client
-#                 "host": "0.0.0.0",
-#                 "port": 8080,
-#                 "remote_host": "localhost",  # 客户端模式使用
-#                 "remote_port": 8080,  # 客户端模式使用
-#                 "buffer_size": 4096,
-#                 "encoding": "utf-8",
-#                 "data_format": "json",  # json, line, binary
-#                 "delimiter": "\n"
-#             },
-#             "data_mapping": {
-#                 "event_type_field": "type",
-#                 "event_type_mapping": {
-#                     "alarm": "alarm",
-#                     "detection": "detection",
-#                     "status": "status"
-#                 },
-#                 "device_id_field": "device_id",
-#                 "confidence_field": "confidence",
-#                 "location_field": "location"
-#             },
-#             "filter_rules": {
-#                 "event_types": ["detection", "alarm"],
-#                 "min_confidence": 0.5
-#             }
-#         },
-#         "mqtt": {
-#             "name": "MQTT监听器模板",
-#             "description": "MQTT消息订阅监听",
-#             "connection_config": {
-#                 "host": "localhost",
-#                 "port": 1883,
-#                 "username": "",
-#                 "password": "",
-#                 "client_id": "",
-#                 "topics": ["#"],
-#                 "qos": 0,
-#                 "keepalive": 60,
-#                 "clean_session": True,
-#                 "use_tls": False
-#             },
-#             "data_mapping": {
-#                 "event_type_field": "type",
-#                 "device_id_field": "device_id",
-#                 "confidence_field": "confidence"
-#             }
-#         },
-#         "http": {
-#             "name": "HTTP监听器模板",
-#             "description": "HTTP Webhook或轮询监听",
-#             "connection_config": {
-#                 "mode": "webhook",  # webhook or polling
-#                 "host": "0.0.0.0",
-#                 "port": 8080,
-#                 "path": "/webhook",
-#                 "methods": ["POST"],
-#                 "auth_token": "",
-#                 "poll_url": "",  # 轮询模式使用
-#                 "poll_interval": 30,
-#                 "poll_method": "GET"
-#             },
-#             "data_mapping": {
-#                 "event_type_field": "type",
-#                 "device_id_field": "device_id"
-#             }
-#         }
-#     }
-    
-#     return {
-#         "status": "success",
-#         "data": {"templates": templates}
-#     } 

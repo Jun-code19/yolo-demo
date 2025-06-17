@@ -656,6 +656,13 @@ class CrowdAnalyzer:
             #     if "preview_image" in camera_copy:
             #         del camera_copy["preview_image"]
             #     processed_camera_counts.append(camera_copy)
+
+            # 更新分析任务最新一次的记录
+            result1 = db.query(CrowdAnalysisJob).filter(CrowdAnalysisJob.job_id == job_id).first()
+            if result1:
+                result1.last_result = { "total_person_count": total_person_count }
+                result1.last_run = datetime.now()
+                db.commit()
             
             # 创建新的分析结果记录
             result = CrowdAnalysisResult(

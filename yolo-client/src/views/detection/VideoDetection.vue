@@ -267,7 +267,7 @@ watch(selectedModel, async (modelId) => {
     modelDetails.value = data
     addDetectionRecord('info', `已选择模型: ${data.models_name}`)
   } catch (error) {
-    console.error('获取模型详情失败:', error)
+    // console.error('获取模型详情失败:', error)
     addDetectionRecord('error', '获取模型详情失败: ' + (error.response?.data?.detail || error.message))
   }
 })
@@ -357,25 +357,25 @@ watch(videoUrl, async (newUrl) => {
       // 确保视频元素存在
       const videoElement = videoRef.value
       if (!videoElement) {
-        console.error('Video element not found')
+        // console.error('Video element not found')
         throw new Error('无法找到视频元素')
       }
       
       // 等待视频元数据加载完成
       await new Promise((resolve, reject) => {
         const handleLoad = () => {
-          console.log('Video metadata loaded')
+          // console.log('Video metadata loaded')
           // 获取视频尺寸
           videoWidth.value = videoElement.videoWidth
           videoHeight.value = videoElement.videoHeight
-          console.log('Video dimensions:', videoWidth.value, 'x', videoHeight.value)
+          // console.log('Video dimensions:', videoWidth.value, 'x', videoHeight.value)
           videoElement.removeEventListener('loadedmetadata', handleLoad)
           videoElement.removeEventListener('error', handleError)
           resolve()
         }
         
         const handleError = (error) => {
-          console.error('Video loading error:', error)
+          // console.error('Video loading error:', error)
           videoElement.removeEventListener('loadedmetadata', handleLoad)
           videoElement.removeEventListener('error', handleError)
           reject(new Error('获取视频信息失败：' + (videoElement.error?.message || '未知错误')))
@@ -385,7 +385,7 @@ watch(videoUrl, async (newUrl) => {
           // 如果视频元数据已经加载完成，直接获取尺寸
           videoWidth.value = videoElement.videoWidth
           videoHeight.value = videoElement.videoHeight
-          console.log('Video dimensions:', videoWidth.value, 'x', videoHeight.value)
+          // console.log('Video dimensions:', videoWidth.value, 'x', videoHeight.value)
           resolve()
         } else {
           videoElement.addEventListener('loadedmetadata', handleLoad)
@@ -403,7 +403,7 @@ watch(videoUrl, async (newUrl) => {
       handleVideoResize()
       
     } catch (error) {
-      console.error('获取视频时长失败:', error)
+      // console.error('获取视频时长失败:', error)
       duration.value = '--:--'
       addDetectionRecord('error', '获取视频信息失败：' + error.message)
     }
@@ -452,7 +452,7 @@ const initWebSocket = () => {
         ws = new WebSocket(`ws://${window.location.host}/ws/rtsp/preview`)
         
         ws.onopen = () => {
-          console.log('WebSocket connection established, sending handshake...')
+          // console.log('WebSocket connection established, sending handshake...')
           // 发送连接请求
           ws.send(JSON.stringify({
             type: 'connect',
@@ -465,21 +465,21 @@ const initWebSocket = () => {
         // 设置连接超时
         const connectionTimeout = setTimeout(() => {
           if (!isWsConnected) {
-            console.error('WebSocket connection timeout')
+            // console.error('WebSocket connection timeout')
             ws.close()
             reject(new Error('WebSocket连接超时'))
           }
         }, 5000)
 
         ws.onerror = (error) => {
-          console.error('WebSocket error:', error)
+          // console.error('WebSocket error:', error)
           isWsConnected = false
           clearTimeout(connectionTimeout)
           reject(error)
         }
 
         ws.onclose = () => {
-          console.log('WebSocket closed')
+          // console.log('WebSocket closed')
           isWsConnected = false
           clearTimeout(connectionTimeout)
           if (isDetecting.value && !isReconnecting) {
@@ -487,7 +487,7 @@ const initWebSocket = () => {
           }
         }
       } catch (error) {
-        console.error('Failed to create WebSocket:', error)
+        // console.error('Failed to create WebSocket:', error)
         reject(error)
       }
     }
@@ -498,33 +498,33 @@ const initWebSocket = () => {
 const handleWsMessage = (event) => {
   try {
     const data = JSON.parse(event.data)
-    console.log('Received WebSocket message:', data.type)
+    // console.log('Received WebSocket message:', data.type)
     
     switch (data.type) {
       case 'detection_result':
         handleDetectionResult(data)
         break
       case 'connect_confirm':
-        console.log('Connection confirmed by server')
+        // console.log('Connection confirmed by server')
         isWsConnected = true
         reconnectAttempts = 0
         break
       case 'config_confirm':
-        console.log('Model configuration confirmed by server')
+        // console.log('Model configuration confirmed by server')
         break
       case 'progress':
         // 不再更新进度条和剩余时间，因为它们现在由视频播放事件更新
-        console.log('Server progress update:', data)
+        // console.log('Server progress update:', data)
         break
       case 'error':
-        console.error('Server error:', data.message)
+        // console.error('Server error:', data.message)
         addDetectionRecord('error', `服务器错误: ${data.message}`)
         break
       default:
-        console.log('Unhandled message type:', data.type)
+        // console.log('Unhandled message type:', data.type)
     }
   } catch (error) {
-    console.error('Error handling WebSocket message:', error)
+    // console.error('Error handling WebSocket message:', error)
   }
 }
 
@@ -674,18 +674,18 @@ const sendVideoFrame = async () => {
     frameStats.sent++
     
     // 每100帧输出一次统计信息
-    if (frameStats.sent % 100 === 0) {
-      console.log('Frame stats:', {
-        sent: frameStats.sent,
-        received: frameStats.received,
-        dropped: frameStats.dropped,
-        outOfSync: frameStats.outOfSync,
-        bufferSize: frameBuffer.size
-      })
-    }
+    // if (frameStats.sent % 100 === 0) {
+    //   console.log('Frame stats:', {
+    //     sent: frameStats.sent,
+    //     received: frameStats.received,
+    //     dropped: frameStats.dropped,
+    //     outOfSync: frameStats.outOfSync,
+    //     bufferSize: frameBuffer.size
+    //   })
+    // }
 
   } catch (error) {
-    console.error('Error sending frame:', error)
+    // console.error('Error sending frame:', error)
   }
 }
 
@@ -693,7 +693,7 @@ const sendVideoFrame = async () => {
 const handleDetectionResult = (data) => {
   try {
     if (!data || !data.objects || !Array.isArray(data.objects) || !data.timestamp) {
-      console.warn('Invalid detection result data:', data)
+      // console.warn('Invalid detection result data:', data)
       return
     }
 
@@ -720,7 +720,7 @@ const handleDetectionResult = (data) => {
     
     // 如果延迟太大，跳过这一帧
     if (detectionDelay > maxDetectionDelay) {
-      console.warn(`Detection delay too large: ${detectionDelay}ms, skipping frame`)
+      // console.warn(`Detection delay too large: ${detectionDelay}ms, skipping frame`)
       frameStats.outOfSync++
       return
     }
@@ -728,7 +728,7 @@ const handleDetectionResult = (data) => {
     // 获取所有可用的时间戳
     const timestamps = Array.from(frameBuffer.keys())
     if (timestamps.length === 0) {
-      console.warn('Frame buffer empty, waiting for frames...')
+      // console.warn('Frame buffer empty, waiting for frames...')
       return
     }
 
@@ -748,13 +748,13 @@ const handleDetectionResult = (data) => {
     const canvas = canvasRef.value
     const video = videoRef.value
     if (!canvas || !video) {
-      console.warn('Canvas or video element not found')
+      // console.warn('Canvas or video element not found')
       return
     }
 
     const ctx = canvas.getContext('2d')
     if (!ctx) {
-      console.warn('Could not get canvas context')
+      // console.warn('Could not get canvas context')
       return
     }
 
@@ -826,7 +826,7 @@ const handleDetectionResult = (data) => {
     }
 
   } catch (error) {
-    console.error('Error handling detection result:', error)
+    // console.error('Error handling detection result:', error)
   }
 }
 
@@ -847,15 +847,15 @@ const startFrameCapture = () => {
       lastFrameTime = timestamp
       
       // 输出性能统计
-      if (frameStats.sent % 50 === 0) {
-        console.log('Performance stats:', {
-          fps: adaptiveFPS.toFixed(1),
-          avgDelay: avgDetectionDelay.toFixed(0),
-          bufferSize: frameBuffer.size,
-          dropped: frameStats.dropped,
-          outOfSync: frameStats.outOfSync
-        })
-      }
+      // if (frameStats.sent % 50 === 0) {
+      //   console.log('Performance stats:', {
+      //     fps: adaptiveFPS.toFixed(1),
+      //     avgDelay: avgDetectionDelay.toFixed(0),
+      //     bufferSize: frameBuffer.size,
+      //     dropped: frameStats.dropped,
+      //     outOfSync: frameStats.outOfSync
+      //   })
+      // }
     }
     
     animationFrameId = requestAnimationFrame(captureFrame)
@@ -906,7 +906,7 @@ const handleVideoChange = async (file) => {
     // 确保视频元素存在
     const videoElement = videoRef.value
     if (!videoElement) {
-      console.error('Video element not found in DOM')
+      // console.error('Video element not found in DOM')
       throw new Error('无法找到视频元素，请刷新页面重试')
     }
     
@@ -937,14 +937,14 @@ const handleVideoChange = async (file) => {
       }
       
       const handleLoad = () => {
-        console.log('Video metadata loaded, readyState:', videoElement.readyState)
+        // console.log('Video metadata loaded, readyState:', videoElement.readyState)
         videoElement.addEventListener('loadeddata', handleDataLoad)
         // 添加进度更新
         updateVideoProgress()
       }
       
       const handleDataLoad = () => {
-        console.log('Video data loaded, readyState:', videoElement.readyState)
+        // console.log('Video data loaded, readyState:', videoElement.readyState)
         if (videoElement.readyState >= 2) {
           updateVideoProgress() // 再次更新进度
           cleanup()
@@ -953,7 +953,7 @@ const handleVideoChange = async (file) => {
       }
       
       const handleError = (error) => {
-        console.error('Video loading error:', error)
+        // console.error('Video loading error:', error)
         cleanup()
         reject(new Error('视频加载失败：' + (videoElement.error?.message || '未知错误')))
       }
@@ -973,11 +973,11 @@ const handleVideoChange = async (file) => {
     }
     
     // 视频加载成功
-    console.log('Video loaded successfully:', {
-      width: videoElement.videoWidth,
-      height: videoElement.videoHeight,
-      duration: videoElement.duration
-    })
+    // console.log('Video loaded successfully:', {
+    //   width: videoElement.videoWidth,
+    //   height: videoElement.videoHeight,
+    //   duration: videoElement.duration
+    // })
     
     // 更新视频容器尺寸
     await nextTick()
@@ -987,7 +987,7 @@ const handleVideoChange = async (file) => {
     ElMessage.success('视频加载成功')
     
   } catch (error) {
-    console.error('视频加载错误:', error)
+    // console.error('视频加载错误:', error)
     ElMessage.error(error.message || '视频加载失败')
     
     // 清理资源
@@ -1040,7 +1040,7 @@ const startDetection = async () => {
     try {
       await sendModelConfig()
     } catch (error) {
-      console.error('Model configuration failed:', error)
+      // console.error('Model configuration failed:', error)
       throw new Error(`模型配置失败: ${error.message}`)
     }
 
@@ -1088,7 +1088,7 @@ const startDetection = async () => {
     startFrameCapture()
     addDetectionRecord('success', '开始检测')
   } catch (error) {
-    console.error('Failed to start detection:', error)
+    // console.error('Failed to start detection:', error)
     addDetectionRecord('error', `启动检测失败: ${error.message}`)
     isDetecting.value = false
     // 如果是WebSocket错误，尝试重新连接
@@ -1117,7 +1117,7 @@ const handleReconnect = async () => {
   reconnectAttempts++
 
   try {
-    console.log(`尝试重新连接 (${reconnectAttempts}/${maxReconnectAttempts})...`)
+    // console.log(`尝试重新连接 (${reconnectAttempts}/${maxReconnectAttempts})...`)
     addDetectionRecord('info', `尝试重新连接 (${reconnectAttempts}/${maxReconnectAttempts})...`)
     
     await initWebSocket()
@@ -1131,7 +1131,7 @@ const handleReconnect = async () => {
       startDetection()
     }
   } catch (error) {
-    console.error('Reconnection failed:', error)
+    // console.error('Reconnection failed:', error)
     isReconnecting = false
     
     if (reconnectAttempts < maxReconnectAttempts) {
@@ -1171,7 +1171,7 @@ const stopDetection = async () => {
       ws = null
       isWsConnected = false
     } catch (error) {
-      console.error('Error closing WebSocket:', error)
+      // console.error('Error closing WebSocket:', error)
     }
   }
 
@@ -1223,7 +1223,7 @@ const sendModelConfig = () => {
             }
           }
         } catch (error) {
-          console.error('处理模型配置响应失败:', error)
+          // console.error('处理模型配置响应失败:', error)
         }
       }
 
@@ -1231,7 +1231,7 @@ const sendModelConfig = () => {
       ws.addEventListener('message', configConfirmHandler)
 
       // 发送模型配置
-      console.log('Sending model config:', modelConfig)
+      // console.log('Sending model config:', modelConfig)
       ws.send(JSON.stringify(modelConfig))
 
       // 设置超时，防止无限等待
@@ -1285,7 +1285,7 @@ onBeforeUnmount(() => {
       ws = null
       isWsConnected = false
     } catch (error) {
-      console.error('Error closing WebSocket on unmount:', error)
+      // console.error('Error closing WebSocket on unmount:', error)
     }
   }
   

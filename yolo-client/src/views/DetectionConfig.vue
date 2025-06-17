@@ -831,7 +831,7 @@ export default defineComponent({
 
     const drawPolygon = (points) => {
       if (!drawingCanvas.value) {
-        console.error('Canvas 未初始化')
+        // console.error('Canvas 未初始化')
         return
       }
       try {
@@ -1289,7 +1289,7 @@ export default defineComponent({
         //   ElMessage.error('请绘制有效的多边形区域');
         //   return;
         // }
-        console.log(areaForm.coordinates);
+        // console.log(areaForm.coordinates);
 
         if (areaForm.coordinates.points.length == 0) {
           // 调用API保存区域配置
@@ -1581,7 +1581,7 @@ export default defineComponent({
       loading.value = true;
       try {
         const response = await detectionConfigApi.getConfigs();
-        configList.value = response.data;
+        configList.value = response.data.data;
       } catch (error) {
         ElMessage.error('获取配置列表失败: ' + error.message);
       } finally {

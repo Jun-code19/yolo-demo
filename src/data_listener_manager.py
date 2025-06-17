@@ -156,6 +156,18 @@ class BaseListener(ABC):
             if 'description_field' in mapping:
                 description = raw_data.get(mapping['description_field'])
             
+            # 判断校验，如果engine_id不为空，则判断该引擎id，是否在algorithm_field_mappings中。数据格式{"1": [17, 1, 16, 18]}，如果engine_id为17，则判断17是否在[17, 1, 16, 18]中
+            if engine_id:
+                engine_found = False
+                for device_id, engine_list in self.algorithm_field_mappings.items():
+                    if engine_id in engine_list:
+                        engine_found = True
+                        break
+                
+                if not engine_found:
+                    logger.warning(f"引擎id {engine_id} 不存在算法字段映射中")
+                    return None
+
             # 处理算法特定字段
             algorithm_data = self._process_algorithm_fields(raw_data, device_sn, engine_id)
             

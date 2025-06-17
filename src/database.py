@@ -478,6 +478,110 @@ Index('idx_external_events_type', ExternalEvent.event_type)
 Index('idx_external_events_config', ExternalEvent.config_id)
 Index('idx_listener_configs_type', ListenerConfig.listener_type)
 
+# 热力图相关表模型
+class HeatmapMap(Base):
+    """热力图地图表"""
+    __tablename__ = "heatmap_maps"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(255), nullable=False, comment="地图名称")
+    file_path = Column(String(500), nullable=False, comment="地图文件路径")
+    file_name = Column(String(255), nullable=False, comment="原始文件名")
+    file_size = Column(Integer, nullable=False, comment="文件大小(字节)")
+    mime_type = Column(String(100), nullable=False, comment="文件MIME类型")
+    width = Column(Integer, comment="图片宽度")
+    height = Column(Integer, comment="图片高度")
+    scale_factor = Column(Float, default=1.0, comment="比例尺(像素/米)")
+    description = Column(Text, comment="地图描述")
+    created_at = Column(DateTime, default=datetime.now, comment="创建时间")
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, comment="更新时间")
+    is_active = Column(Boolean, default=True, comment="是否激活")
+    created_by = Column(String(100), comment="创建人")
+    
+    # 关系
+    areas = relationship("HeatmapArea", back_populates="map", cascade="all, delete-orphan")
+    dashboard_configs = relationship("HeatmapDashboardConfig", back_populates="map", cascade="all, delete-orphan")
+
+class HeatmapArea(Base):
+    """热力图区域表"""
+    __tablename__ = "heatmap_areas"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    map_id = Column(Integer, ForeignKey('heatmap_maps.id'), nullable=False, comment="关联地图ID")
+    name = Column(String(255), nullable=False, comment="区域名称")
+    points = Column(JSONB, nullable=False, comment="区域多边形坐标点")
+    color = Column(String(50), default='rgba(74, 144, 226, 0.5)', comment="区域颜色")
+    area_size = Column(Float, default=0, comment="区域面积(平方米)")
+    max_capacity = Column(Integer, comment="最大容量")
+    description = Column(Text, comment="区域描述")
+    created_at = Column(DateTime, default=datetime.now, comment="创建时间")
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, comment="更新时间")
+    is_active = Column(Boolean, default=True, comment="是否激活")
+    
+    # 关系
+    map = relationship("HeatmapMap", back_populates="areas")
+    bindings = relationship("HeatmapBinding", back_populates="area", cascade="all, delete-orphan")
+    history = relationship("HeatmapHistory", back_populates="area", cascade="all, delete-orphan")
+
+class HeatmapBinding(Base):
+    """热力图数据绑定表"""
+    __tablename__ = "heatmap_bindings"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    area_id = Column(Integer, ForeignKey('heatmap_areas.id'), nullable=False, comment="关联区域ID")
+    data_source_type = Column(String(50), nullable=False, comment="数据源类型(crowd_analysis,manual,api)")
+    data_source_id = Column(String(100), comment="数据源ID(如人群分析任务ID)")
+    data_source_name = Column(String(255), comment="数据源名称")
+    refresh_interval = Column(Integer, default=30, comment="刷新间隔(秒)")
+    last_update_time = Column(DateTime, comment="最后更新时间")
+    current_count = Column(Integer, default=0, comment="当前人数")
+    config = Column(JSONB, comment="绑定配置信息")
+    created_at = Column(DateTime, default=datetime.now, comment="创建时间")
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, comment="更新时间")
+    is_active = Column(Boolean, default=True, comment="是否激活")
+    
+    # 关系
+    area = relationship("HeatmapArea", back_populates="bindings")
+
+class HeatmapDashboardConfig(Base):
+    """热力图展板配置表"""
+    __tablename__ = "heatmap_dashboard_config"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    map_id = Column(Integer, ForeignKey('heatmap_maps.id'), nullable=False, comment="关联地图ID")
+    display_mode = Column(Enum('preview', 'mini', 'full', name='display_mode_enum'), default='preview', comment="显示模式")
+    max_areas = Column(Integer, default=6, comment="最大显示区域数")
+    refresh_interval = Column(Integer, default=30, comment="刷新间隔(秒)")
+    config = Column(JSONB, comment="其他配置信息")
+    created_at = Column(DateTime, default=datetime.now, comment="创建时间")
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, comment="更新时间")
+    is_active = Column(Boolean, default=True, comment="是否激活")
+    
+    # 关系
+    map = relationship("HeatmapMap", back_populates="dashboard_configs")
+
+class HeatmapHistory(Base):
+    """热力图历史数据表 (可选，用于存储历史统计)"""
+    __tablename__ = "heatmap_history"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    area_id = Column(Integer, ForeignKey('heatmap_areas.id'), nullable=False, comment="关联区域ID")
+    people_count = Column(Integer, nullable=False, comment="人数")
+    density = Column(Float, comment="人口密度")
+    record_time = Column(DateTime, default=datetime.now, comment="记录时间")
+    data_source = Column(String(100), comment="数据来源")
+    
+    # 关系
+    area = relationship("HeatmapArea", back_populates="history")
+
+# 添加热力图相关索引
+Index('idx_heatmap_areas_map_id', HeatmapArea.map_id)
+Index('idx_heatmap_bindings_area_id', HeatmapBinding.area_id)
+Index('idx_heatmap_bindings_data_source', HeatmapBinding.data_source_type, HeatmapBinding.data_source_id)
+Index('idx_heatmap_dashboard_config_map_id', HeatmapDashboardConfig.map_id)
+Index('idx_heatmap_history_area_time', HeatmapHistory.area_id, HeatmapHistory.record_time)
+Index('idx_heatmap_history_record_time', HeatmapHistory.record_time)
+
 # 数据库依赖注入
 def get_db():
     db = SessionLocal()

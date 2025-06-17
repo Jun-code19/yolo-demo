@@ -29,6 +29,7 @@ storage/
 docker-image/
 models/
 docs/
+uploads/
 
 # Node
 node_modules/

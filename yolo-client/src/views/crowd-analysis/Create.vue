@@ -262,7 +262,7 @@ const fetchAvailableDevices = async () => {
     availableDevices.value = res.data
   } catch (error) {
     ElMessage.error('获取监控设备列表失败')
-    console.error(error)
+    // console.error(error)
   }
 }
 
@@ -330,7 +330,7 @@ const handleModelChange = async (modelId) => {
       form.detect_classes = []
     }
   } catch (error) {
-    console.error('获取模型类别失败:', error)
+    // console.error('获取模型类别失败:', error)
     ElMessage.error('获取模型支持的类别失败')
     modelClasses.value = []
   }
@@ -361,7 +361,7 @@ const submitForm = async () => {
       ElMessage.success('创建成功')
       router.push('/crowd-analysis')
     } catch (error) {
-      console.error('创建任务失败:', error)
+      // console.error('创建任务失败:', error)
       
       let errorMessage = '创建失败'
       if (error.response) {

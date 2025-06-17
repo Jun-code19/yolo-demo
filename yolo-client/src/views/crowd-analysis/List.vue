@@ -158,7 +158,7 @@ const fetchJobs = async () => {
     total.value = res.data.length
   } catch (error) {
     ElMessage.error('获取任务列表失败')
-    console.error(error)
+    // console.error(error)
   } finally {
     loading.value = false
   }
@@ -172,7 +172,7 @@ const fetchDevices = async () => {
       deviceMap.value[item.device_id] = item.device_name
     })
   } catch (error) {
-    console.error('获取设备列表失败', error)
+    // console.error('获取设备列表失败', error)
   }
 }
 
@@ -184,7 +184,7 @@ const fetchModels = async () => {
       modelMap.value[item.model_id] = item.model_name
     })
   } catch (error) {
-    console.error('获取模型列表失败', error)
+    // console.error('获取模型列表失败', error)
   }
 }
 
@@ -242,7 +242,7 @@ const runJob = async (jobId) => {
     fetchJobs()
   } catch (error) {
     ElMessage.error('执行任务失败')
-    console.error(error)
+    // console.error(error)
   }
 }
 
@@ -260,7 +260,7 @@ const toggleJobStatus = async (jobId, isActive) => {
     fetchJobs()
   } catch (error) {
     ElMessage.error(`${isActive ? '暂停' : '恢复'}任务失败`)
-    console.error(error)
+    // console.error(error)
   }
 }
 
@@ -276,7 +276,7 @@ const deleteJob = (jobId) => {
       fetchJobs()
     } catch (error) {
       ElMessage.error('删除失败')
-      console.error(error)
+      // console.error(error)
     }
   }).catch(() => {})
 }

@@ -533,7 +533,7 @@ const loadServerInfo = async () => {
       serverAPI.value = edgeServerAPI.createServerAPI(response.ip_address, response.port)
     }
   } catch (error) {
-    console.error('加载服务器信息失败:', error)
+    // console.error('加载服务器信息失败:', error)
     ElMessage.error('加载服务器信息失败')
   } finally {
     loading.value = false
@@ -565,7 +565,7 @@ const loadSystemData = async () => {
 
     loadEngines()
   } catch (error) {
-    console.error('加载系统数据失败:', error)
+    // console.error('加载系统数据失败:', error)
   }
 }
 
@@ -614,7 +614,7 @@ const loadCPUData = async () => {
       }
     }
   } catch (error) {
-    console.error('加载CPU数据失败:', error)
+    // console.error('加载CPU数据失败:', error)
   }
 }
 
@@ -761,7 +761,7 @@ const handleTabChange = async (tabName) => {
         break
     }
   } catch (error) {
-    console.error('加载选项卡数据失败:', error)
+    // console.error('加载选项卡数据失败:', error)
   } finally {
     tabLoading.value = false
   }
@@ -805,7 +805,7 @@ const loadEngines = async () => {
       engines.value = response.result || []
     }
   } catch (error) {
-    console.error('加载算法引擎失败:', error)
+    // console.error('加载算法引擎失败:', error)
     engines.value = []
   }
 }
@@ -833,7 +833,7 @@ const loadChannels = async () => {
       channels.value = response.result || []
     }
   } catch (error) {
-    console.error('加载视频通道失败:', error)
+    // console.error('加载视频通道失败:', error)
     channels.value = []
   }
 }
@@ -852,7 +852,7 @@ const loadEventTypes = async () => {
       eventTypes.value = response.result || []
     }
   } catch (error) {
-    console.error('加载事件类型失败:', error)
+    // console.error('加载事件类型失败:', error)
     eventTypes.value = []
   }
 }
@@ -919,7 +919,7 @@ const loadEvents = async () => {
       eventPagination.total = 0
     }
   } catch (error) {
-    console.error('加载历史事件失败:', error)
+    // console.error('加载历史事件失败:', error)
     events.value = []
     eventPagination.total = 0
   }
@@ -1086,7 +1086,7 @@ const parseUnitValue = (value) => {
 
 const handleImageError = () => {
   // 处理图片加载错误后的逻辑
-  console.error('图片加载失败')
+  // console.error('图片加载失败')
 }
 </script>
 

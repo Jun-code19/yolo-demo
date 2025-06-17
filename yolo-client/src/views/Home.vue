@@ -177,7 +177,7 @@ const fetchDashboardData = async () => {
       renderChart()
     }
   } catch (error) {
-    console.error('获取仪表盘数据失败:', error)
+    // console.error('获取仪表盘数据失败:', error)
     ElMessage.error('获取仪表盘数据失败')
   } finally {
     loading.value = false
