@@ -1,8 +1,11 @@
 import asyncio
 import json
 import logging
+import queue
+import threading
 from typing import Dict, Any, List
 from datetime import datetime
+import uuid
 
 try:
     import paho.mqtt.client as mqtt
@@ -51,7 +54,10 @@ class MQTTListener(BaseListener):
         self.keyfile = self.connection_config.get('keyfile')
         
         # 消息队列（用于异步处理）
-        self.message_queue = asyncio.Queue()
+        self.message_queue = None
+        self.loop = None
+        # 线程安全的消息缓冲队列
+        self.thread_safe_queue = queue.Queue(maxsize=1000)
     
     async def connect(self) -> bool:
         """建立MQTT连接"""
@@ -116,29 +122,44 @@ class MQTTListener(BaseListener):
                 self.client.disconnect()
                 self.client = None
                 logger.info("MQTT连接已断开")
+            
+            # 清理队列和循环引用
+            self.message_queue = None
+            self.loop = None
         except Exception as e:
             logger.error(f"断开MQTT连接失败: {e}")
     
     async def listen(self):
         """开始监听MQTT消息"""
+        # 初始化队列和事件循环引用
+        self.loop = asyncio.get_running_loop()
+        self.message_queue = asyncio.Queue()
+        
         # 订阅主题
         await self._subscribe_topics()
         
         # 处理消息队列
         while self.running:
             try:
-                # 从队列中获取消息（带超时）
-                message_data = await asyncio.wait_for(
-                    self.message_queue.get(), 
-                    timeout=1.0
-                )
+                # 首先检查线程安全队列
+                try:
+                    message_data = self.thread_safe_queue.get_nowait()
+                    await self._process_message(message_data)
+                    continue
+                except queue.Empty:
+                    pass
                 
-                # 处理消息
-                await self._process_message(message_data)
-                
-            except asyncio.TimeoutError:
-                # 超时正常，继续循环
-                continue
+                # 然后检查异步队列
+                try:
+                    message_data = await asyncio.wait_for(
+                        self.message_queue.get(), 
+                        timeout=0.1
+                    )
+                    await self._process_message(message_data)
+                except asyncio.TimeoutError:
+                    # 短暂睡眠以避免忙等待
+                    await asyncio.sleep(0.01)
+                    
             except Exception as e:
                 logger.error(f"处理MQTT消息失败: {e}")
                 await asyncio.sleep(0.1)
@@ -199,11 +220,22 @@ class MQTTListener(BaseListener):
                 # 不是JSON格式，保持原始字符串
                 pass
             
-            # 异步放入队列
-            asyncio.run_coroutine_threadsafe(
-                self.message_queue.put(message_data),
-                asyncio.get_event_loop()
-            )
+            # 使用线程安全队列作为主要方式
+            try:
+                self.thread_safe_queue.put_nowait(message_data)
+            except queue.Full:
+                logger.warning("线程安全队列已满，丢弃消息")
+                # 如果线程安全队列满了，尝试使用异步队列
+                if self.loop and self.message_queue:
+                    try:
+                        asyncio.run_coroutine_threadsafe(
+                            self.message_queue.put(message_data),
+                            self.loop
+                        )
+                    except RuntimeError as e:
+                        logger.warning(f"无法将消息放入异步队列: {e}")
+                else:
+                    logger.warning("消息队列或事件循环未初始化，消息丢失")
             
         except Exception as e:
             logger.error(f"处理MQTT消息回调失败: {e}")
@@ -225,9 +257,10 @@ class MQTTListener(BaseListener):
             
             # 标准化数据格式
             event = self.normalize_data(enhanced_data)
-            
-            # 触发事件处理
-            await self.emit_event(event)
+
+            if event and event.event_type != ExternalEventType.heartbeat:
+                # 触发事件处理
+                await self.emit_event(event)
             
         except Exception as e:
             logger.error(f"处理MQTT消息失败: {e}")
@@ -235,10 +268,10 @@ class MQTTListener(BaseListener):
     def _enhance_message_data(self, message_data: Dict[str, Any]) -> Dict[str, Any]:
         """增强消息数据，添加更多上下文信息"""
         enhanced = message_data.copy()
-        
+
         # 如果有JSON负载，将其作为主要数据
         if 'json_payload' in message_data:
-            enhanced.update(message_data['json_payload'])
+            enhanced = message_data['json_payload']
         
         # 添加MQTT特定信息
         enhanced['mqtt_topic'] = message_data['topic']
@@ -272,119 +305,3 @@ class MQTTListener(BaseListener):
         else:
             return 'other'
     
-    def normalize_data(self, raw_data: Dict) -> UnifiedEvent:
-        """重写标准化方法，针对MQTT优化"""
-        try:
-            # 基础字段
-            event_id = raw_data.get('id') or raw_data.get('event_id') or str(uuid.uuid4())
-            timestamp = self._parse_timestamp(raw_data.get('timestamp') or datetime.now())
-            
-            # 应用数据映射规则
-            mapping = self.data_mapping
-            
-            # 事件类型映射
-            event_type = ExternalEventType.other
-            if 'event_type_mapping' in mapping:
-                raw_type = raw_data.get(mapping.get('event_type_field', 'type'), 'other')
-                event_type = ExternalEventType(mapping['event_type_mapping'].get(raw_type, 'other'))
-            else:
-                # 使用推断的类型
-                inferred_type = raw_data.get('type', 'other')
-                try:
-                    event_type = ExternalEventType(inferred_type)
-                except ValueError:
-                    event_type = ExternalEventType.other
-            
-            # 设备ID
-            device_id = None
-            if 'device_id_field' in mapping:
-                device_id = raw_data.get(mapping['device_id_field'])
-            else:
-                # 尝试从多个字段获取设备ID
-                device_id = (raw_data.get('device_id') or 
-                           raw_data.get('deviceId') or 
-                           raw_data.get('device') or
-                           raw_data.get('device_from_topic'))
-            
-            # 位置信息
-            location = None
-            if 'location_field' in mapping:
-                location = raw_data.get(mapping['location_field'])
-            else:
-                location = raw_data.get('location') or raw_data.get('position')
-            
-            # 置信度
-            confidence = None
-            if 'confidence_field' in mapping:
-                confidence = raw_data.get(mapping['confidence_field'])
-            else:
-                confidence = raw_data.get('confidence') or raw_data.get('score')
-                if confidence is not None:
-                    confidence = float(confidence)
-            
-            # 描述
-            description = None
-            if 'description_field' in mapping:
-                description = raw_data.get(mapping['description_field'])
-            else:
-                description = (raw_data.get('description') or 
-                             raw_data.get('message') or
-                             raw_data.get('payload'))
-            
-            # 提取目标信息
-            targets = None
-            if 'targets_field' in mapping:
-                targets_data = raw_data.get(mapping['targets_field'])
-                if targets_data:
-                    targets = self._extract_targets(targets_data)
-            else:
-                targets_data = raw_data.get('targets') or raw_data.get('objects')
-                if targets_data:
-                    targets = self._extract_targets(targets_data)
-            
-            # 标签
-            tags = ['mqtt']  # 默认添加mqtt标签
-            if 'tags_field' in mapping:
-                custom_tags = raw_data.get(mapping['tags_field'])
-                if custom_tags:
-                    if isinstance(custom_tags, str):
-                        tags.append(custom_tags)
-                    elif isinstance(custom_tags, list):
-                        tags.extend(custom_tags)
-            
-            # 添加主题作为标签
-            if 'mqtt_topic' in raw_data:
-                tags.append(f"topic:{raw_data['mqtt_topic']}")
-            
-            return UnifiedEvent(
-                event_id=event_id,
-                event_type=event_type,
-                timestamp=timestamp,
-                source_type=self.listener_type,
-                device_id=device_id,
-                location=location,
-                confidence=confidence,
-                description=description,
-                targets=targets,
-                tags=tags,
-                metadata={
-                    'source_config': self.config_id,
-                    'mqtt_topic': raw_data.get('mqtt_topic'),
-                    'mqtt_qos': raw_data.get('mqtt_qos'),
-                    'mqtt_retain': raw_data.get('mqtt_retain')
-                },
-                original_data=raw_data
-            )
-            
-        except Exception as e:
-            logger.error(f"MQTT数据标准化失败: {e}")
-            import uuid
-            # 返回最小化的事件对象
-            return UnifiedEvent(
-                event_id=str(uuid.uuid4()),
-                event_type=ExternalEventType.other,
-                timestamp=datetime.now(),
-                source_type=self.listener_type,
-                tags=['mqtt'],
-                original_data=raw_data
-            ) 

@@ -206,6 +206,7 @@
                     <li class="toc-sub-item"><a href="#add-device" class="toc-sub-link">2.1 添加设备</a></li>
                     <li class="toc-sub-item"><a href="#edit-device" class="toc-sub-link">2.2 编辑设备</a></li>
                     <li class="toc-sub-item"><a href="#delete-device" class="toc-sub-link">2.3 删除设备</a></li>
+                    <li class="toc-sub-item"><a href="#device-status" class="toc-sub-link">2.4 设备状态监控</a></li>
                 </ul>
             </li>
             <li class="toc-item">
@@ -238,67 +239,166 @@
                 <ul class="toc-sub-list">
                     <li class="toc-sub-item"><a href="#push-config" class="toc-sub-link">6.1 配置推送</a></li>
                     <li class="toc-sub-item"><a href="#push-management" class="toc-sub-link">6.2 管理推送</a></li>
+                    <li class="toc-sub-item"><a href="#data-listeners" class="toc-sub-link">6.3 数据监听器</a></li>
                 </ul>
             </li>
             <li class="toc-item">
-                <a href="#system-management" class="toc-link">7. 系统管理</a>
+                <a href="#edge-servers" class="toc-link">7. 边缘服务器</a>
                 <ul class="toc-sub-list">
-                    <li class="toc-sub-item"><a href="#system-status" class="toc-sub-link">7.1 系统状态</a></li>
-                    <li class="toc-sub-item"><a href="#system-logs" class="toc-sub-link">7.2 系统日志</a></li>
+                    <li class="toc-sub-item"><a href="#edge-management" class="toc-sub-link">7.1 边缘服务器管理</a></li>
+                    <li class="toc-sub-item"><a href="#edge-monitoring" class="toc-sub-link">7.2 边缘服务器监控</a></li>
                 </ul>
             </li>
             <li class="toc-item">
-                <a href="#faq" class="toc-link">8. 常见问题</a>
+                <a href="#heatmap-management" class="toc-link">8. 热力图管理</a>
+                <ul class="toc-sub-list">
+                    <li class="toc-sub-item"><a href="#heatmap-creation" class="toc-sub-link">8.1 创建热力图</a></li>
+                    <li class="toc-sub-item"><a href="#heatmap-configuration" class="toc-sub-link">8.2 热力图配置</a></li>
+                    <li class="toc-sub-item"><a href="#heatmap-dashboard" class="toc-sub-link">8.3 数据大屏</a></li>
+                </ul>
+            </li>
+            <li class="toc-item">
+                <a href="#system-management" class="toc-link">9. 系统管理</a>
+                <ul class="toc-sub-list">
+                    <li class="toc-sub-item"><a href="#system-status" class="toc-sub-link">9.1 系统状态</a></li>
+                    <li class="toc-sub-item"><a href="#system-logs" class="toc-sub-link">9.2 系统日志</a></li>
+                </ul>
+            </li>
+            <li class="toc-item">
+                <a href="#faq" class="toc-link">10. 常见问题</a>
+                <ul class="toc-sub-list">
+                    <li class="toc-sub-item"><a href="#device-issues" class="toc-sub-link">10.1 设备连接问题</a></li>
+                    <li class="toc-sub-item"><a href="#detection-issues" class="toc-sub-link">10.2 检测问题</a></li>
+                    <li class="toc-sub-item"><a href="#push-issues" class="toc-sub-link">10.3 数据推送问题</a></li>
+                    <li class="toc-sub-item"><a href="#heatmap-issues" class="toc-sub-link">10.4 热力图问题</a></li>
+                    <li class="toc-sub-item"><a href="#performance-issues" class="toc-sub-link">10.5 性能问题</a></li>
+                    <li class="toc-sub-item"><a href="#system-issues" class="toc-sub-link">10.6 系统问题</a></li>
+                </ul>
             </li>
         </ul>
     </div>
 
     <div id="overview" class="section">
         <h2>1. 系统概述</h2>
-        <p>智能视频分析系统是一个集视频监控、目标检测、人群分析于一体的综合管理平台。系统支持多种设备类型，包括摄像头、硬盘录像机、边缘服务器和存储节点。</p>
+        <p>智能视频分析系统是一个集视频监控、目标检测、人群分析于一体的综合管理平台。系统采用先进的AI算法，支持多种设备类型和检测模式，为用户提供全方位的视频监控解决方案。</p>
         <div class="note">
-            <strong>主要功能：</strong>
+            <strong>核心功能模块：</strong>
             <ul>
-                <li>设备管理：支持添加、编辑、删除设备，实时监控设备状态</li>
-                <li>目标检测：支持实时检测、视频检测和图片检测</li>
-                <li>人群分析：提供人群密度、行为分析等功能</li>
-                <li>数据推送：支持多种推送方式，包括HTTP、HTTPS、TCP和MQTT</li>
+                <li><strong>设备管理：</strong>支持摄像头、NVR、边缘服务器等多种设备，实时监控设备状态</li>
+                <li><strong>目标检测：</strong>提供实时检测、视频检测和图片检测，支持多种AI模型</li>
+                <li><strong>人群分析：</strong>人群密度统计、行为分析、热力图可视化</li>
+                <li><strong>数据推送：</strong>支持HTTP/HTTPS、TCP、MQTT等多种数据推送方式</li>
+                <li><strong>边缘服务器：</strong>分布式边缘计算，支持本地和云端协同处理</li>
+                <li><strong>数据大屏：</strong>实时数据可视化展示，支持多维度统计分析</li>
+                <li><strong>系统监控：</strong>系统运行状态监控、日志管理、性能分析</li>
+            </ul>
+        </div>
+        <div class="success">
+            <strong>系统特点：</strong>
+            <ul>
+                <li>🎯 高精度检测：采用先进的YOLO算法，检测精度高达95%以上</li>
+                <li>⚡ 实时处理：支持多路视频流同时处理，延迟低于100ms</li>
+                <li>🔧 灵活配置：支持自定义检测区域、目标类别、报警规则</li>
+                <li>📊 可视化分析：提供丰富的图表和报表，数据一目了然</li>
+                <li>🌐 分布式架构：支持多节点部署，具备高可用性和扩展性</li>
             </ul>
         </div>
     </div>
 
     <div id="device-management" class="section">
         <h2>2. 设备管理</h2>
+        <p>设备管理模块支持多种类型的视频设备接入，包括网络摄像头、硬盘录像机(NVR)、边缘服务器等。系统提供设备的全生命周期管理功能。</p>
+        
+        <div class="note">
+            <strong>支持的设备类型：</strong>
+            <ul>
+                <li><strong>网络摄像头：</strong>支持RTSP、HTTP、ONVIF协议</li>
+                <li><strong>硬盘录像机(NVR)：</strong>支持多通道视频流管理</li>
+                <li><strong>边缘服务器：</strong>支持分布式计算节点</li>
+                <li><strong>存储节点：</strong>用于视频数据存储和回放</li>
+            </ul>
+        </div>
+
         <div id="add-device">
             <h3>2.1 添加设备</h3>
-            <div class="step">点击"设备管理"页面右上角的"添加设备"按钮</div>
+            <div class="step">导航到"设备管理"页面</div>
+            <div class="step">点击页面右上角的"添加设备"按钮</div>
             <div class="screenshot">
                 <img src="./images/help/add-device.png" alt="添加设备按钮">
                 <div class="screenshot-caption">图2.1 添加设备按钮位置</div>
             </div>
-            <div class="step">填写设备信息，包括设备ID、名称、类型、IP地址、端口、用户名和密码</div>
+            <div class="step">在弹出的表单中填写设备基本信息：
+                <ul>
+                    <li><strong>设备ID：</strong>唯一标识符，建议使用有意义的命名规则</li>
+                    <li><strong>设备名称：</strong>便于识别的友好名称</li>
+                    <li><strong>设备类型：</strong>选择对应的设备类型</li>
+                    <li><strong>IP地址：</strong>设备的网络地址</li>
+                    <li><strong>端口：</strong>服务端口号</li>
+                    <li><strong>用户名/密码：</strong>设备访问凭据</li>
+                </ul>
+            </div>
             <div class="screenshot">
                 <img src="./images/help/device-form.png" alt="设备信息表单">
                 <div class="screenshot-caption">图2.2 设备信息表单</div>
             </div>
-            <div class="step">对于NVR设备，需要设置通道号和码流类型</div>
-            <div class="step">点击"确认"按钮完成添加</div>
+            <div class="step">对于NVR设备，还需要配置：
+                <ul>
+                    <li><strong>通道号：</strong>指定要接入的摄像头通道</li>
+                    <li><strong>码流类型：</strong>主码流或子码流</li>
+                    <li><strong>录像计划：</strong>设置录像时间段</li>
+                </ul>
+            </div>
+            <div class="step">点击"测试连接"按钮验证设备连接状态</div>
+            <div class="step">确认无误后点击"确认"按钮完成添加</div>
+            <div class="success">
+                <strong>提示：</strong>添加设备后，系统会自动检测设备状态并显示在设备列表中。
+            </div>
         </div>
+
         <div id="edit-device">
             <h3>2.2 编辑设备</h3>
             <div class="step">在设备列表中找到需要编辑的设备</div>
-            <div class="step">点击"编辑"按钮</div>
-            <div class="step">修改设备信息</div>
+            <div class="step">点击设备行末尾的"编辑"按钮</div>
+            <div class="step">在编辑表单中修改设备信息</div>
+            <div class="step">可以修改的信息包括：设备名称、IP地址、端口、凭据等</div>
+            <div class="step">点击"测试连接"验证修改后的配置</div>
             <div class="step">点击"确认"按钮保存修改</div>
+            <div class="note">
+                <strong>注意：</strong>修改设备配置可能会影响正在进行的检测任务，建议在业务低峰期进行。
+            </div>
         </div>
+
         <div id="delete-device">
             <h3>2.3 删除设备</h3>
             <div class="step">在设备列表中找到需要删除的设备</div>
-            <div class="step">点击"删除"按钮</div>
-            <div class="step">确认删除操作</div>
+            <div class="step">点击设备行末尾的"删除"按钮</div>
+            <div class="step">在确认对话框中仔细阅读删除提示</div>
+            <div class="step">输入"确认删除"文本确认操作</div>
+            <div class="step">点击"确认删除"按钮完成删除</div>
             <div class="warning">
-                <strong>注意：</strong>删除设备将同时删除与该设备相关的所有检测配置和事件记录。
+                <strong>重要警告：</strong>删除设备将会：
+                <ul>
+                    <li>删除与该设备相关的所有检测配置</li>
+                    <li>删除设备的所有历史事件记录</li>
+                    <li>停止该设备上正在运行的检测任务</li>
+                    <li>清除设备相关的统计数据</li>
+                </ul>
+                此操作不可逆，请谨慎操作！
             </div>
+        </div>
+
+        <div id="device-status">
+            <h3>2.4 设备状态监控</h3>
+            <div class="step">设备列表中会实时显示每个设备的状态：
+                <ul>
+                    <li><strong>在线（绿色）：</strong>设备正常连接，可以正常使用</li>
+                    <li><strong>离线（红色）：</strong>设备连接断开，需要检查网络或设备状态</li>
+                    <li><strong>异常（黄色）：</strong>设备连接不稳定或配置有误</li>
+                    <li><strong>未知（灰色）：</strong>设备状态检测中</li>
+                </ul>
+            </div>
+            <div class="step">点击设备状态图标可以查看详细的连接信息</div>
+            <div class="step">系统会定期自动检测设备状态，也可以手动刷新</div>
         </div>
     </div>
 
@@ -401,6 +501,10 @@
         <div id="model-list">
             <h3>4.2 模型列表</h3>
             <div class="step">在模型列表中查看所有已上传的模型</div>
+            <div class="screenshot">
+                <img src="./images/help/model-list.png" alt="模型列表页面">
+                <div class="screenshot-caption">图4.2 模型列表页面</div>
+            </div>
             <div class="step">可以查看模型详细信息：
                 <ul>
                     <li>模型名称和类型</li>
@@ -445,6 +549,10 @@
         <div id="view-results">
             <h3>5.2 查看分析结果</h3>
             <div class="step">在任务列表中找到要查看的任务</div>
+            <div class="screenshot">
+                <img src="./images/help/view-results.png" alt="查看分析结果页面">
+                <div class="screenshot-caption">图5.2 查看分析结果页面</div>
+            </div>
             <div class="step">点击"查看结果"按钮</div>
             <div class="step">查看分析结果，包括人数统计、趋势图等</div>
         </div>
@@ -474,21 +582,194 @@
             <div class="step">支持启用/禁用推送</div>
             <div class="step">可以编辑或删除推送配置</div>
         </div>
+        <div id="data-listeners">
+            <h3>6.3 数据监听器</h3>
+            <div class="step">进入"数据监听器"页面</div>
+            <div class="screenshot">
+                <img src="./images/help/data-listeners.png" alt="数据监听器页面">
+                <div class="screenshot-caption">图6.3 数据监听器页面</div>
+            </div>
+            <div class="step">配置数据监听器来接收外部系统的数据：
+                <ul>
+                    <li><strong>HTTP监听器：</strong>接收HTTP POST请求数据</li>
+                    <li><strong>TCP监听器：</strong>监听TCP端口接收数据</li>
+                    <li><strong>MQTT监听器：</strong>订阅MQTT主题接收数据</li>
+                </ul>
+            </div>
+            <div class="step">设置数据映射规则，将外部数据格式转换为系统标准格式</div>
+            <div class="step">配置数据过滤和处理规则</div>
+        </div>
+
         <div class="note">
             <strong>推送方式说明：</strong>
             <ul>
-                <li>HTTP/HTTPS：支持自定义请求头和方法</li>
-                <li>TCP：支持设置主机和端口</li>
-                <li>MQTT：支持设置代理服务器、主题等</li>
+                <li><strong>HTTP/HTTPS：</strong>支持自定义请求头和方法，适用于Web服务集成</li>
+                <li><strong>TCP：</strong>支持设置主机和端口，适用于低延迟数据传输</li>
+                <li><strong>MQTT：</strong>支持设置代理服务器、主题等，适用于物联网场景</li>
+                <li><strong>数据监听器：</strong>支持接收外部系统数据，实现双向数据交换</li>
             </ul>
         </div>
     </div>
 
+    <div id="edge-servers" class="section">
+        <h2>7. 边缘服务器</h2>
+        <p>边缘服务器管理模块用于管理分布式部署的边缘计算节点，支持边缘设备的注册、监控和管理。</p>
+        
+        <div id="edge-management">
+            <h3>7.1 边缘服务器管理</h3>
+            <div class="step">进入"边缘服务器"页面查看所有边缘节点</div>
+            <div class="screenshot">
+                <img src="./images/help/edge-management.png" alt="边缘服务器管理页面">
+                <div class="screenshot-caption">图7.1 边缘服务器管理页面</div>
+            </div>
+            <div class="step">边缘服务器会自动注册到中央管理系统</div>
+            <div class="step">可以查看边缘服务器的详细信息：
+                <ul>
+                    <li><strong>服务器ID：</strong>唯一标识符</li>
+                    <li><strong>服务器名称：</strong>友好名称</li>
+                    <li><strong>IP地址：</strong>网络地址</li>
+                    <li><strong>状态：</strong>在线/离线状态</li>
+                    <li><strong>版本信息：</strong>软件版本</li>
+                    <li><strong>资源使用情况：</strong>CPU、内存、磁盘使用率</li>
+                </ul>
+            </div>
+            <div class="step">支持对边缘服务器进行远程配置和管理</div>
+        </div>
+
+        <div id="edge-monitoring">
+            <h3>7.2 边缘服务器监控</h3>
+            <div class="step">实时监控边缘服务器的运行状态</div>
+            <div class="screenshot">
+                <img src="./images/help/edge-monitoring.png" alt="边缘服务器监控页面">
+                <div class="screenshot-caption">图7.2 边缘服务器监控页面</div>
+            </div>
+            <div class="step">查看系统资源使用情况：
+                <ul>
+                    <li>CPU使用率</li>
+                    <li>内存使用率</li>
+                    <li>磁盘使用率</li>
+                    <li>网络流量</li>
+                </ul>
+            </div>
+            <div class="step">查看边缘服务器上运行的检测任务</div>
+            <div class="step">监控数据传输和处理性能</div>
+            <div class="success">
+                <strong>边缘计算优势：</strong>
+                <ul>
+                    <li>🚀 低延迟：本地处理，减少网络延迟</li>
+                    <li>💾 节省带宽：本地分析，只传输关键数据</li>
+                    <li>🔒 数据安全：敏感数据无需上传到云端</li>
+                    <li>⚡ 高可用：分布式架构，提高系统可靠性</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <div id="heatmap-management" class="section">
+        <h2>8. 热力图管理</h2>
+        <p>热力图管理模块提供人群分布可视化功能，支持创建自定义热力图、配置监控区域、绑定数据源等。</p>
+        
+        <div id="heatmap-creation">
+            <h3>8.1 创建热力图</h3>
+            <div class="step">进入"热力图管理"页面</div>
+            <div class="screenshot">
+                <img src="./images/help/heatmap-creation.png" alt="创建热力图页面">
+                <div class="screenshot-caption">图8.1 创建热力图页面</div>
+            </div>
+            <div class="step">点击"新建热力图"按钮</div>
+            <div class="step">上传地图背景图片（支持JPG、PNG格式）</div>
+            <div class="step">设置热力图基本信息：
+                <ul>
+                    <li><strong>地图名称：</strong>便于识别的名称</li>
+                    <li><strong>描述信息：</strong>地图用途说明</li>
+                    <li><strong>地图尺寸：</strong>实际物理尺寸</li>
+                </ul>
+            </div>
+            <div class="step">保存热力图配置</div>
+        </div>
+
+        <div id="heatmap-configuration">
+            <h3>8.2 热力图配置</h3>
+            <div class="step">编辑热力图配置</div>
+            <div class="screenshot">
+                <img src="./images/help/heatmap-edit.png" alt="编辑热力图配置">
+                <div class="screenshot-caption">图8.2 编辑热力图配置</div>
+            </div>
+            <div class="step">在热力图编辑界面绘制监控区域：
+                <ul>
+                    <li>使用多边形工具绘制区域边界</li>
+                    <li>设置区域名称和属性</li>
+                    <li>配置区域颜色和样式</li>
+                </ul>
+            </div>
+            <div class="step">为每个区域绑定数据源：
+                <ul>
+                    <li>选择对应的人群分析任务</li>
+                    <li>设置数据更新间隔</li>
+                    <li>配置预警阈值</li>
+                </ul>
+            </div>
+            <div class="step">设置显示选项：
+                <ul>
+                    <li>人数显示格式</li>
+                    <li>密度计算方式</li>
+                    <li>颜色映射规则</li>
+                </ul>
+            </div>
+            <div class="step">预览和测试热力图效果</div>
+        </div>
+
+        <div id="heatmap-dashboard">
+            <h3>8.3 数据大屏</h3>
+            <div class="step">进入"数据大屏"页面查看实时数据可视化</div>
+            <div class="screenshot">
+                <img src="./images/help/heatmap-dashboard.png" alt="数据可视化页面">
+                <div class="screenshot-caption">图8.3 数据可视化页面</div>
+            </div>
+            <div class="step">大屏包含以下模块：
+                <ul>
+                    <li><strong>园区概况：</strong>显示任务数量、设备数量、事件统计等</li>
+                    <li><strong>人数热力图：</strong>实时显示各区域人员分布</li>
+                    <li><strong>检测告警数据：</strong>各类检测事件统计</li>
+                    <li><strong>游客分布：</strong>人员在各区域的分布情况</li>
+                    <li><strong>事件告警信息：</strong>最新的异常事件列表</li>
+                </ul>
+            </div>
+            <div class="step">支持大屏数据绑定管理：
+                <ul>
+                    <li>配置数据源映射</li>
+                    <li>设置自动刷新间隔</li>
+                    <li>自定义显示内容</li>
+                </ul>
+            </div>
+            <div class="step">热力图交互功能：
+                <ul>
+                    <li>鼠标悬停显示区域信息</li>
+                    <li>点击区域查看详细数据</li>
+                    <li>地图缩放和拖拽</li>
+                </ul>
+            </div>
+            <div class="note">
+                <strong>热力图功能特点：</strong>
+                <ul>
+                    <li>📊 实时数据：数据自动更新，反映当前状态</li>
+                    <li>🎨 可视化：直观的颜色映射，一目了然</li>
+                    <li>🖱️ 交互式：支持鼠标交互，查看详细信息</li>
+                    <li>⚙️ 可配置：灵活的配置选项，满足不同需求</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
     <div id="system-management" class="section">
-        <h2>7. 系统管理</h2>
+        <h2>9. 系统管理</h2>
         <div id="system-status">
-            <h3>7.1 系统状态</h3>
+            <h3>9.1 系统状态</h3>
             <div class="step">进入"系统管理"页面</div>
+            <div class="screenshot">
+                <img src="./images/help/system-status.png" alt="系统状态页面">
+                <div class="screenshot-caption">图9.1 系统状态页面</div>
+            </div>
             <div class="step">查看系统运行状态：
                 <ul>
                     <li>CPU使用率</li>
@@ -503,8 +784,12 @@
         </div>
 
         <div id="system-logs">
-            <h3>7.2 系统日志</h3>
+            <h3>9.2 系统日志</h3>
             <div class="step">进入"系统日志"页面</div>
+            <div class="screenshot">
+                <img src="./images/help/system-logs.png" alt="系统日志">
+                <div class="screenshot-caption">图9.2 系统日志</div>
+            </div>
             <div class="step">可以查看以下类型的日志：
                 <ul>
                     <li>系统操作日志</li>
@@ -520,42 +805,99 @@
     </div>
 
     <div id="faq" class="section">
-        <h2>8. 常见问题</h2>
+        <h2>10. 常见问题</h2>
         <div id="device-issues">
-            <h3>8.1 设备连接问题</h3>
+            <h3>10.1 设备连接问题</h3>
             <div class="step">检查设备IP地址和端口是否正确</div>
             <div class="step">确认用户名和密码是否正确</div>
             <div class="step">检查网络连接是否正常</div>
-            <div class="step">查看设备连接日志</div>
+            <div class="step">确认设备是否支持RTSP协议</div>
+            <div class="step">查看设备连接日志获取详细错误信息</div>
+            <div class="warning">
+                <strong>常见错误：</strong>
+                <ul>
+                    <li>连接超时：检查网络连通性和防火墙设置</li>
+                    <li>认证失败：确认用户名密码正确</li>
+                    <li>协议不支持：确认设备支持所选协议</li>
+                </ul>
+            </div>
         </div>
 
         <div id="detection-issues">
-            <h3>8.2 检测问题</h3>
+            <h3>10.2 检测问题</h3>
             <div class="step">确认已选择正确的检测模型</div>
-            <div class="step">检查视频流是否正常</div>
-            <div class="step">调整检测参数（如灵敏度）</div>
-            <div class="step">检查检测配置是否正确</div>
-            <div class="step">查看检测日志</div>
+            <div class="step">检查视频流是否正常播放</div>
+            <div class="step">调整检测参数（如灵敏度、置信度阈值）</div>
+            <div class="step">检查检测区域设置是否正确</div>
+            <div class="step">确认目标类别配置正确</div>
+            <div class="step">查看检测日志分析问题原因</div>
+            <div class="note">
+                <strong>检测优化建议：</strong>
+                <ul>
+                    <li>根据场景选择合适的模型</li>
+                    <li>调整检测区域避免干扰</li>
+                    <li>设置合理的置信度阈值</li>
+                    <li>定期更新和优化模型</li>
+                </ul>
+            </div>
         </div>
 
         <div id="push-issues">
-            <h3>8.3 推送问题</h3>
+            <h3>10.3 数据推送问题</h3>
             <div class="step">检查推送配置是否正确</div>
             <div class="step">确认目标服务器是否可访问</div>
-            <div class="step">查看推送日志</div>
-            <div class="step">检查网络连接状态</div>
+            <div class="step">验证推送格式和数据结构</div>
+            <div class="step">检查网络连接和防火墙设置</div>
+            <div class="step">查看推送日志分析失败原因</div>
+            <div class="step">测试推送连接是否正常</div>
+        </div>
+
+        <div id="heatmap-issues">
+            <h3>10.4 热力图问题</h3>
+            <div class="step">检查地图图片是否正确上传</div>
+            <div class="step">确认区域绘制是否完整</div>
+            <div class="step">验证数据源绑定是否正确</div>
+            <div class="step">检查人群分析任务是否正常运行</div>
+            <div class="step">确认数据更新频率设置</div>
+        </div>
+
+        <div id="performance-issues">
+            <h3>10.5 性能问题</h3>
+            <div class="step">监控系统资源使用情况：
+                <ul>
+                    <li>CPU使用率过高：减少并发检测任务</li>
+                    <li>内存不足：优化模型参数或增加内存</li>
+                    <li>磁盘空间不足：清理历史数据和日志</li>
+                    <li>网络带宽不足：优化视频流参数</li>
+                </ul>
+            </div>
+            <div class="step">优化检测配置：
+                <ul>
+                    <li>调整检测频率</li>
+                    <li>选择合适的模型大小</li>
+                    <li>设置合理的检测区域</li>
+                </ul>
+            </div>
         </div>
 
         <div id="system-issues">
-            <h3>8.4 系统问题</h3>
-            <div class="step">检查系统资源使用情况</div>
+            <h3>10.6 系统问题</h3>
+            <div class="step">检查系统服务状态</div>
             <div class="step">查看系统错误日志</div>
-            <div class="step">确认服务是否正常运行</div>
-            <div class="step">检查系统配置是否正确</div>
+            <div class="step">确认数据库连接正常</div>
+            <div class="step">检查系统配置文件</div>
+            <div class="step">验证依赖服务是否正常</div>
+            <div class="step">重启相关服务或系统</div>
         </div>
 
         <div class="success">
-            <strong>提示：</strong>如果遇到问题，可以查看系统日志或联系管理员。
+            <strong>技术支持：</strong>
+            <ul>
+                <li>📖 查看详细日志获取更多信息</li>
+                <li>🔧 使用系统诊断工具检查问题</li>
+                <li>📞 联系技术支持获取专业帮助</li>
+                <li>💬 访问在线文档和社区论坛</li>
+            </ul>
         </div>
     </div>
 

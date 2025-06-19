@@ -594,7 +594,7 @@
     <el-dialog
       v-model="originalImageVisible"
       title="原图预览"
-      width="95vw"
+      width="40vw"
       :close-on-click-modal="false"
       :z-index="100001"
       append-to-body

@@ -16,7 +16,7 @@ heatmap_router = APIRouter(prefix="/heatmap", tags=["热力图管理"])
 # 文件上传配置
 UPLOAD_FOLDER = 'uploads/heatmaps'
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
-MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
 
 # Pydantic 模型
 class HeatmapMapCreate(BaseModel):

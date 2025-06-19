@@ -529,10 +529,10 @@
               placeholder="保存路径前缀，如：images/events"
               style="width: 200px"
             />
-            <!-- <div class="image-options">
+            <div class="image-options">
               <el-switch
                 v-model="imageField.generate_thumbnail"
-                active-text="生成缩略图"
+                active-text="缩略图"
               />
               <el-input-number
                 v-if="imageField.generate_thumbnail"
@@ -540,9 +540,9 @@
                 :min="50"
                 :max="500"
                 placeholder="尺寸"
-                style="width: 80px; margin-left: 8px"
+                style="width: 120px; margin-left: 8px"
               />
-            </div> -->
+            </div>
             <el-button
               type="danger"
               size="small"
@@ -1018,7 +1018,7 @@ const addImageFieldConfig = () => {
     field_name: '',
     encoding: 'base64',
     save_path: 'images/events',
-    generate_thumbnail: true,
+    generate_thumbnail: false,
     thumbnail_size: 200
   })
 }

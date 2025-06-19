@@ -32,7 +32,7 @@
             <span>22°C</span>
           </div>
         </div>
-        
+
       </div>
     </div>
 
@@ -108,7 +108,7 @@
         <!-- 游客分布 -->
         <!-- 游客分布为人群分析中各任务的游客数量 -->
         <div class="panel staff-distribution">
-          <h3 class="panel-title">游客分布</h3>         
+          <h3 class="panel-title">游客分布</h3>
           <div class="distribution-list">
             <div class="distribution-item" v-for="item in staffDistribution" :key="item.area">
               <div class="area-name">{{ item.area }}</div>
@@ -128,8 +128,10 @@
         <div class="panel alert-data">
           <h3 class="panel-title">检测告警数据</h3>
           <div class="alert-stats">
-            <div class="alert-item" v-for="(item,index) in alertData" :key="item.engine_name">
-              <div class="alert-value" :class="index === alertData.length - 1 ? 'danger' : index%4 === 0 ? 'warning' : index%4 === 1 ? 'info' : index%4 === 2 ? 'success' : 'danger'">{{ item.detection_count }}</div>
+            <div class="alert-item" v-for="(item, index) in alertData" :key="item.engine_name">
+              <div class="alert-value"
+                :class="index === alertData.length - 1 ? 'danger' : index % 4 === 0 ? 'warning' : index % 4 === 1 ? 'info' : index % 4 === 2 ? 'success' : 'danger'">
+                {{ item.detection_count }}</div>
               <div class="alert-label">{{ item.engine_name }}</div>
             </div>
           </div>
@@ -160,12 +162,8 @@
               <div class="col">状态</div>
             </div>
             <div class="table-body">
-              <div 
-                v-for="alert in alertHistory" 
-                :key="alert.id"
-                class="table-row"
-                :class="{ 'highlight': alert.isNew }"
-              >
+              <div v-for="alert in alertHistory" :key="alert.id" class="table-row"
+                :class="{ 'highlight': alert.isNew }">
                 <div class="col">{{ alert.type }}</div>
                 <div class="col">{{ alert.device }}</div>
                 <div class="col">{{ alert.name }}</div>
@@ -196,88 +194,77 @@
                 <div class="behavior-name">{{ item.name }}</div>
                 <div class="behavior-value">{{ item.value }}</div>
                 <div class="behavior-trend" :class="item.trend > 0 ? 'up' : item.trend < 0 ? 'down' : 'equal'">
-                  {{ item.trend > 0 ? '↑' :item.trend < 0 ? '↓' : '-' }} {{ Math.abs(item.trend) }}%
+                  {{ item.trend > 0 ? '↑' : item.trend < 0 ? '↓' : '-' }} {{ Math.abs(item.trend) }}% </div>
                 </div>
               </div>
             </div>
           </div>
-        </div>
 
-        <!-- 历史数据事件 -->
-        <!-- 历史数据事件为数据事件列表中的历史事件统计 -->
-        <div class="panel compliance-chart">
-          <h3 class="panel-title">历史数据事件</h3>
-          <div class="chart-container">
-            <div ref="complianceChartRef" class="chart"></div>
+          <!-- 历史数据事件 -->
+          <!-- 历史数据事件为数据事件列表中的历史事件统计 -->
+          <div class="panel compliance-chart">
+            <h3 class="panel-title">历史数据事件</h3>
+            <div class="chart-container">
+              <div ref="complianceChartRef" class="chart"></div>
+            </div>
           </div>
-        </div>
 
-        <!-- 最新报警推送 -->
-        <!-- 最新报警推送为数据事件列表中的最新报警推送 -->
-        <div class="panel live-monitor">
-          <h3 class="panel-title">最新报警推送</h3>
-          <div class="monitor-grid">
-            <div class="monitor-item" v-for="monitor in liveMonitors" :key="monitor.id">
-              <div class="monitor-screen">
-                <img :src="getImageUrl(monitor.image)" :alt="monitor.name" @error="handleImageError" />
-                <div class="monitor-overlay">
-                  <div class="monitor-name">{{ monitor.name }}</div>
-                  <div class="monitor-status" :class="monitor.status">
-                    {{ monitor.statusText }}
+          <!-- 最新报警推送 -->
+          <!-- 最新报警推送为数据事件列表中的最新报警推送 -->
+          <div class="panel live-monitor">
+            <h3 class="panel-title">最新报警推送</h3>
+            <div class="monitor-grid">
+              <div class="monitor-item" v-for="monitor in liveMonitors" :key="monitor.id">
+                <div class="monitor-screen">
+                  <img :src="getImageUrl(monitor.image)" :alt="monitor.name" @error="handleImageError" />
+                  <div class="monitor-overlay">
+                    <div class="monitor-name">{{ monitor.name }}</div>
+                    <div class="monitor-status" :class="monitor.status">
+                      {{ monitor.statusText }}
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
           </div>
-        </div>
 
-        <!-- 检测占比分类 -->
-        <!-- 检测占比分类为检测各类型分析对应的风险占比分类 -->
-        <div class="panel risk-distribution">
-          <h3 class="panel-title">检测占比分类</h3>
-          <div class="chart-container">
-            <div ref="riskChartRef" class="chart"></div>
+          <!-- 检测占比分类 -->
+          <!-- 检测占比分类为检测各类型分析对应的风险占比分类 -->
+          <div class="panel risk-distribution">
+            <h3 class="panel-title">检测占比分类</h3>
+            <div class="chart-container">
+              <div ref="riskChartRef" class="chart"></div>
+            </div>
           </div>
         </div>
       </div>
-    </div>
 
-    <!-- 地图缩放对话框 -->
-    <el-dialog 
-      v-model="showMapZoomDialog" 
-      title="地图预览" 
-      width="85%" 
-      :top="'3vh'"
-      class="dashboard-map-dialog"
-      :show-close="false"
-    >
-      <template #header>
-        <div class="dialog-header-custom">
-          <div class="dialog-title-custom">
-            <span class="title-icon">🗺️</span>
-            <span class="title-text">地图预览</span>
-          </div>
-          <div class="dialog-controls">
-            <div class="zoom-info">
-              缩放: {{ Math.round(zoomState.scale * 100) }}%
+      <!-- 地图缩放对话框 -->
+      <el-dialog v-model="showMapZoomDialog" title="地图预览" width="85%" :top="'3vh'" class="dashboard-map-dialog"
+        :show-close="false">
+        <template #header>
+          <div class="dialog-header-custom">
+            <div class="dialog-title-custom">
+              <span class="title-icon">🗺️</span>
+              <span class="title-text">地图预览</span>
             </div>
-            <button @click="showMapZoomDialog = false" class="close-btn-custom">&times;</button>
+            <div class="dialog-controls">
+              <div class="zoom-info">
+                缩放: {{ Math.round(zoomState.scale * 100) }}%
+              </div>
+              <button @click="showMapZoomDialog = false" class="close-btn-custom">
+                <span class="btn-icon">✕</span>
+                <span>关闭</span>
+              </button>
+            </div>
           </div>
-        </div>
-      </template>
-      
-      <div class="map-zoom-container">
-        <canvas 
-          ref="zoomCanvas" 
-          class="zoom-canvas"
-          @wheel="handleZoomWheel"
-          @mousedown="handleZoomMouseDown"
-          @mousemove="handleZoomMouseMove"
-          @mouseup="handleZoomMouseUp"
-          @mouseleave="handleZoomMouseUp"
-          @dblclick="resetZoom"
-        ></canvas>
-        <!-- <div class="zoom-controls">
+        </template>
+
+        <div class="map-zoom-container">
+          <canvas ref="zoomCanvas" class="zoom-canvas" @wheel="handleZoomWheel" @mousedown="handleZoomMouseDown"
+            @mousemove="handleZoomMouseMove" @mouseup="handleZoomMouseUp" @mouseleave="handleZoomMouseUp"
+            @dblclick="resetZoom"></canvas>
+          <!-- <div class="zoom-controls">
           <div class="control-group">
             <button @click="zoomIn" class="zoom-btn zoom-in" title="放大">
               <span>+</span>
@@ -290,38 +277,38 @@
             </button>
           </div>
         </div> -->
-        <div class="zoom-tips">
-          <div class="tip-item">🖱️ 滚轮缩放</div>
-          <div class="tip-item">✋ 拖拽移动</div>
-          <div class="tip-item">🔄 双击重置</div>
+          <div class="zoom-tips">
+            <div class="tip-item">🖱️ 滚轮缩放</div>
+            <div class="tip-item">✋ 拖拽移动</div>
+            <div class="tip-item">🔄 双击重置</div>
+          </div>
         </div>
-      </div>
-      
-      <template #footer>
-        <div class="dialog-footer-custom">
-          <button @click="showMapZoomDialog = false" class="footer-btn secondary">
-            <span class="btn-icon">✕</span>
-            <span>关闭</span>
-          </button>
-          <button @click="goToHeatMapManagement" class="footer-btn primary">
-            <span class="btn-icon">⚙️</span>
-            <span>管理设置</span>
-          </button>
-        </div>
-      </template>
-    </el-dialog>
 
-    <!-- 数据绑定管理器 -->
-    <div v-if="showDataBindingManager" class="data-binding-overlay">
-      <div class="data-binding-modal">
-        <div class="modal-header">
-          <h2>数据绑定管理</h2>
-          <button @click="showDataBindingManager = false" class="close-btn">&times;</button>
+        <template #footer>
+          <div class="dialog-footer-custom">
+            <!-- <button @click="showMapZoomDialog = false" class="footer-btn secondary">
+              <span class="btn-icon">✕</span>
+              <span>关闭</span>
+            </button> -->
+            <button @click="goToHeatMapManagement" class="footer-btn primary">
+              <span class="btn-icon">⚙️</span>
+              <span>管理设置</span>
+            </button>
+          </div>
+        </template>
+      </el-dialog>
+
+      <!-- 数据绑定管理器 -->
+      <div v-if="showDataBindingManager" class="data-binding-overlay">
+        <div class="data-binding-modal">
+          <div class="modal-header">
+            <h2>数据绑定管理</h2>
+            <button @click="showDataBindingManager = false" class="close-btn">&times;</button>
+          </div>
+          <DataBindingManager />
         </div>
-        <DataBindingManager />
       </div>
     </div>
-  </div>
 </template>
 
 <script setup>
@@ -371,7 +358,7 @@ const initializeDataBinding = () => {
     dataBindingManager.registerModule(moduleId, config)
     // console.log(`已注册模块: ${moduleId}`)
   })
-  
+
   // 配置全局设置
   dataBindingManager.updateGlobalConfig({
     autoRefresh: true, // 默认关闭自动刷新
@@ -408,7 +395,7 @@ const factoryData = computed(() => {
     return dashboardModulesConfig[DASHBOARD_MODULES.FACTORY_OVERVIEW]?.fallbackData || {}
   }
   return dataBindingManager.getModuleData(DASHBOARD_MODULES.FACTORY_OVERVIEW) ||
-         dashboardModulesConfig[DASHBOARD_MODULES.FACTORY_OVERVIEW]?.fallbackData || {}
+    dashboardModulesConfig[DASHBOARD_MODULES.FACTORY_OVERVIEW]?.fallbackData || {}
 })
 
 const alertData = computed(() => {
@@ -416,7 +403,7 @@ const alertData = computed(() => {
     return dashboardModulesConfig[DASHBOARD_MODULES.ALERT_DATA]?.fallbackData || {}
   }
   return dataBindingManager.getModuleData(DASHBOARD_MODULES.ALERT_DATA) ||
-         dashboardModulesConfig[DASHBOARD_MODULES.ALERT_DATA]?.fallbackData || {}
+    dashboardModulesConfig[DASHBOARD_MODULES.ALERT_DATA]?.fallbackData || {}
 })
 
 const staffDistribution = computed(() => {
@@ -424,7 +411,7 @@ const staffDistribution = computed(() => {
     return dashboardModulesConfig[DASHBOARD_MODULES.STAFF_DISTRIBUTION]?.fallbackData || []
   }
   return dataBindingManager.getModuleData(DASHBOARD_MODULES.STAFF_DISTRIBUTION) ||
-         dashboardModulesConfig[DASHBOARD_MODULES.STAFF_DISTRIBUTION]?.fallbackData || []
+    dashboardModulesConfig[DASHBOARD_MODULES.STAFF_DISTRIBUTION]?.fallbackData || []
 })
 
 const monitoringPoints = computed(() => {
@@ -432,7 +419,7 @@ const monitoringPoints = computed(() => {
     return dashboardModulesConfig[DASHBOARD_MODULES.MONITORING_POINTS]?.fallbackData || []
   }
   return dataBindingManager.getModuleData(DASHBOARD_MODULES.MONITORING_POINTS) ||
-         dashboardModulesConfig[DASHBOARD_MODULES.MONITORING_POINTS]?.fallbackData || []
+    dashboardModulesConfig[DASHBOARD_MODULES.MONITORING_POINTS]?.fallbackData || []
 })
 
 const alertHistory = computed(() => {
@@ -440,7 +427,7 @@ const alertHistory = computed(() => {
     return dashboardModulesConfig[DASHBOARD_MODULES.ALERT_HISTORY]?.fallbackData || []
   }
   return dataBindingManager.getModuleData(DASHBOARD_MODULES.ALERT_HISTORY) ||
-         dashboardModulesConfig[DASHBOARD_MODULES.ALERT_HISTORY]?.fallbackData || []
+    dashboardModulesConfig[DASHBOARD_MODULES.ALERT_HISTORY]?.fallbackData || []
 })
 
 const behaviorStats = computed(() => {
@@ -448,7 +435,7 @@ const behaviorStats = computed(() => {
     return dashboardModulesConfig[DASHBOARD_MODULES.BEHAVIOR_STATS]?.fallbackData || []
   }
   return dataBindingManager.getModuleData(DASHBOARD_MODULES.BEHAVIOR_STATS) ||
-         dashboardModulesConfig[DASHBOARD_MODULES.BEHAVIOR_STATS]?.fallbackData || []
+    dashboardModulesConfig[DASHBOARD_MODULES.BEHAVIOR_STATS]?.fallbackData || []
 })
 
 const liveMonitors = computed(() => {
@@ -456,7 +443,7 @@ const liveMonitors = computed(() => {
     return dashboardModulesConfig[DASHBOARD_MODULES.LIVE_MONITORS]?.fallbackData || []
   }
   return dataBindingManager.getModuleData(DASHBOARD_MODULES.LIVE_MONITORS) ||
-         dashboardModulesConfig[DASHBOARD_MODULES.LIVE_MONITORS]?.fallbackData || []
+    dashboardModulesConfig[DASHBOARD_MODULES.LIVE_MONITORS]?.fallbackData || []
 })
 
 const historicalStats = computed(() => {
@@ -464,7 +451,7 @@ const historicalStats = computed(() => {
     return dashboardModulesConfig[DASHBOARD_MODULES.HISTORICAL_STATS]?.fallbackData || []
   }
   return dataBindingManager.getModuleData(DASHBOARD_MODULES.HISTORICAL_STATS) ||
-         dashboardModulesConfig[DASHBOARD_MODULES.HISTORICAL_STATS]?.fallbackData || []
+    dashboardModulesConfig[DASHBOARD_MODULES.HISTORICAL_STATS]?.fallbackData || []
 })
 
 // 模块状态
@@ -506,7 +493,7 @@ const initCharts = () => {
 // 更新安全作业合格率图表
 const updateSafetyChart = () => {
   if (!safetyChart) return
-  
+
   safetyChart.setOption({
     backgroundColor: 'transparent',
     grid: {
@@ -523,25 +510,25 @@ const updateSafetyChart = () => {
       textStyle: {
         color: '#ffffff'
       },
-      formatter: function(params) {
-        return params[0].name + '<br/>' + 
-               '<span style="color:#ff8a65;">排队时长:</span> ' + 
-               params[0].value + ' 分钟';
+      formatter: function (params) {
+        return params[0].name + '<br/>' +
+          '<span style="color:#ff8a65;">排队时长:</span> ' +
+          params[0].value + ' 分钟';
       }
     },
     xAxis: {
       type: 'category',
       data: ['A区', 'B区', 'C区', 'D区', 'E区'],
-      axisLabel: { 
+      axisLabel: {
         color: '#ffffff',
         fontSize: 12,
         fontWeight: 'bold'
       },
-      axisLine: { 
-        lineStyle: { 
+      axisLine: {
+        lineStyle: {
           color: '#ff8a65',
           width: 2
-        } 
+        }
       },
       axisTick: {
         lineStyle: { color: '#ff8a65' }
@@ -550,23 +537,23 @@ const updateSafetyChart = () => {
     yAxis: {
       type: 'value',
       max: 100,
-      axisLabel: { 
+      axisLabel: {
         color: '#ffffff',
         fontSize: 12,
         fontWeight: 'bold',
         formatter: '{value} 分钟'
       },
-      axisLine: { 
-        lineStyle: { 
+      axisLine: {
+        lineStyle: {
           color: '#ff8a65',
           width: 2
-        } 
+        }
       },
-      splitLine: { 
-        lineStyle: { 
+      splitLine: {
+        lineStyle: {
           color: 'rgba(255, 138, 101, 0.3)',
           type: 'dashed'
-        } 
+        }
       }
     },
     series: [{
@@ -593,14 +580,14 @@ const updateSafetyChart = () => {
 // 更新历史数据事件图表
 const updateComplianceChart = () => {
   if (!complianceChart) return
-  
+
   // 确保有数据
   const chartData = historicalStats.value || []
-  
+
   // 动态计算Y轴最大值
   const maxValue = Math.max(...chartData.map(item => item.value || 0), 100)
   const yAxisMax = Math.ceil(maxValue * 1.2) // 增加20%的缓冲
-  
+
   complianceChart.setOption({
     backgroundColor: 'transparent',
     grid: {
@@ -609,7 +596,7 @@ const updateComplianceChart = () => {
       top: '20%',
       bottom: '25%'
     },
-    tooltip: { 
+    tooltip: {
       trigger: 'axis',
       backgroundColor: 'rgba(30, 60, 114, 0.9)',
       borderColor: '#ff8a65',
@@ -617,11 +604,11 @@ const updateComplianceChart = () => {
       textStyle: {
         color: '#ffffff'
       },
-      formatter: function(params) {
+      formatter: function (params) {
         if (params && params[0]) {
-          return params[0].name + '<br/>' + 
-                 '<span style="color:#ff8a65;">事件数量:</span> ' + 
-                 params[0].value;
+          return params[0].name + '<br/>' +
+            '<span style="color:#ff8a65;">事件数量:</span> ' +
+            params[0].value;
         }
         return '';
       }
@@ -635,18 +622,18 @@ const updateComplianceChart = () => {
         // return `${date.getMonth() + 1}/${date.getDate()}`
         return date.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })
       }),
-      axisLabel: { 
+      axisLabel: {
         color: '#ffffff',
         fontSize: 10,
         fontWeight: 'bold',
         rotate: chartData.length > 6 ? 45 : 0, // 数据点多时旋转标签
         interval: 0 // 显示所有标签
       },
-      axisLine: { 
-        lineStyle: { 
+      axisLine: {
+        lineStyle: {
           color: '#ff8a65',
           width: 2
-        } 
+        }
       },
       axisTick: {
         lineStyle: { color: '#ff8a65' }
@@ -655,22 +642,22 @@ const updateComplianceChart = () => {
     yAxis: {
       type: 'value',
       max: yAxisMax,
-      axisLabel: { 
+      axisLabel: {
         color: '#ffffff',
         fontSize: 12,
         fontWeight: 'bold'
       },
-      axisLine: { 
-        lineStyle: { 
+      axisLine: {
+        lineStyle: {
           color: '#ff8a65',
           width: 2
-        } 
+        }
       },
-      splitLine: { 
-        lineStyle: { 
+      splitLine: {
+        lineStyle: {
           color: 'rgba(255, 138, 101, 0.3)',
           type: 'dashed'
-        } 
+        }
       }
     },
     series: [{
@@ -679,13 +666,13 @@ const updateComplianceChart = () => {
       smooth: true,
       symbol: 'circle',
       symbolSize: 8,
-      lineStyle: { 
-        color: '#ff8a65', 
+      lineStyle: {
+        color: '#ff8a65',
         width: 4,
         shadowBlur: 15,
         shadowColor: 'rgba(255, 138, 101, 0.5)'
       },
-      itemStyle: { 
+      itemStyle: {
         color: '#ff8a65',
         borderColor: '#ffffff',
         borderWidth: 3,
@@ -707,10 +694,10 @@ const updateComplianceChart = () => {
 // 更新检测类型占比分类图表
 const updateRiskChart = () => {
   if (!riskChart) return
-  
+
   // 计算总值
   const total = behaviorStats.value.reduce((sum, item) => sum + item.value, 0)
-  
+
   // 使用 behaviorStats 数据，并计算百分比
   const chartData = behaviorStats.value.map(item => ({
     value: total > 0 ? Number(((item.value / total) * 100).toFixed(1)) : 0,
@@ -772,7 +759,7 @@ const updateTime = () => {
 // 刷新数据的方法
 const refreshData = async () => {
   if (isRefreshing.value) return
-  
+
   // console.log('手动刷新大屏数据...')
   isRefreshing.value = true
   try {
@@ -816,7 +803,7 @@ const getModuleInfo = (moduleId) => {
   const module = dataBindingManager.getModule(moduleId)
   const status = modulesStatus.value[moduleId]
   const config = dashboardModulesConfig[moduleId]
-  
+
   return {
     module,
     status,
@@ -828,10 +815,10 @@ const getModuleInfo = (moduleId) => {
 onMounted(async () => {
   updateTime()
   timeInterval = setInterval(updateTime, 1000)
-  
+
   // 模块已经在setup阶段初始化了，这里只需要加载数据
   // console.log('开始加载模块数据...')
-  
+
   try {
     // 加载初始数据
     await dataBindingManager.loadAllModules()
@@ -841,13 +828,13 @@ onMounted(async () => {
     //   factoryData: factoryData.value,
     //   staffDistribution: staffDistribution.value
     // })
-    
+
     // 可选：启动自动刷新（默认是关闭的）
     // dataBindingManager.startAutoRefresh()
   } catch (error) {
     // console.error('模块数据加载失败:', error)
   }
-  
+
   // 延迟初始化图表，确保DOM已渲染
   setTimeout(() => {
     initCharts()
@@ -881,29 +868,29 @@ const handleOpenMapZoom = (data) => {
 
 const drawZoomCanvas = () => {
   if (!zoomCanvas.value || !mapZoomData.value.mapImage) return
-  
+
   const canvas = zoomCanvas.value
   const ctx = canvas.getContext('2d')
-  
+
   // 设置canvas尺寸
   const container = canvas.parentElement
   const rect = container.getBoundingClientRect()
   canvas.width = rect.width
   canvas.height = rect.height
-  
+
   // 清除画布
   ctx.clearRect(0, 0, canvas.width, canvas.height)
-  
+
   // 计算绘制参数
   const scale = Math.min(canvas.width / mapZoomData.value.mapImage.width, canvas.height / mapZoomData.value.mapImage.height) * zoomState.scale
   const mapWidth = mapZoomData.value.mapImage.width * scale
   const mapHeight = mapZoomData.value.mapImage.height * scale
   const x = (canvas.width - mapWidth) / 2 + zoomState.offsetX
   const y = (canvas.height - mapHeight) / 2 + zoomState.offsetY
-  
+
   // 绘制地图
   ctx.drawImage(mapZoomData.value.mapImage, x, y, mapWidth, mapHeight)
-  
+
   // 绘制区域
   mapZoomData.value.areas.forEach(area => {
     if (area.points && area.points.length >= 3) {
@@ -914,50 +901,50 @@ const drawZoomCanvas = () => {
 
 const drawAreaOnZoomCanvas = (ctx, area, transform) => {
   if (!area.points || area.points.length < 3) return
-  
+
   const { x: offsetX, y: offsetY, scale } = transform
-  
+
   ctx.beginPath()
   const firstPoint = area.points[0]
   ctx.moveTo(firstPoint.x * scale + offsetX, firstPoint.y * scale + offsetY)
-  
+
   area.points.forEach(point => {
     ctx.lineTo(point.x * scale + offsetX, point.y * scale + offsetY)
   })
   ctx.closePath()
-  
+
   // 填充颜色
   const areaColor = area.color ? area.color.replace(/[\d\.]+\)$/g, '0.4)') : 'rgba(74, 144, 226, 0.4)'
   ctx.fillStyle = areaColor
   ctx.fill()
-  
+
   // 绘制边框
   const borderColor = area.color ? area.color.replace(/rgba?/, 'rgb').replace(/,\s*[\d\.]+\)/, ')') : '#4a90e2'
   ctx.strokeStyle = borderColor
   ctx.lineWidth = Math.max(2, scale * 2)
   ctx.stroke()
-  
+
   // 绘制标签
   const center = calculateAreaCenter(area)
   const centerX = center.x * scale + offsetX
   const centerY = center.y * scale + offsetY
-  
+
   const fontSize = Math.max(12, Math.min(24, scale * 16))
-  
+
   ctx.fillStyle = '#333'
   ctx.font = `bold ${fontSize}px Arial`
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
-  
+
   // 添加文字阴影效果
   ctx.shadowColor = 'rgba(255, 255, 255, 0.8)'
   ctx.shadowBlur = 3
   ctx.shadowOffsetX = 1
   ctx.shadowOffsetY = 1
-  
+
   ctx.fillText(area.name, centerX, centerY - fontSize * 0.6)
   ctx.fillText(`${area.currentCount || 0}人`, centerX, centerY + fontSize * 0.6)
-  
+
   // 重置阴影
   ctx.shadowColor = 'transparent'
   ctx.shadowBlur = 0
@@ -967,10 +954,10 @@ const drawAreaOnZoomCanvas = (ctx, area, transform) => {
 
 const calculateAreaCenter = (area) => {
   if (!area.points || area.points.length === 0) return { x: 0, y: 0 }
-  
+
   const sumX = area.points.reduce((sum, point) => sum + point.x, 0)
   const sumY = area.points.reduce((sum, point) => sum + point.y, 0)
-  
+
   return {
     x: sumX / area.points.length,
     y: sumY / area.points.length
@@ -981,37 +968,37 @@ const handleZoomWheel = (event) => {
   event.preventDefault()
   const delta = event.deltaY > 0 ? 0.9 : 1.1
   const newScale = Math.max(0.5, Math.min(5, zoomState.scale * delta))
-  
+
   // 计算鼠标在canvas上的位置
   const rect = event.target.getBoundingClientRect()
   const mouseX = event.clientX - rect.left
   const mouseY = event.clientY - rect.top
-  
+
   // 计算当前图像的实际显示位置和尺寸
   const currentImageScale = Math.min(rect.width / mapZoomData.value.mapImage.width, rect.height / mapZoomData.value.mapImage.height) * zoomState.scale
   const currentImageWidth = mapZoomData.value.mapImage.width * currentImageScale
   const currentImageHeight = mapZoomData.value.mapImage.height * currentImageScale
   const currentImageX = (rect.width - currentImageWidth) / 2 + zoomState.offsetX
   const currentImageY = (rect.height - currentImageHeight) / 2 + zoomState.offsetY
-  
+
   // 计算鼠标相对于图像的位置比例
   const relativeX = (mouseX - currentImageX) / currentImageWidth
   const relativeY = (mouseY - currentImageY) / currentImageHeight
-  
+
   // 计算新的图像尺寸
   const newImageScale = Math.min(rect.width / mapZoomData.value.mapImage.width, rect.height / mapZoomData.value.mapImage.height) * newScale
   const newImageWidth = mapZoomData.value.mapImage.width * newImageScale
   const newImageHeight = mapZoomData.value.mapImage.height * newImageScale
-  
+
   // 计算新的偏移量，使鼠标位置在图像上的相对位置保持不变
   const newImageX = mouseX - relativeX * newImageWidth
   const newImageY = mouseY - relativeY * newImageHeight
-  
+
   // 更新偏移量和缩放比例
   zoomState.offsetX = newImageX - (rect.width - newImageWidth) / 2
   zoomState.offsetY = newImageY - (rect.height - newImageHeight) / 2
   zoomState.scale = newScale
-  
+
   drawZoomCanvas()
 }
 
@@ -1026,12 +1013,12 @@ const handleZoomMouseMove = (event) => {
   if (zoomState.isDragging) {
     const deltaX = event.clientX - zoomState.lastMouseX
     const deltaY = event.clientY - zoomState.lastMouseY
-    
+
     zoomState.offsetX += deltaX
     zoomState.offsetY += deltaY
     zoomState.lastMouseX = event.clientX
     zoomState.lastMouseY = event.clientY
-    
+
     drawZoomCanvas()
   }
 }
@@ -1088,7 +1075,7 @@ onUnmounted(() => {
 .dashboard-container {
   width: 100%;
   height: 100vh;
-  background: 
+  background:
     radial-gradient(ellipse at top, rgba(30, 60, 114, 0.4) 0%, transparent 50%),
     radial-gradient(ellipse at bottom, rgba(255, 138, 101, 0.3) 0%, transparent 50%),
     linear-gradient(135deg, #0f1a2e 0%, #1e3c72 30%, #2a4d7a 70%, #4a90e2 100%);
@@ -1105,7 +1092,7 @@ onUnmounted(() => {
   left: 0;
   width: 100%;
   height: 100%;
-  background-image: 
+  background-image:
     linear-gradient(rgba(74, 144, 226, 0.05) 1px, transparent 1px),
     linear-gradient(90deg, rgba(255, 138, 101, 0.05) 1px, transparent 1px);
   background-size: 50px 50px;
@@ -1119,13 +1106,12 @@ onUnmounted(() => {
   align-items: center;
   height: 70px;
   padding: 0 40px;
-  background: linear-gradient(90deg, 
-    rgba(30, 60, 114, 0.8) 0%, 
-    rgba(74, 144, 226, 0.6) 50%, 
-    rgba(255, 138, 101, 0.8) 100%
-  );
+  background: linear-gradient(90deg,
+      rgba(30, 60, 114, 0.8) 0%,
+      rgba(74, 144, 226, 0.6) 50%,
+      rgba(255, 138, 101, 0.8) 100%);
   border-bottom: 2px solid #ff8a65;
-  box-shadow: 
+  box-shadow:
     0 2px 20px rgba(255, 138, 101, 0.4),
     0 1px 0 rgba(255, 255, 255, 0.1);
   position: relative;
@@ -1145,8 +1131,15 @@ onUnmounted(() => {
 }
 
 @keyframes headerGlow {
-  0% { opacity: 0.5; transform: scaleX(0.8); }
-  100% { opacity: 1; transform: scaleX(1); }
+  0% {
+    opacity: 0.5;
+    transform: scaleX(0.8);
+  }
+
+  100% {
+    opacity: 1;
+    transform: scaleX(1);
+  }
 }
 
 .time-display {
@@ -1170,8 +1163,13 @@ onUnmounted(() => {
 }
 
 @keyframes titleGlow {
-  0% { filter: drop-shadow(0 0 20px rgba(255, 138, 101, 0.4)); }
-  100% { filter: drop-shadow(0 0 30px rgba(255, 138, 101, 0.8)); }
+  0% {
+    filter: drop-shadow(0 0 20px rgba(255, 138, 101, 0.4));
+  }
+
+  100% {
+    filter: drop-shadow(0 0 30px rgba(255, 138, 101, 0.8));
+  }
 }
 
 .dashboard-controls {
@@ -1279,16 +1277,15 @@ onUnmounted(() => {
 }
 
 .panel {
-  background: linear-gradient(135deg, 
-    rgba(30, 60, 114, 0.7) 0%, 
-    rgba(15, 26, 46, 0.8) 50%, 
-    rgba(42, 77, 122, 0.7) 100%
-  );
+  background: linear-gradient(135deg,
+      rgba(30, 60, 114, 0.7) 0%,
+      rgba(15, 26, 46, 0.8) 50%,
+      rgba(42, 77, 122, 0.7) 100%);
   border: 1px solid rgba(255, 138, 101, 0.4);
   border-radius: 12px;
   padding: 10px;
   backdrop-filter: blur(15px);
-  box-shadow: 
+  box-shadow:
     0 8px 32px rgba(0, 0, 0, 0.4),
     inset 0 1px 0 rgba(255, 255, 255, 0.1),
     0 0 20px rgba(255, 138, 101, 0.2);
@@ -1303,20 +1300,24 @@ onUnmounted(() => {
   left: 0;
   right: 0;
   height: 2px;
-  background: linear-gradient(90deg, 
-    transparent, 
-    #ff8a65, 
-    #4a90e2, 
-    #ff8a65, 
-    transparent
-  );
+  background: linear-gradient(90deg,
+      transparent,
+      #ff8a65,
+      #4a90e2,
+      #ff8a65,
+      transparent);
   border-radius: 12px 12px 0 0;
   animation: panelGlow 4s ease-in-out infinite alternate;
 }
 
 @keyframes panelGlow {
-  0% { opacity: 0.5; }
-  100% { opacity: 1; }
+  0% {
+    opacity: 0.5;
+  }
+
+  100% {
+    opacity: 1;
+  }
 }
 
 .panel-title {
@@ -1354,10 +1355,9 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   padding: 12px;
-  background: linear-gradient(135deg, 
-    rgba(74, 144, 226, 0.15) 0%, 
-    rgba(255, 138, 101, 0.1) 100%
-  );
+  background: linear-gradient(135deg,
+      rgba(74, 144, 226, 0.15) 0%,
+      rgba(255, 138, 101, 0.1) 100%);
   border-radius: 8px;
   border: 1px solid rgba(255, 138, 101, 0.3);
   transition: all 0.3s ease;
@@ -1377,10 +1377,9 @@ onUnmounted(() => {
 }
 
 .overview-item:hover {
-  background: linear-gradient(135deg, 
-    rgba(74, 144, 226, 0.25) 0%, 
-    rgba(255, 138, 101, 0.2) 100%
-  );
+  background: linear-gradient(135deg,
+      rgba(74, 144, 226, 0.25) 0%,
+      rgba(255, 138, 101, 0.2) 100%);
   border-color: #ff8a65;
   transform: translateY(-2px);
   box-shadow: 0 4px 15px rgba(255, 138, 101, 0.3);
@@ -1391,12 +1390,14 @@ onUnmounted(() => {
 }
 
 .overview-icon {
+
   /* 如果页面宽度大于1200px，小于1600px，则不显示icon */
   /* display: none; */
   @media (max-width: 1600px) and (min-width: 1200px) {
     display: none;
     /* display: block; */
   }
+
   width: 30px;
   height: 30px;
   margin-right: 12px;
@@ -1407,12 +1408,29 @@ onUnmounted(() => {
   box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
 }
 
-.factory-icon { background: linear-gradient(135deg, #ff8a65, #ff6b6b) url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white"><path d="M12 2l3.09 6.26L22 9l-5 4.87L18.18 21 12 17.27 5.82 21 7 13.87 2 9l6.91-.74L12 2z"/></svg>') center/50% no-repeat; }
-.area-icon { background: linear-gradient(135deg, #4a90e2, #1e3c72) url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/></svg>') center/50% no-repeat; }
-.staff-icon { background: linear-gradient(135deg, #ff8a65, #4a90e2) url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white"><path d="M16 4c0-1.11.89-2 2-2s2 .89 2 2-.89 2-2 2-2-.89-2-2zm4 18v-6h2.5l-2.54-7.63A1.5 1.5 0 0 0 18.53 7h-.53c-.8 0-1.53.5-1.83 1.25L14.5 12.5l1.5 1.5L17 11h1l1.5 4.5H21V22h-1z"/></svg>') center/50% no-repeat; }
-.camera-icon { background: linear-gradient(135deg, #4a90e2, #ff8a65) url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white"><path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/></svg>') center/50% no-repeat; }
-.device-icon { background: linear-gradient(135deg, #ff8a65, #4a90e2) url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white"><path d="M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11C5.84 5 5.28 5.42 5.08 6.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8l-2.08-5.99z"/></svg>') center/50% no-repeat; }
-.event-icon { background: linear-gradient(135deg, #ff6b6b, #ff8a65) url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>') center/50% no-repeat; }
+.factory-icon {
+  background: linear-gradient(135deg, #ff8a65, #ff6b6b) url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white"><path d="M12 2l3.09 6.26L22 9l-5 4.87L18.18 21 12 17.27 5.82 21 7 13.87 2 9l6.91-.74L12 2z"/></svg>') center/50% no-repeat;
+}
+
+.area-icon {
+  background: linear-gradient(135deg, #4a90e2, #1e3c72) url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/></svg>') center/50% no-repeat;
+}
+
+.staff-icon {
+  background: linear-gradient(135deg, #ff8a65, #4a90e2) url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white"><path d="M16 4c0-1.11.89-2 2-2s2 .89 2 2-.89 2-2 2-2-.89-2-2zm4 18v-6h2.5l-2.54-7.63A1.5 1.5 0 0 0 18.53 7h-.53c-.8 0-1.53.5-1.83 1.25L14.5 12.5l1.5 1.5L17 11h1l1.5 4.5H21V22h-1z"/></svg>') center/50% no-repeat;
+}
+
+.camera-icon {
+  background: linear-gradient(135deg, #4a90e2, #ff8a65) url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white"><path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/></svg>') center/50% no-repeat;
+}
+
+.device-icon {
+  background: linear-gradient(135deg, #ff8a65, #4a90e2) url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white"><path d="M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11C5.84 5 5.28 5.42 5.08 6.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8l-2.08-5.99z"/></svg>') center/50% no-repeat;
+}
+
+.event-icon {
+  background: linear-gradient(135deg, #ff6b6b, #ff8a65) url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>') center/50% no-repeat;
+}
 
 .overview-content {
   flex: 1;
@@ -1453,11 +1471,25 @@ onUnmounted(() => {
   font-family: 'Courier New', monospace;
 }
 
-.alert-value.danger { color: #ff6b6b; }
-.alert-value.warning { color: #ff8a65; }
-.alert-value.info { color: #4a90e2; }
-.alert-value.success { color: #4CAF50; }
-.alert-value.primary { color: #1e3c72; }
+.alert-value.danger {
+  color: #ff6b6b;
+}
+
+.alert-value.warning {
+  color: #ff8a65;
+}
+
+.alert-value.info {
+  color: #4a90e2;
+}
+
+.alert-value.success {
+  color: #4CAF50;
+}
+
+.alert-value.primary {
+  color: #1e3c72;
+}
 
 .alert-label {
   font-size: 14px;
@@ -1471,7 +1503,7 @@ onUnmounted(() => {
   border-radius: 8px;
   overflow: hidden;
   border: 2px solid rgba(255, 138, 101, 0.6);
-  box-shadow: 
+  box-shadow:
     0 0 20px rgba(255, 138, 101, 0.4),
     inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
@@ -1550,6 +1582,7 @@ onUnmounted(() => {
     transform: translate(-50%, -50%) scale(0.8);
     opacity: 1;
   }
+
   100% {
     transform: translate(-50%, -50%) scale(2.5);
     opacity: 0;
@@ -1567,10 +1600,9 @@ onUnmounted(() => {
 
 .table-header {
   display: flex;
-  background: linear-gradient(135deg, 
-    rgba(74, 144, 226, 0.3) 0%, 
-    rgba(255, 138, 101, 0.2) 100%
-  );
+  background: linear-gradient(135deg,
+      rgba(74, 144, 226, 0.3) 0%,
+      rgba(255, 138, 101, 0.2) 100%);
   padding: 12px;
   font-weight: bold;
   color: #ffffff;
@@ -1594,18 +1626,16 @@ onUnmounted(() => {
 }
 
 .table-row.highlight {
-  background: linear-gradient(135deg, 
-    rgba(255, 107, 107, 0.3) 0%, 
-    rgba(255, 138, 101, 0.2) 100%
-  );
+  background: linear-gradient(135deg,
+      rgba(255, 107, 107, 0.3) 0%,
+      rgba(255, 138, 101, 0.2) 100%);
   animation: highlight 3s ease;
 }
 
 .table-row:hover {
-  background: linear-gradient(135deg, 
-    rgba(74, 144, 226, 0.2) 0%, 
-    rgba(255, 138, 101, 0.15) 100%
-  );
+  background: linear-gradient(135deg,
+      rgba(74, 144, 226, 0.2) 0%,
+      rgba(255, 138, 101, 0.15) 100%);
 }
 
 .col {
@@ -1651,10 +1681,9 @@ onUnmounted(() => {
   flex-direction: column;
   align-items: center;
   padding: 12px 8px;
-  background: linear-gradient(135deg, 
-    rgba(74, 144, 226, 0.15) 0%, 
-    rgba(255, 138, 101, 0.1) 100%
-  );
+  background: linear-gradient(135deg,
+      rgba(74, 144, 226, 0.15) 0%,
+      rgba(255, 138, 101, 0.1) 100%);
   border-radius: 8px;
   border: 1px solid rgba(255, 138, 101, 0.3);
   transition: all 0.3s ease;
@@ -1675,10 +1704,9 @@ onUnmounted(() => {
 }
 
 .behavior-item:hover {
-  background: linear-gradient(135deg, 
-    rgba(74, 144, 226, 0.25) 0%, 
-    rgba(255, 138, 101, 0.2) 100%
-  );
+  background: linear-gradient(135deg,
+      rgba(74, 144, 226, 0.25) 0%,
+      rgba(255, 138, 101, 0.2) 100%);
   border-color: #ff8a65;
   box-shadow: 0 4px 15px rgba(255, 138, 101, 0.3);
 }
@@ -1698,12 +1726,29 @@ onUnmounted(() => {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 
-.production-icon { background: linear-gradient(135deg, #ff8a65, #ff6b6b); }
-.storage-icon { background: linear-gradient(135deg, #4a90e2, #1e3c72); }
-.operation-icon { background: linear-gradient(135deg, #ff8a65, #4a90e2); }
-.maintenance-icon { background: linear-gradient(135deg, #4a90e2, #ff8a65); }
-.environment-icon { background: linear-gradient(135deg, #ff8a65, #ff6b6b); }
-.safety-icon { background: linear-gradient(135deg, #ff6b6b, #ff8a65); }
+.production-icon {
+  background: linear-gradient(135deg, #ff8a65, #ff6b6b);
+}
+
+.storage-icon {
+  background: linear-gradient(135deg, #4a90e2, #1e3c72);
+}
+
+.operation-icon {
+  background: linear-gradient(135deg, #ff8a65, #4a90e2);
+}
+
+.maintenance-icon {
+  background: linear-gradient(135deg, #4a90e2, #ff8a65);
+}
+
+.environment-icon {
+  background: linear-gradient(135deg, #ff8a65, #ff6b6b);
+}
+
+.safety-icon {
+  background: linear-gradient(135deg, #ff6b6b, #ff8a65);
+}
 
 .behavior-content {
   display: flex;
@@ -1757,19 +1802,17 @@ onUnmounted(() => {
   margin-bottom: 12px;
   padding: 8px;
   border-radius: 6px;
-  background: linear-gradient(135deg, 
-    rgba(74, 144, 226, 0.1) 0%, 
-    rgba(255, 138, 101, 0.05) 100%
-  );
+  background: linear-gradient(135deg,
+      rgba(74, 144, 226, 0.1) 0%,
+      rgba(255, 138, 101, 0.05) 100%);
   border: 1px solid rgba(255, 138, 101, 0.2);
   transition: all 0.3s ease;
 }
 
 .distribution-item:hover {
-  background: linear-gradient(135deg, 
-    rgba(74, 144, 226, 0.2) 0%, 
-    rgba(255, 138, 101, 0.1) 100%
-  );
+  background: linear-gradient(135deg,
+      rgba(74, 144, 226, 0.2) 0%,
+      rgba(255, 138, 101, 0.1) 100%);
   border-color: #ff8a65;
 }
 
@@ -1783,10 +1826,9 @@ onUnmounted(() => {
 .progress-bar {
   flex: 1;
   height: 8px;
-  background: linear-gradient(135deg, 
-    rgba(30, 60, 114, 0.3) 0%, 
-    rgba(15, 26, 46, 0.4) 100%
-  );
+  background: linear-gradient(135deg,
+      rgba(30, 60, 114, 0.3) 0%,
+      rgba(15, 26, 46, 0.4) 100%);
   border-radius: 4px;
   margin: 0 12px;
   overflow: hidden;
@@ -1823,10 +1865,9 @@ onUnmounted(() => {
   overflow: hidden;
   border: 1px solid rgba(255, 138, 101, 0.4);
   transition: all 0.3s ease;
-  background: linear-gradient(135deg, 
-    rgba(30, 60, 114, 0.3) 0%, 
-    rgba(15, 26, 46, 0.4) 100%
-  );
+  background: linear-gradient(135deg,
+      rgba(30, 60, 114, 0.3) 0%,
+      rgba(15, 26, 46, 0.4) 100%);
 }
 
 .monitor-item:hover {
@@ -1852,10 +1893,9 @@ onUnmounted(() => {
   bottom: 0;
   left: 0;
   right: 0;
-  background: linear-gradient(transparent, 
-    rgba(30, 60, 114, 0.9) 40%, 
-    rgba(15, 26, 46, 0.95) 100%
-  );
+  background: linear-gradient(transparent,
+      rgba(30, 60, 114, 0.9) 40%,
+      rgba(15, 26, 46, 0.95) 100%);
   padding: 8px;
   display: flex;
   justify-content: space-between;
@@ -1902,17 +1942,16 @@ onUnmounted(() => {
 
 /* 动画效果 */
 @keyframes highlight {
-  0% { 
-    background: linear-gradient(135deg, 
-      rgba(255, 107, 107, 0.5) 0%, 
-      rgba(255, 138, 101, 0.3) 100%
-    ); 
+  0% {
+    background: linear-gradient(135deg,
+        rgba(255, 107, 107, 0.5) 0%,
+        rgba(255, 138, 101, 0.3) 100%);
   }
-  100% { 
-    background: linear-gradient(135deg, 
-      rgba(255, 107, 107, 0.2) 0%, 
-      rgba(255, 138, 101, 0.1) 100%
-    ); 
+
+  100% {
+    background: linear-gradient(135deg,
+        rgba(255, 107, 107, 0.2) 0%,
+        rgba(255, 138, 101, 0.1) 100%);
   }
 }
 
@@ -1922,10 +1961,9 @@ onUnmounted(() => {
 }
 
 ::-webkit-scrollbar-track {
-  background: linear-gradient(135deg, 
-    rgba(30, 60, 114, 0.2) 0%, 
-    rgba(15, 26, 46, 0.3) 100%
-  );
+  background: linear-gradient(135deg,
+      rgba(30, 60, 114, 0.2) 0%,
+      rgba(15, 26, 46, 0.3) 100%);
   border-radius: 3px;
 }
 
@@ -1946,12 +1984,12 @@ onUnmounted(() => {
     flex-direction: column;
     padding: 15px;
   }
-  
+
   .dashboard-left,
   .dashboard-right {
     flex: none;
   }
-  
+
   .main-title {
     font-size: 32px;
   }
@@ -2086,7 +2124,7 @@ onUnmounted(() => {
   transform: scale(1.1);
 }
 
-.data-binding-modal > .data-binding-manager {
+.data-binding-modal>.data-binding-manager {
   flex: 1;
   overflow-y: auto;
   background: #f5f5f5;
@@ -2138,13 +2176,12 @@ onUnmounted(() => {
 }
 
 .dashboard-map-dialog .el-dialog {
-  background: linear-gradient(135deg, 
-    rgba(30, 60, 114, 0.95) 0%, 
-    rgba(15, 26, 46, 0.98) 100%
-  );
+  background: linear-gradient(135deg,
+      rgba(30, 60, 114, 0.95) 0%,
+      rgba(15, 26, 46, 0.98) 100%);
   border: 2px solid rgba(255, 138, 101, 0.6);
   border-radius: 16px;
-  box-shadow: 
+  box-shadow:
     0 25px 80px rgba(0, 0, 0, 0.5),
     0 0 50px rgba(255, 138, 101, 0.3),
     inset 0 1px 0 rgba(255, 255, 255, 0.1);
@@ -2174,10 +2211,9 @@ onUnmounted(() => {
   justify-content: space-between;
   align-items: center;
   padding: 10px 30px;
-  background: linear-gradient(135deg, 
-    rgba(74, 144, 226, 0.3) 0%, 
-    rgba(255, 138, 101, 0.2) 100%
-  );
+  background: linear-gradient(135deg,
+      rgba(74, 144, 226, 0.3) 0%,
+      rgba(255, 138, 101, 0.2) 100%);
   border-bottom: 1px solid rgba(255, 138, 101, 0.4);
   position: relative;
 }
@@ -2189,13 +2225,12 @@ onUnmounted(() => {
   left: 0;
   right: 0;
   height: 2px;
-  background: linear-gradient(90deg, 
-    transparent, 
-    #ff8a65, 
-    #4a90e2, 
-    #ff8a65, 
-    transparent
-  );
+  background: linear-gradient(90deg,
+      transparent,
+      #ff8a65,
+      #4a90e2,
+      #ff8a65,
+      transparent);
   animation: headerGlow 3s ease-in-out infinite alternate;
 }
 
@@ -2231,41 +2266,40 @@ onUnmounted(() => {
   font-size: 14px;
   font-weight: 500;
   padding: 6px 12px;
-  background: linear-gradient(135deg, 
-    rgba(74, 144, 226, 0.3) 0%, 
-    rgba(255, 138, 101, 0.3) 100%
-  );
+  background: linear-gradient(135deg,
+      rgba(74, 144, 226, 0.3) 0%,
+      rgba(255, 138, 101, 0.3) 100%);
   border-radius: 20px;
   border: 1px solid rgba(255, 138, 101, 0.4);
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
 }
 
 .close-btn-custom {
-  background: linear-gradient(135deg, 
-    rgba(255, 107, 107, 0.8) 0%, 
-    rgba(255, 138, 101, 0.8) 100%
-  );
+  background: linear-gradient(135deg,
+      rgba(255, 107, 107, 0.8) 0%,
+      rgba(255, 138, 101, 0.8) 100%);
   border: 1px solid rgba(255, 138, 101, 0.6);
   color: #ffffff;
-  width: 40px;
-  height: 40px;
+  display: flex;
+  gap: 8px;
+  /* width: 40px; */
+  /* height: 40px; */
   border-radius: 25px;
-  font-size: 24px;
+  font-size: 14px;
   font-weight: bold;
   cursor: pointer;
   transition: all 0.3s ease;
-  display: flex;
+  /* display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: center; */
   backdrop-filter: blur(10px);
   box-shadow: 0 4px 15px rgba(255, 138, 101, 0.3);
 }
 
 .close-btn-custom:hover {
-  background: linear-gradient(135deg, 
-    rgba(255, 138, 101, 0.9) 0%, 
-    rgba(255, 107, 107, 0.9) 100%
-  );
+  background: linear-gradient(135deg,
+      rgba(255, 138, 101, 0.9) 0%,
+      rgba(255, 107, 107, 0.9) 100%);
   transform: translateY(-1px);
   box-shadow: 0 6px 20px rgba(255, 138, 101, 0.5);
 }
@@ -2273,10 +2307,9 @@ onUnmounted(() => {
 .map-zoom-container {
   position: relative;
   height: 75vh;
-  background: linear-gradient(135deg, 
-    rgba(15, 26, 46, 0.8) 0%, 
-    rgba(30, 60, 114, 0.6) 100%
-  );
+  background: linear-gradient(135deg,
+      rgba(15, 26, 46, 0.8) 0%,
+      rgba(30, 60, 114, 0.6) 100%);
   border-radius: 0;
   overflow: hidden;
   border: none;
@@ -2307,14 +2340,13 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  background: linear-gradient(135deg, 
-    rgba(30, 60, 114, 0.9) 0%, 
-    rgba(15, 26, 46, 0.95) 100%
-  );
+  background: linear-gradient(135deg,
+      rgba(30, 60, 114, 0.9) 0%,
+      rgba(15, 26, 46, 0.95) 100%);
   padding: 12px;
   border-radius: 16px;
   border: 1px solid rgba(255, 138, 101, 0.4);
-  box-shadow: 
+  box-shadow:
     0 8px 32px rgba(0, 0, 0, 0.4),
     0 0 20px rgba(255, 138, 101, 0.2);
   backdrop-filter: blur(15px);
@@ -2323,10 +2355,9 @@ onUnmounted(() => {
 .zoom-btn {
   width: 48px;
   height: 48px;
-  background: linear-gradient(135deg, 
-    rgba(74, 144, 226, 0.8) 0%, 
-    rgba(255, 138, 101, 0.8) 100%
-  );
+  background: linear-gradient(135deg,
+      rgba(74, 144, 226, 0.8) 0%,
+      rgba(255, 138, 101, 0.8) 100%);
   border: 1px solid rgba(255, 138, 101, 0.6);
   border-radius: 12px;
   color: #ffffff;
@@ -2342,10 +2373,9 @@ onUnmounted(() => {
 }
 
 .zoom-btn:hover {
-  background: linear-gradient(135deg, 
-    rgba(255, 138, 101, 0.9) 0%, 
-    rgba(74, 144, 226, 0.9) 100%
-  );
+  background: linear-gradient(135deg,
+      rgba(255, 138, 101, 0.9) 0%,
+      rgba(74, 144, 226, 0.9) 100%);
   transform: translateY(-2px) scale(1.05);
   box-shadow: 0 6px 20px rgba(255, 138, 101, 0.5);
 }
@@ -2365,10 +2395,9 @@ onUnmounted(() => {
 }
 
 .tip-item {
-  background: linear-gradient(135deg, 
-    rgba(30, 60, 114, 0.9) 0%, 
-    rgba(15, 26, 46, 0.95) 100%
-  );
+  background: linear-gradient(135deg,
+      rgba(30, 60, 114, 0.9) 0%,
+      rgba(15, 26, 46, 0.95) 100%);
   color: #ffffff;
   padding: 8px 16px;
   border-radius: 20px;
@@ -2391,10 +2420,9 @@ onUnmounted(() => {
   justify-content: flex-end;
   gap: 12px;
   padding: 10px 30px;
-  background: linear-gradient(135deg, 
-    rgba(15, 26, 46, 0.8) 0%, 
-    rgba(30, 60, 114, 0.6) 100%
-  );
+  background: linear-gradient(135deg,
+      rgba(15, 26, 46, 0.8) 0%,
+      rgba(30, 60, 114, 0.6) 100%);
   border-top: 1px solid rgba(255, 138, 101, 0.4);
 }
 
@@ -2414,37 +2442,33 @@ onUnmounted(() => {
 }
 
 .footer-btn.secondary {
-  background: linear-gradient(135deg, 
-    rgba(108, 117, 125, 0.8) 0%, 
-    rgba(73, 80, 87, 0.8) 100%
-  );
+  background: linear-gradient(135deg,
+      rgba(108, 117, 125, 0.8) 0%,
+      rgba(73, 80, 87, 0.8) 100%);
   border-color: rgba(108, 117, 125, 0.6);
   color: #ffffff;
 }
 
 .footer-btn.secondary:hover {
-  background: linear-gradient(135deg, 
-    rgba(73, 80, 87, 0.9) 0%, 
-    rgba(108, 117, 125, 0.9) 100%
-  );
+  background: linear-gradient(135deg,
+      rgba(73, 80, 87, 0.9) 0%,
+      rgba(108, 117, 125, 0.9) 100%);
   transform: translateY(-1px);
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
 }
 
 .footer-btn.primary {
-  background: linear-gradient(135deg, 
-    rgba(74, 144, 226, 0.8) 0%, 
-    rgba(255, 138, 101, 0.8) 100%
-  );
+  background: linear-gradient(135deg,
+      rgba(74, 144, 226, 0.8) 0%,
+      rgba(255, 138, 101, 0.8) 100%);
   border-color: rgba(255, 138, 101, 0.6);
   color: #ffffff;
 }
 
 .footer-btn.primary:hover {
-  background: linear-gradient(135deg, 
-    rgba(255, 138, 101, 0.9) 0%, 
-    rgba(74, 144, 226, 0.9) 100%
-  );
+  background: linear-gradient(135deg,
+      rgba(255, 138, 101, 0.9) 0%,
+      rgba(74, 144, 226, 0.9) 100%);
   transform: translateY(-1px);
   box-shadow: 0 6px 20px rgba(255, 138, 101, 0.5);
 }

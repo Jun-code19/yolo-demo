@@ -762,10 +762,24 @@ const handleDetectionResult = (data) => {
     canvas.width = frameInfo.displayWidth
     canvas.height = frameInfo.displayHeight
 
-    // 计算实际缩放比例
-    const displayScale = {
-      x: canvas.width / 512,
-      y: canvas.height / 512
+    // 计算视频在显示容器中的实际尺寸和位置（考虑object-fit: contain）
+    const videoDisplayAspect = frameInfo.displayWidth / frameInfo.displayHeight
+    const videoAspect = frameInfo.canvasWidth / frameInfo.canvasHeight
+    
+    let videoDisplayWidth, videoDisplayHeight, videoDisplayOffsetX, videoDisplayOffsetY
+    
+    if (videoAspect > videoDisplayAspect) {
+      // 视频更宽，以宽度为准
+      videoDisplayWidth = frameInfo.displayWidth
+      videoDisplayHeight = frameInfo.displayWidth / videoAspect
+      videoDisplayOffsetX = 0
+      videoDisplayOffsetY = (frameInfo.displayHeight - videoDisplayHeight) / 2
+    } else {
+      // 视频更高，以高度为准
+      videoDisplayWidth = frameInfo.displayHeight * videoAspect
+      videoDisplayHeight = frameInfo.displayHeight
+      videoDisplayOffsetX = (frameInfo.displayWidth - videoDisplayWidth) / 2
+      videoDisplayOffsetY = 0
     }
 
     // 清除上一帧的检测框
@@ -775,11 +789,23 @@ const handleDetectionResult = (data) => {
     data.objects.forEach(obj => {
       const [x, y, w, h] = obj.bbox
       
-      // 转换坐标到显示尺寸
-      const boxX = x * displayScale.x
-      const boxY = y * displayScale.y
-      const boxW = w * displayScale.x
-      const boxH = h * displayScale.y
+      // 第一步：从512x512坐标系转换回原始视频坐标系
+      // 考虑发送时的缩放和偏移
+      const originalX = (x - frameInfo.offset.x) / frameInfo.scale
+      const originalY = (y - frameInfo.offset.y) / frameInfo.scale
+      const originalW = w / frameInfo.scale
+      const originalH = h / frameInfo.scale
+      
+      // 第二步：从原始视频坐标系转换到显示坐标系
+      const displayScale = {
+        x: videoDisplayWidth / frameInfo.canvasWidth,
+        y: videoDisplayHeight / frameInfo.canvasHeight
+      }
+      
+      const boxX = originalX * displayScale.x + videoDisplayOffsetX
+      const boxY = originalY * displayScale.y + videoDisplayOffsetY
+      const boxW = originalW * displayScale.x
+      const boxH = originalH * displayScale.y
 
       // 设置绘制样式
       ctx.lineWidth = Math.max(2, Math.min(canvas.width, canvas.height) / 200)

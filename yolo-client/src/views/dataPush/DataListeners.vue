@@ -361,17 +361,6 @@ const loadStats = async () => {
   }
 }
 
-// const loadTemplates = async () => {
-//   try {
-//     const response = await dataListenerApi.getTemplates()
-//     if (response.data.status === 'success') {
-//       templates.value = response.data.data.templates
-//     }
-//   } catch (error) {
-//     console.error('加载模板失败:', error)
-//   }
-// }
-
 const refreshData = async () => {
   await Promise.all([
     loadData(),
