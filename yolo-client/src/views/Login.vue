@@ -608,7 +608,7 @@ const backToLogin = () => {
   width: 100%;
   height: 50px;
   border-radius: 12px;
-  font-size: 16px;
+  /* font-size: 16px; */
   font-weight: 600;
   letter-spacing: 1px;
   background: linear-gradient(135deg, #4a90e2 0%, #1e3c72 50%, #ff8a65 100%);
