@@ -1030,16 +1030,6 @@ const handleZoomMouseUp = () => {
   }
 }
 
-const zoomIn = () => {
-  zoomState.scale = Math.min(5, zoomState.scale * 1.2)
-  drawZoomCanvas()
-}
-
-const zoomOut = () => {
-  zoomState.scale = Math.max(0.5, zoomState.scale / 1.2)
-  drawZoomCanvas()
-}
-
 const resetZoom = () => {
   zoomState.scale = 1
   zoomState.offsetX = 0

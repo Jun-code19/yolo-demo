@@ -80,7 +80,7 @@
         <!-- 操作列 -->
         <el-table-column label="操作" min-width="230" fixed="right">
           <template #default="scope">
-          <el-button-group>
+            <el-button-group>
               <el-button type="warning" size="small" @click="scope.row.enabled ? null : setInterestArea(scope.row)"
                 :disabled="scope.row.enabled"> <!-- 禁用按钮 -->
                 区域
@@ -100,14 +100,15 @@
                   </el-button>
                 </template>
               </el-popconfirm>
-          </el-button-group>
+            </el-button-group>
           </template>
         </el-table-column>
       </el-table>
     </el-card>
 
     <!-- 添加/编辑配置的模态框 -->
-    <el-dialog v-model="modalVisible" :title="isEdit ? '编辑检测配置' : '创建检测配置'" width="750px" top="5vh" destroy-on-close class="config-dialog">
+    <el-dialog v-model="modalVisible" :title="isEdit ? '编辑检测配置' : '创建检测配置'" width="750px" top="5vh" destroy-on-close
+      class="config-dialog">
       <div class="config-steps">
         <div class="step" :class="{ active: currentStep >= 1 }">
           <div class="step-number">1</div>
@@ -131,7 +132,7 @@
           <el-divider content-position="left">
             <span class="divider-title">基本设置</span>
           </el-divider>
-          
+
           <div class="form-section">
             <div class="form-grid">
               <!-- 设备选择 -->
@@ -140,7 +141,9 @@
                   <el-option v-for="device in deviceList" :key="device.device_id"
                     :label="`${device.device_name} (${device.device_id})`" :value="device.device_id">
                     <div class="device-option">
-                      <el-icon><VideoCamera /></el-icon>
+                      <el-icon>
+                        <VideoCamera />
+                      </el-icon>
                       <span>{{ device.device_name }}</span>
                       <span class="device-id">({{ device.device_id }})</span>
                     </div>
@@ -165,19 +168,15 @@
               <div class="form-row">
                 <!-- 是否启用 -->
                 <el-form-item label="状态" prop="enabled" class="form-item-small">
-                  <el-switch v-model="formState.enabled" 
-                    active-text="启用" 
-                    inactive-text="禁用"
-                    :active-value="true"
+                  <el-switch v-model="formState.enabled" active-text="启用" inactive-text="禁用" :active-value="true"
                     :inactive-value="false" />
                 </el-form-item>
 
                 <!-- 检测灵敏度 -->
                 <el-form-item label="检测灵敏度" prop="sensitivity" class="form-item-large">
                   <div class="sensitivity-container">
-                    <el-slider v-model="formState.sensitivity" :min="0.1" :max="0.9" :step="0.05" 
-                      :format-tooltip="value => `${Math.round(value * 100)}%`"
-                      :marks="{
+                    <el-slider v-model="formState.sensitivity" :min="0.1" :max="0.9" :step="0.05"
+                      :format-tooltip="value => `${Math.round(value * 100)}%`" :marks="{
                         0.1: '低',
                         0.5: '中',
                         0.9: '高'
@@ -188,8 +187,8 @@
 
               <!-- 目标类别 -->
               <el-form-item label="目标类别" prop="target_classes" class="grid-item full-width">
-                <el-select v-model="formState.target_classes" multiple placeholder="请选择要检测的目标类别"
-                  collapse-tags collapse-tags-tooltip :max-collapse-tags="4" filterable>
+                <el-select v-model="formState.target_classes" multiple placeholder="请选择要检测的目标类别" collapse-tags
+                  collapse-tags-tooltip :max-collapse-tags="4" filterable>
                   <el-option v-for="(classItem, index) in targetClasses" :key="classItem.value" :label="classItem.label"
                     :value="classItem.value">
                     <div class="class-option">
@@ -201,17 +200,21 @@
                 <div class="select-hint">
                   <div class="hint-buttons">
                     <el-button link size="small" @click="selectAllClasses" v-if="targetClasses.length > 0">
-                      <el-icon><CircleCheckFilled /></el-icon> 全选
+                      <el-icon>
+                        <CircleCheckFilled />
+                      </el-icon> 全选
                     </el-button>
                     <el-button link size="small" @click="clearAllClasses" v-if="formState.target_classes.length > 0">
-                      <el-icon><CircleCloseFilled /></el-icon> 清空
+                      <el-icon>
+                        <CircleCloseFilled />
+                      </el-icon> 清空
                     </el-button>
                   </div>
                   <span class="selected-count" v-if="targetClasses.length > 0">
                     已选择 {{ formState.target_classes.length }}/{{ targetClasses.length }}
                   </span>
                 </div>
-              </el-form-item>             
+              </el-form-item>
             </div>
           </div>
         </div>
@@ -221,75 +224,78 @@
           <el-divider content-position="left">
             <span class="divider-title">定时设置</span>
           </el-divider>
-          
+
           <div class="form-section schedule-section">
             <!-- 检测频率设置 -->
             <div class="schedule-card">
               <div class="card-title">
-                <el-icon><Calendar /></el-icon>
+                <el-icon>
+                  <Calendar />
+                </el-icon>
                 <span>检测频率</span>
               </div>
               <div class="card-content">
                 <div class="frequency-content">
                   <el-radio-group v-model="formState.frequency">
                     <div class="frequency-options">
-                        <div class="radio-card" :class="{ active: formState.frequency === 'realtime' }">
-                          <el-radio value="realtime">
-                            <div class="radio-card-content">
-                              <div>
-                                <div class="radio-title">实时检测</div>
-                                <div class="radio-desc">设备连接后立即开始检测</div>
-                              </div>
+                      <div class="radio-card" :class="{ active: formState.frequency === 'realtime' }">
+                        <el-radio value="realtime">
+                          <div class="radio-card-content">
+                            <div>
+                              <div class="radio-title">实时检测</div>
+                              <div class="radio-desc">设备连接后立即开始检测</div>
                             </div>
-                          </el-radio>
-                        </div>
-                        <div class="radio-card" :class="{ active: formState.frequency === 'scheduled' }">
-                          <el-radio value="scheduled">
-                            <div class="radio-card-content">
-                              <div>
-                                <div class="radio-title">定时检测</div>
-                                <div class="radio-desc">按照预定的时间计划执行检测</div>
-                              </div>
-                            </div>
-                          </el-radio>
-                        </div>
-                        <div class="radio-card" :class="{ active: formState.frequency === 'manual' }">
-                          <el-radio value="manual">
-                            <div class="radio-card-content">
-                              <div>
-                                <div class="radio-title">手动触发</div>
-                                <div class="radio-desc">仅在手动启动时执行检测</div>
-                              </div>
-                            </div>
-                          </el-radio>
-                        </div>
+                          </div>
+                        </el-radio>
                       </div>
+                      <div class="radio-card" :class="{ active: formState.frequency === 'scheduled' }">
+                        <el-radio value="scheduled">
+                          <div class="radio-card-content">
+                            <div>
+                              <div class="radio-title">定时检测</div>
+                              <div class="radio-desc">按照预定的时间计划执行检测</div>
+                            </div>
+                          </div>
+                        </el-radio>
+                      </div>
+                      <div class="radio-card" :class="{ active: formState.frequency === 'manual' }">
+                        <el-radio value="manual">
+                          <div class="radio-card-content">
+                            <div>
+                              <div class="radio-title">手动触发</div>
+                              <div class="radio-desc">仅在手动启动时执行检测</div>
+                            </div>
+                          </div>
+                        </el-radio>
+                      </div>
+                    </div>
                   </el-radio-group>
                 </div>
               </div>
             </div>
-            
+
             <!-- 定时详细设置 -->
             <template v-if="formState.frequency === 'scheduled'">
               <!-- 模式选择 -->
               <div class="section-header" style="margin-top: 20px;">
                 <div class="section-title">配置模式</div>
-                <el-radio-group v-model="formState.scheduleMode" @change="handleScheduleModeChange" size="large" class="mode-selector">
+                <el-radio-group v-model="formState.scheduleMode" @change="handleScheduleModeChange" size="large"
+                  class="mode-selector">
                   <el-radio-button value="simple">简单模式</el-radio-button>
                   <el-radio-button value="advanced">高级模式</el-radio-button>
                 </el-radio-group>
               </div>
-              
+
               <!-- 简单模式 -->
               <div v-if="formState.scheduleMode === 'simple'" class="schedule-simple-mode schedule-card">
                 <div class="form-row time-settings">
                   <el-form-item label="执行时间" class="form-item">
-                    <el-time-picker v-model="formState.scheduleTime" format="HH:mm" placeholder="选择时间" 
+                    <el-time-picker v-model="formState.scheduleTime" format="HH:mm" placeholder="选择时间"
                       class="time-picker"></el-time-picker>
                   </el-form-item>
                   <el-form-item label="执行时长" class="form-item">
                     <div class="input-with-unit">
-                      <el-input-number v-model="formState.scheduleDuration" :min="1" :max="120" :step="1" 
+                      <el-input-number v-model="formState.scheduleDuration" :min="1" :max="120" :step="1"
                         controls-position="right"></el-input-number>
                       <span class="unit-label">分钟</span>
                     </div>
@@ -315,14 +321,16 @@
                   </div>
                 </el-form-item>
               </div>
-              
+
               <!-- 高级模式 -->
               <div v-else class="schedule-advanced-mode">
                 <div class="schedule-cards">
                   <!-- 时间设置卡片 -->
                   <div class="schedule-card">
                     <div class="card-title">
-                      <el-icon><Clock /></el-icon>
+                      <el-icon>
+                        <Clock />
+                      </el-icon>
                       <span>时间设置</span>
                     </div>
                     <div class="card-content">
@@ -330,20 +338,26 @@
                         <el-radio value="points">多时间点</el-radio>
                         <el-radio value="range">时间范围</el-radio>
                       </el-radio-group>
-                      
+
                       <!-- 多时间点模式 -->
                       <div v-if="formState.scheduleTimeType === 'points'" class="time-points-section">
                         <div class="time-points-header">
                           <el-button type="primary" plain @click="addTimePoint" size="small">
-                            <el-icon><plus /></el-icon>添加时间点
+                            <el-icon>
+                              <plus />
+                            </el-icon>添加时间点
                           </el-button>
                         </div>
                         <transition-group name="time-point-list" tag="div" class="time-points-list">
-                          <div v-for="(time, index) in formState.scheduleTimePoints" :key="index" class="time-point-item">
-                            <el-time-picker v-model="formState.scheduleTimePoints[index]" format="HH:mm" 
+                          <div v-for="(time, index) in formState.scheduleTimePoints" :key="index"
+                            class="time-point-item">
+                            <el-time-picker v-model="formState.scheduleTimePoints[index]" format="HH:mm"
                               class="time-point-picker"></el-time-picker>
-                            <el-button type="danger" circle plain @click="removeTimePoint(index)" class="remove-time-btn" size="small">
-                              <el-icon><delete /></el-icon>
+                            <el-button type="danger" circle plain @click="removeTimePoint(index)"
+                              class="remove-time-btn" size="small">
+                              <el-icon>
+                                <delete />
+                              </el-icon>
                             </el-button>
                           </div>
                         </transition-group>
@@ -351,7 +365,7 @@
                           <el-empty description="暂无时间点" :image-size="60"></el-empty>
                         </div>
                       </div>
-                      
+
                       <!-- 时间范围模式 -->
                       <div v-else class="time-range-section">
                         <div class="time-range-row">
@@ -368,7 +382,7 @@
                         <el-form-item label="执行间隔">
                           <div class="input-with-unit">
                             <span class="unit-label-prefix">每隔</span>
-                            <el-input-number v-model="formState.scheduleInterval" :min="1" :max="120" :step="5" 
+                            <el-input-number v-model="formState.scheduleInterval" :min="1" :max="120" :step="5"
                               controls-position="right"></el-input-number>
                             <span class="unit-label">分钟执行一次</span>
                           </div>
@@ -380,7 +394,9 @@
                   <!-- 日期设置卡片 -->
                   <div class="schedule-card">
                     <div class="card-title">
-                      <el-icon><Calendar /></el-icon>
+                      <el-icon>
+                        <Calendar />
+                      </el-icon>
                       <span>日期设置</span>
                     </div>
                     <div class="card-content">
@@ -389,7 +405,7 @@
                         <el-radio value="monthday">每月日期</el-radio>
                         <el-radio value="specific">特定日期</el-radio>
                       </el-radio-group>
-                      
+
                       <div class="date-content">
                         <!-- 星期几 -->
                         <div v-if="formState.scheduleDateType === 'weekday'" class="weekday-section">
@@ -409,7 +425,7 @@
                             <el-button link size="small" @click="clearWeekdays">清空</el-button>
                           </div>
                         </div>
-                        
+
                         <!-- 每月日期 -->
                         <div v-else-if="formState.scheduleDateType === 'monthday'" class="monthday-section">
                           <el-select v-model="formState.scheduleMonthdays" multiple placeholder="选择每月几号执行"
@@ -417,17 +433,15 @@
                             <el-option v-for="i in 31" :key="i" :label="`${i}日`" :value="i"></el-option>
                           </el-select>
                           <div class="quick-buttons">
-                            <el-button link size="small" @click="selectMonthdays([1, 5, 10, 15, 20, 25])">常用日期</el-button>
+                            <el-button link size="small"
+                              @click="selectMonthdays([1, 5, 10, 15, 20, 25])">常用日期</el-button>
                             <el-button link size="small" @click="clearMonthdays">清空</el-button>
                           </div>
                         </div>
-                        
+
                         <!-- 特定日期 -->
                         <div v-else class="specific-date-section">
-                          <el-date-picker 
-                            v-model="formState.scheduleSpecificDates" 
-                            type="dates" 
-                            placeholder="选择特定日期"
+                          <el-date-picker v-model="formState.scheduleSpecificDates" type="dates" placeholder="选择特定日期"
                             style="width: 100%">
                           </el-date-picker>
                         </div>
@@ -438,7 +452,9 @@
                   <!-- 执行控制卡片 -->
                   <div class="schedule-card">
                     <div class="card-title">
-                      <el-icon><Setting /></el-icon>
+                      <el-icon>
+                        <Setting />
+                      </el-icon>
                       <span>执行控制</span>
                     </div>
                     <div class="card-content">
@@ -450,24 +466,28 @@
                             <span class="unit-label">分钟</span>
                           </div>
                         </el-form-item>
-                        
+
                         <el-form-item label="最大执行次数" class="control-item">
                           <div class="input-with-unit">
                             <el-input-number v-model="formState.scheduleMaxExecutions" :min="-1" :max="100"
                               controls-position="right"></el-input-number>
                             <el-tooltip content="设置为-1表示不限制执行次数" placement="top">
-                              <el-icon class="info-icon"><InfoFilled /></el-icon>
+                              <el-icon class="info-icon">
+                                <InfoFilled />
+                              </el-icon>
                             </el-tooltip>
                           </div>
                         </el-form-item>
-                        
+
                         <el-form-item label="无活动自动停止" class="control-item">
                           <div class="input-with-unit">
                             <el-input-number v-model="formState.scheduleIdleTimeout" :min="0" :max="60"
                               controls-position="right"></el-input-number>
                             <span class="unit-label">分钟</span>
                             <el-tooltip content="设置为0表示不自动停止" placement="top">
-                              <el-icon class="info-icon"><InfoFilled /></el-icon>
+                              <el-icon class="info-icon">
+                                <InfoFilled />
+                              </el-icon>
                             </el-tooltip>
                           </div>
                         </el-form-item>
@@ -490,13 +510,15 @@
           <el-divider content-position="left">
             <span class="divider-title">保存设置</span>
           </el-divider>
-          
+
           <div class="form-section save-section">
             <!-- 保存模式 -->
             <!-- <el-form-item label="保存模式" prop="save_mode"> -->
             <div class="schedule-card">
               <div class="card-title">
-                <el-icon><Edit/></el-icon>
+                <el-icon>
+                  <Edit />
+                </el-icon>
                 <span>保存模式</span>
               </div>
               <div class="card-content">
@@ -567,7 +589,7 @@
 
                 <el-form-item label="事件保留天数" prop="max_storage_days">
                   <div class="input-with-unit">
-                    <el-input-number v-model="formState.max_storage_days" :min="1" :max="90" :step="1" 
+                    <el-input-number v-model="formState.max_storage_days" :min="1" :max="90" :step="1"
                       controls-position="right"></el-input-number>
                     <span class="unit-label">天</span>
                   </div>
@@ -593,58 +615,55 @@
     </el-dialog>
 
     <!-- 区域设置对话框 -->
-    <el-dialog v-model="areaModalVisible" title="感兴趣区域设置" width="800px" destroy-on-close @close="stopPreview">
+    <el-dialog v-model="areaModalVisible" title="感兴趣区域设置" width="800px" top="5vh" destroy-on-close @close="stopPreview">
       <el-form :model="areaForm" label-position="top">
-        <!-- 配置类型 -->
-        <el-form-item label="配置类型">
-          <el-radio-group v-model="areaForm.coordinates.type">
-            <el-radio value="area">区域设置</el-radio>
-            <el-radio value="line">拌线设置</el-radio>
-          </el-radio-group>
-        </el-form-item>
+        <div class="form-item-container">
+          <!-- 配置类型 -->
+          <el-form-item label="1. 画线类型" class="form-item-left">
+            <el-radio-group v-model="areaForm.coordinates.type">
+              <el-radio value="area">区域设置</el-radio>
+              <el-radio value="line">拌线设置</el-radio>
+            </el-radio-group>
+          </el-form-item>
 
-        <!-- 新增检测模式选择 -->
-        <el-form-item label="检测模式">
-          <el-radio-group v-model="areaForm.coordinates.subtype" @change="handleSubtypeChange">
-            <el-radio value="simple">普通检测</el-radio>
-            <el-radio value="directional">方向检测</el-radio>
-          </el-radio-group>
-        </el-form-item>
-
-        <!-- 新增方向选择 -->
-        <el-form-item label="检测方向" v-if="areaForm.coordinates.subtype === 'directional'">
-          <el-radio-group v-model="areaForm.coordinates.direction" @change="updateDirectionArrow">
-            <el-radio value="in">入方向</el-radio>
-            <el-radio value="out">出方向</el-radio>
-            <el-radio value="both">双向</el-radio>
-          </el-radio-group>
-        </el-form-item>
-
-        <!-- 视频预览和绘制区域 -->
-        <div class="video-preview-container">
-          <div v-if="previewLoading" class="loading-wrapper">
+          <!-- 新增检测模式选择 -->
+          <el-form-item label="2. 检测模式" class="form-item-left">
+            <el-radio-group v-model="areaForm.coordinates.subtype" @change="handleSubtypeChange">
+              <el-radio value="simple">普通检测</el-radio>
+              <el-radio value="directional">方向检测</el-radio>
+            </el-radio-group>
+          </el-form-item>
+          
+          <!-- 新增方向选择 -->
+          <el-form-item label="3. 检测方向" v-if="areaForm.coordinates.subtype === 'directional'" class="form-item-left">
+            <el-radio-group v-model="areaForm.coordinates.direction">
+              <el-radio value="in">入方向</el-radio>
+              <el-radio value="out">出方向</el-radio>
+              <el-radio value="both">双向</el-radio>
+            </el-radio-group>
+          </el-form-item>
+        </div>
+        <!-- 设备画面预览和绘制区域 -->
+        <div class="image-preview-container">
+          <div v-if="imageLoading" class="loading-wrapper">
             <el-skeleton animated :rows="8" />
-            <div class="loading-text">正在连接设备，请稍候...</div>
+            <div class="loading-text">正在加载设备画面...</div>
           </div>
-          <div v-else-if="previewError" class="error-wrapper">
+          <div v-else-if="imageError" class="error-wrapper">
             <el-icon :size="64">
               <CircleClose />
             </el-icon>
-            <p>{{ previewError }}</p>
-            <el-button @click="retryPreview">重试</el-button>
+            <p>{{ imageError }}</p>
+            <el-button @click="loadDeviceImage">重试</el-button>
           </div>
-          <div v-else-if="!previewStream" class="video-placeholder">
+          <div v-else-if="!deviceImage" class="image-placeholder">
             <el-icon :size="64">
               <VideoCamera />
             </el-icon>
-            <p>等待视频流连接...</p>
+            <p>暂无设备画面图片</p>
           </div>
-          <div v-else class="video-wrapper">
-            <video ref="videoRef" class="preview-video" autoplay muted @loadedmetadata="onVideoLoaded">
-            </video>
-            <!-- 备用图像显示 -->
-            <img v-if="currentFrame" :src="currentFrame" class="fallback-image"
-              :style="{ display: showFallbackImage ? 'block' : 'none' }" />
+          <div v-else class="image-wrapper">
+            <img ref="deviceImageRef" :src="deviceImage" class="device-image" @load="onImageLoaded" />
             <canvas ref="drawingCanvas" class="drawing-canvas" @mousedown="handleMouseDown" @mousemove="handleMouseMove"
               @contextmenu.prevent="handleRightClick">
             </canvas>
@@ -655,15 +674,14 @@
           </div>
         </div>
 
-        <el-form-item label="区域坐标">
+        <!-- <el-form-item label="区域坐标">
           <el-input v-model="coordinatesDisplay" placeholder="绘制完成后自动生成坐标" readonly />
-        </el-form-item>
+        </el-form-item> -->
         <div class="coordinate-hint">提示：左键添加顶点，右键完成绘制</div>
       </el-form>
 
       <template #footer>
         <span class="dialog-footer">
-          <el-button type="primary" @click="loadArea">查看</el-button>
           <el-button @click="areaModalVisible = false">取消</el-button>
           <el-button type="primary" @click="saveAreaConfig">保存</el-button>
         </span>
@@ -739,54 +757,122 @@ export default defineComponent({
     const points = ref([]);
     const drawingCanvas = ref(null);
 
-    // 预览相关
-    const previewLoading = ref(false)
-    const previewError = ref(null)
-    const previewStream = ref(null)
+    // 图片预览相关
+    const imageLoading = ref(false)
+    const imageError = ref(null)
+    const deviceImage = ref(null)
     const currentDevice = ref(null)
-    const videoRef = ref(null)
-    const currentFrame = ref(null)
-    const streamResolution = ref('')
-    const ws = ref(null)
-    const showFallbackImage = ref(false)
+    const deviceImageRef = ref(null)
+    const imageResolution = ref('')
 
     // 高级定时设置当前标签
     const scheduleActiveTab = ref('time');
 
-    // 视频加载完成
-    const onVideoLoaded = () => {
-      if (!videoRef.value) return
+    // 初始化Canvas以获得清晰的绘制效果
+    const initCanvas = () => {
+      if (!drawingCanvas.value || !deviceImageRef.value) return
 
-      const { videoWidth, videoHeight } = videoRef.value
-      streamResolution.value = `${videoWidth}x${videoHeight}`
+      const canvas = drawingCanvas.value
+      const image = deviceImageRef.value
+      const ctx = canvas.getContext('2d')
+      
+      // 获取设备像素比
+      const devicePixelRatio = window.devicePixelRatio || 1
+      
+      // 设置Canvas的实际大小（考虑设备像素比）
+      const displayWidth = image.clientWidth
+      const displayHeight = image.clientHeight
+      
+      canvas.width = displayWidth * devicePixelRatio
+      canvas.height = displayHeight * devicePixelRatio
+      
+      // 设置CSS尺寸
+      canvas.style.width = displayWidth + 'px'
+      canvas.style.height = displayHeight + 'px'
+      
+      // 缩放绘图上下文以匹配设备像素比
+      ctx.scale(devicePixelRatio, devicePixelRatio)
+      
+      // 设置绘图质量
+      ctx.imageSmoothingEnabled = false
+      ctx.lineCap = 'round'
+      ctx.lineJoin = 'round'
     }
-    // 重试预览
-    const retryPreview = () => {
-      previewError.value = null
-      previewLoading.value = true
-      startPreview()
-    }
-    // 停止预览
-    const stopPreview = () => {
-      // 关闭WebSocket连接
-      if (ws.value) {
-        if (ws.value.readyState === WebSocket.OPEN) {
-          ws.value.send(JSON.stringify({ type: 'stop' }))
+
+    // 图片加载完成
+    const onImageLoaded = () => {
+      if (!deviceImageRef.value) return
+
+      const { naturalWidth, naturalHeight } = deviceImageRef.value
+      imageResolution.value = `${naturalWidth}x${naturalHeight}`
+      
+      // 初始化Canvas
+      setTimeout(() => {
+        initCanvas()
+        
+        // 图片加载完成后，如果有坐标数据，重新绘制
+        if (areaForm.coordinates.points && areaForm.coordinates.points.length > 0) {
+          drawPolygon(areaForm.coordinates.points)
         }
-        ws.value.close()
-        ws.value = null
+      }, 100)
+    }
+
+    // 从设备ID获取IP地址
+    const getDeviceIpAddress = (deviceId) => {
+      const device = deviceList.value.find(d => d.device_id === deviceId)
+      return device ? device.ip_address : null
+    }
+
+    // 获取设备图片URL
+    const getDeviceImageUrl = (ipAddress) => {
+      // 使用后端提供的图片服务API
+      const imagePath = `storage/devices/${ipAddress}.jpg`
+      return `/api/v2/data-listeners/images/${encodeURIComponent(imagePath)}`
+    }
+
+    // 加载设备图片
+    const loadDeviceImage = () => {
+      if (!currentDevice.value) {
+        imageError.value = '设备信息不完整'
+        return
       }
 
-      // 停止视频流
-      if (videoRef.value && videoRef.value.srcObject) {
-        const tracks = videoRef.value.srcObject.getTracks()
-        tracks.forEach(track => track.stop())
-        videoRef.value.srcObject = null
+      imageLoading.value = true
+      imageError.value = null
+      deviceImage.value = null
+
+      const ipAddress = getDeviceIpAddress(currentDevice.value.device_id)
+      if (!ipAddress) {
+        imageLoading.value = false
+        imageError.value = '无法获取设备IP地址'
+        return
       }
 
+      // 使用后端图片服务API构建图片URL
+      const imageUrl = getDeviceImageUrl(ipAddress)
+      
+      // 创建新的Image对象来检测图片是否存在
+      const img = new Image()
+      
+      img.onload = () => {
+        deviceImage.value = imageUrl
+        imageLoading.value = false
+      }
+      
+      img.onerror = () => {
+        imageLoading.value = false
+        imageError.value = '设备画面图片不存在，请先进行设备预览以生成画面快照'
+      }
+      
+      // 添加时间戳避免缓存
+      img.src = `${imageUrl}?t=${Date.now()}`
+    }
+
+    // 停止预览（保持接口兼容性）
+    const stopPreview = () => {
       // 重置状态
-      previewStream.value = null
-      streamResolution.value = ''
+      deviceImage.value = null
+      imageResolution.value = ''
     }
     // 设置感兴趣区域方法
     const setInterestArea = (config) => {
@@ -794,9 +880,6 @@ export default defineComponent({
       // 检查 area_coordinates 是否有效
       if (config.area_coordinates && Object.keys(config.area_coordinates).length > 0) {
         areaForm.coordinates = config.area_coordinates; // 直接使用对象
-        if (drawingCanvas.value) {
-          drawPolygon(areaForm.coordinates.points);
-        }
       } else {
         areaForm.coordinates = {
           type: 'area',
@@ -808,341 +891,98 @@ export default defineComponent({
 
       areaModalVisible.value = true;
 
+      // 设置当前设备并加载图片
       currentDevice.value = config
-      previewLoading.value = true
-      previewError.value = null
-      previewStream.value = null
-      currentFrame.value = null
-      showFallbackImage.value = true
-      streamResolution.value = ''
 
-      // 清除之前的预览状态
-      if (videoRef.value && videoRef.value.srcObject) {
-        const tracks = videoRef.value.srcObject.getTracks()
-        tracks.forEach(track => track.stop())
-        videoRef.value.srcObject = null
-      }
-
-      // 延迟一帧，确保DOM加载完成再开始预览
+      // 延迟一帧，确保DOM加载完成再开始加载图片
       setTimeout(() => {
-        startPreview()
-      }, 0)
+        loadDeviceImage()
+      }, 100)
     };
 
     const drawPolygon = (points) => {
-      if (!drawingCanvas.value) {
-        // console.error('Canvas 未初始化')
+      if (!drawingCanvas.value || !points || points.length === 0) {
         return
       }
       try {
-        // 使用 Canvas 或其他绘图库绘制多边形
         const canvas = drawingCanvas.value;
         const ctx = canvas.getContext('2d');
-        // 先清除画布，然后重新绘制所有内容
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        const devicePixelRatio = window.devicePixelRatio || 1
+        
+        // 获取Canvas的显示尺寸
+        const displayWidth = canvas.clientWidth
+        const displayHeight = canvas.clientHeight
+        
+        // 先清除画布
+        ctx.clearRect(0, 0, displayWidth, displayHeight);
 
-        ctx.beginPath();
-        ctx.moveTo(points[0].x * drawingCanvas.value.width, points[0].y * drawingCanvas.value.height);
-        points.forEach(point => {
-          // console.log(point.x * drawingCanvas.value.offsetWidth, point.y * drawingCanvas.value.offsetHeight)
-          ctx.lineTo(point.x * drawingCanvas.value.width, point.y * drawingCanvas.value.height);
-        });
-        ctx.closePath();
-        ctx.strokeStyle = '#00ff00';
-        ctx.stroke();
-      } catch { }
+        if (points.length > 0) {
+          ctx.save()
+          
+          // 设置绘制样式
+          ctx.strokeStyle = '#00ff00';
+          ctx.lineWidth = 2;
+          ctx.lineCap = 'round';
+          ctx.lineJoin = 'round';
+          
+          // 开始绘制路径
+          ctx.beginPath();
+          
+          // 移动到第一个点
+          const firstPoint = points[0]
+          const startX = Math.round(firstPoint.x * displayWidth) + 0.5
+          const startY = Math.round(firstPoint.y * displayHeight) + 0.5
+          ctx.moveTo(startX, startY);
+          
+          // 绘制其他点
+          points.forEach((point, index) => {
+            if (index > 0) {
+              const x = Math.round(point.x * displayWidth) + 0.5
+              const y = Math.round(point.y * displayHeight) + 0.5
+              ctx.lineTo(x, y);
+            }
+          });
+          
+          // 根据类型决定是否闭合路径和填充
+          if (areaForm.coordinates.type === 'area') {
+            // 区域设置：闭合路径并填充
+            ctx.closePath();
+            ctx.fillStyle = 'rgba(0, 255, 0, 0.15)'; // 半透明填充
+            ctx.fill();
+          }
+          // 拌线设置：不闭合路径，不填充
+          
+          // 描边
+          ctx.stroke();
+          
+          // 绘制顶点
+          points.forEach(point => {
+            const x = Math.round(point.x * displayWidth)
+            const y = Math.round(point.y * displayHeight)
+            
+            ctx.beginPath();
+            ctx.arc(x, y, 4, 0, Math.PI * 2);
+            ctx.fillStyle = '#ff4444';
+            ctx.fill();
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+          });
+          
+          ctx.restore()
+        }
+      } catch (error) {
+        console.warn('绘制多边形时出错:', error)
+      }
     };
 
-    // 开始预览
-    const startPreview = async () => {
-      try {
-        if (!currentDevice.value) {
-          throw new Error('设备信息不完整')
-        }
-
-        // 构建流地址
-        const { device_type, ip_address, port, username, password } = currentDevice.value
-
-        if (device_type === 'camera') {
-          // 构建RTSP URL（根据摄像头类型可能需要调整URL格式）
-          const rtspUrl = `rtsp://${username}:${password}@${ip_address}:${port}/cam/realmonitor?channel=1&subtype=0`
-
-          // 使用WebSocket连接服务器请求代理流
-          await connectToWebSocket(rtspUrl)
-        } else {
-          throw new Error('不支持的设备类型')
-        }
-
-        previewLoading.value = false
-      } catch (error) {
-        // console.error('预览失败:', error)
-        previewLoading.value = false
-        previewError.value = `连接设备失败: ${error.message}`
-      }
-    }
-    // 连接WebSocket服务器
-    const connectToWebSocket = async (streamUrl) => {
-      return new Promise((resolve, reject) => {
-        try {
-          // 关闭已有的连接
-          if (ws.value && ws.value.readyState === WebSocket.OPEN) {
-            ws.value.close()
-          }
-
-          // 创建新的WebSocket连接
-          ws.value = new WebSocket(`ws://${window.location.host}/ws/rtsp/preview`)
-
-          // 连接超时
-          const connectionTimeout = setTimeout(() => {
-            reject(new Error('连接超时'))
-          }, 10000)
-
-          ws.value.onopen = () => {
-            clearTimeout(connectionTimeout)
-            // console.log('WebSocket已连接，正在发送连接请求...')
-
-            // 发送连接请求
-            ws.value.send(JSON.stringify({
-              type: 'connect',
-              client_type: 'preview_client'
-            }))
-          }
-
-          ws.value.onmessage = handleWsMessage
-
-          ws.value.onerror = (error) => {
-            clearTimeout(connectionTimeout)
-            // console.error('WebSocket错误:', error)
-            reject(new Error('WebSocket连接错误'))
-          }
-
-          ws.value.onclose = () => {
-            // console.log('WebSocket已关闭')
-            if (areaModalVisible.value && !previewError.value) {
-              previewError.value = '视频流连接已断开'
-            }
-          }
-        } catch (error) {
-          // console.error('创建WebSocket连接失败:', error)
-          reject(error)
-        }
-      })
-    }
-    // 处理WebSocket消息
-    const handleWsMessage = (event) => {
-      try {
-        const message = JSON.parse(event.data)
-        // console.log('接收到WebSocket消息:', message.type)
-
-        // 根据消息类型处理
-        switch (message.type) {
-          case 'connect_confirm':
-            // console.log('WebSocket连接确认')
-
-            // 发送预览请求
-            if (ws.value && ws.value.readyState === WebSocket.OPEN && currentDevice.value) {
-              // console.log('发送预览请求')
-              ws.value.send(
-                JSON.stringify({
-                  type: 'preview_request',
-                  device_id: currentDevice.value.device_id,
-                  stream_url: buildRtspUrl()
-                })
-              )
-            }
-            break
-
-          case 'preview_start':
-            // console.log('预览流已开始', message)
-            previewLoading.value = false
-
-            // 如果预览流还未开始，则启动
-            if (!previewStream.value) {
-              // 确保状态被正确设置
-              startVideoStream()
-            }
-            break
-
-          case 'stream_data':
-            // 处理流数据
-            handleStreamData(message)
-            break
-
-          case 'error':
-            // console.error('服务器错误:', message.message)
-            previewLoading.value = false
-            previewError.value = `服务器错误: ${message.message}`
-            break
-
-          default:
-            break
-          // console.log('未处理的消息类型:', message.type)
-        }
-      } catch (error) {
-        // console.error('处理WebSocket消息错误:', error)
-      }
-    }
-    // 开始视频流播放
-    const startVideoStream = () => {
-      // console.log('开始初始化视频流播放...');
-
-      try {
-        // 无论videoRef是否存在，都先将预览状态设置为true
-        previewLoading.value = false;
-        previewStream.value = true;
-        // console.log('视频预览状态已更新: previewStream =', previewStream.value);
-
-        // 检查浏览器支持
-        if (!window.MediaSource) {
-          // console.warn('浏览器不支持MediaSource API，将使用备用显示模式');
-          showFallbackImage.value = true;
-        }
-
-        // 如果videoRef已存在，可以进行其他初始化
-        // if (videoRef.value) {
-        //   console.log('videoRef已存在，可以初始化视频元素');
-        // } else {
-        //   console.log('videoRef尚未就绪，将在收到第一帧时初始化');
-        // }
-      } catch (error) {
-        // console.error('启动视频流失败:', error);
-        previewError.value = `启动视频流失败: ${error.message}`;
-      }
-    }
-    // 处理流数据
-    const handleStreamData = (data) => {
-      // console.log('收到流数据:', data.type, data.format || '(无格式信息)');
-
-      // 确保预览状态已初始化（双重保险）
-      if (!previewStream.value) {
-        // console.log('预览流状态未初始化，自动初始化');
-        previewLoading.value = false;
-        previewStream.value = true;
-      }
-
-      try {
-        // 检查数据格式
-        if (data.format === 'jpeg' && data.data) {
-          // console.log(`处理JPEG图像数据: ${data.width}x${data.height}, 帧ID:${data.frame_id}`);
-
-          // 基于Base64图像创建图像URL
-          const imageData = `data:image/jpeg;base64,${data.data}`;
-
-          // 更新当前帧，用于备用显示方式
-          currentFrame.value = imageData;
-
-          // 更新分辨率信息（无论显示模式如何）
-          if (!streamResolution.value && data.width && data.height) {
-            streamResolution.value = `${data.width}x${data.height}`;
-          }
-
-          // 默认使用备用图像显示方式，简单可靠
-          if (!videoRef.value || !videoRef.value.parentElement) {
-            // console.log('使用备用图像显示模式 - videoRef不可用');
-            showFallbackImage.value = true;
-            return;
-          }
-
-          // 如果明确使用备用图像显示方式，则直接返回
-          if (showFallbackImage.value) {
-            return;
-          }
-
-          // 使用IMG元素更新视频帧
-          const img = new Image();
-          img.onload = () => {
-            // 确保videoRef仍然存在
-            if (!videoRef.value) {
-              // console.warn('videoRef在图像加载过程中消失，切换到备用模式');
-              showFallbackImage.value = true;
-              return;
-            }
-
-            try {
-              // 使用Canvas绘制图像
-              const canvas = document.createElement('canvas');
-              canvas.width = data.width;
-              canvas.height = data.height;
-              const ctx = canvas.getContext('2d');
-              ctx.drawImage(img, 0, 0);
-
-              // 直接将canvas内容显示在video元素上
-              if (!videoRef.value.srcObject) {
-                // 首次创建流
-                // console.log('创建新的Canvas流');
-                try {
-                  const canvasStream = canvas.captureStream(15); // 15fps
-                  videoRef.value.srcObject = canvasStream;
-                  // console.log('视频流已连接到video元素');
-                } catch (e) {
-                  // console.error('创建Canvas流失败，切换到备用模式:', e);
-                  showFallbackImage.value = true;
-                }
-              } else {
-                // 更新现有流的图像 - 使用简化的方法
-                try {
-                  const newStream = canvas.captureStream(15);
-                  const oldStream = videoRef.value.srcObject;
-                  videoRef.value.srcObject = newStream;
-
-                  // 停止旧流的轨道
-                  if (oldStream && oldStream.getTracks) {
-                    oldStream.getTracks().forEach(track => track.stop());
-                  }
-                } catch (e) {
-                  // console.warn('更新Canvas流失败，切换到备用模式:', e);
-                  showFallbackImage.value = true;
-                }
-              }
-            } catch (e) {
-              // console.error('Canvas操作失败，切换到备用模式:', e);
-              showFallbackImage.value = true;
-            }
-          };
-
-          img.onerror = (err) => {
-            // console.error('图像加载失败:', err);
-            previewError.value = '图像加载失败，请检查网络连接';
-          };
-
-          img.src = imageData;
-        } else if (data.data && !data.format) {
-          // console.log('收到二进制数据，尝试作为MP4片段处理');
-          // 二进制数据处理 (PyAV版本的后端)
-          if (window.appendVideoData) {
-            try {
-              const videoData = new Uint8Array(data.data);
-              window.appendVideoData(videoData);
-              // console.log('成功处理视频数据片段');
-            } catch (e) {
-              // console.error('处理视频片段失败:', e);
-              previewError.value = '视频解码失败';
-            }
-          } else {
-            // console.warn('window.appendVideoData未定义，无法处理MP4片段，切换到备用模式');
-            showFallbackImage.value = true;
-          }
-        } else {
-          // console.warn('收到未知格式的数据:', data);
-        }
-      } catch (error) {
-        // console.error('处理视频数据错误:', error);
-        previewError.value = `视频处理错误: ${error.message}`;
-        showFallbackImage.value = true;  // 出错时默认使用备用模式
-      }
-    }
-    // 构建RTSP URL
-    const buildRtspUrl = () => {
-      if (!currentDevice.value) return '';
-
-      return `rtsp://${currentDevice.value.username}:${currentDevice.value.password}@${currentDevice.value.ip_address}:${currentDevice.value.port}/cam/realmonitor?channel=1&subtype=0`
-    }
     // 绘制相关方法
     const startDrawing = () => {
       if (areaForm.coordinates.type) {
         isDrawing.value = true;
         points.value = [];
         areaForm.coordinates.points = [];
+        loadArea();
       } else {
         ElMessage.info('请选择画线类型');
       }
@@ -1152,9 +992,14 @@ export default defineComponent({
     const clearDrawing = () => {
       const canvas = drawingCanvas.value;
       const ctx = canvas.getContext('2d');
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const displayWidth = canvas.clientWidth;
+      const displayHeight = canvas.clientHeight;
+      
+      ctx.clearRect(0, 0, displayWidth, displayHeight);
       points.value = [];
       areaForm.coordinates.points = [];
+      areaForm.coordinates.subtype = 'simple';
+      isDrawing.value = false;
     };
 
     const handleMouseDown = (e) => {
@@ -1162,30 +1007,107 @@ export default defineComponent({
 
       const canvas = drawingCanvas.value;
       const rect = canvas.getBoundingClientRect();
-      const scaleX = canvas.width / rect.width;
-      const scaleY = canvas.height / rect.height;
+      
+      // 计算归一化坐标（0-1之间）
+      const normalizedX = (e.clientX - rect.left) / rect.width;
+      const normalizedY = (e.clientY - rect.top) / rect.height;
+      
+      // 确保坐标在有效范围内
+      if (normalizedX < 0 || normalizedX > 1 || normalizedY < 0 || normalizedY > 1) return;
 
-      const x = (e.clientX - rect.left) * scaleX;
-      const y = (e.clientY - rect.top) * scaleY;
+      points.value.push({ x: normalizedX, y: normalizedY });
 
-      points.value.push({ x, y });
+          // 重新绘制所有内容
+       redrawCanvas();
+    };
 
-      // 绘制点
+    // 重绘Canvas内容
+    const redrawCanvas = (previewPoint = null) => {
+      if (!drawingCanvas.value) return;
+
+      const canvas = drawingCanvas.value;
       const ctx = canvas.getContext('2d');
-      ctx.fillStyle = '#00FF00';
-      ctx.beginPath();
-      ctx.arc(x, y, 1, 0, Math.PI * 2);
-      ctx.fill();
+      const displayWidth = canvas.clientWidth;
+      const displayHeight = canvas.clientHeight;
 
-      // 绘制连线
-      if (points.value.length > 1) {
-        ctx.strokeStyle = '#00FF00';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(points.value[points.value.length - 2].x, points.value[points.value.length - 2].y);
-        ctx.lineTo(x, y);
-        ctx.stroke();
+      // 清除画布
+      ctx.clearRect(0, 0, displayWidth, displayHeight);
+
+      if (points.value.length === 0 && !previewPoint) return;
+
+      ctx.save();
+
+      // 绘制已有的点和线
+      if (points.value.length > 0) {
+        // 绘制点
+        points.value.forEach(point => {
+          const x = Math.round(point.x * displayWidth);
+          const y = Math.round(point.y * displayHeight);
+          
+          ctx.beginPath();
+          ctx.arc(x, y, 4, 0, Math.PI * 2);
+          ctx.fillStyle = '#ff4444';
+          ctx.fill();
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 1;
+          ctx.stroke();
+        });
+
+        // 绘制连线
+        if (points.value.length > 1) {
+          ctx.beginPath();
+          ctx.strokeStyle = '#00ff00';
+          ctx.lineWidth = 2;
+          ctx.lineCap = 'round';
+          ctx.lineJoin = 'round';
+
+          const firstPoint = points.value[0];
+          ctx.moveTo(
+            Math.round(firstPoint.x * displayWidth) + 0.5,
+            Math.round(firstPoint.y * displayHeight) + 0.5
+          );
+
+          for (let i = 1; i < points.value.length; i++) {
+            const point = points.value[i];
+            ctx.lineTo(
+              Math.round(point.x * displayWidth) + 0.5,
+              Math.round(point.y * displayHeight) + 0.5
+            );
+          }
+          
+          // 如果是区域类型且绘制完成，则闭合路径
+          if (areaForm.coordinates.type === 'area' && !isDrawing.value && points.value.length >= 3) {
+            ctx.closePath();
+            ctx.fillStyle = 'rgba(0, 255, 0, 0.15)';
+            ctx.fill();
+          }
+          
+          ctx.stroke();
+        }
+
+        // 绘制预览线（鼠标移动时）
+        if (previewPoint && points.value.length > 0) {
+          ctx.beginPath();
+          // ctx.strokeStyle = 'rgba(0, 255, 0, 0.5)';
+          ctx.strokeStyle = '#00ff00';
+          ctx.lineWidth = 1;
+          // ctx.setLineDash([5, 5]);
+
+          const lastPoint = points.value[points.value.length - 1];
+          ctx.moveTo(
+            Math.round(lastPoint.x * displayWidth) + 0.5,
+            Math.round(lastPoint.y * displayHeight) + 0.5
+          );
+          ctx.lineTo(
+            Math.round(previewPoint.x * displayWidth) + 0.5,
+            Math.round(previewPoint.y * displayHeight) + 0.5
+          );
+          ctx.stroke();
+          // ctx.setLineDash([]);
+        }
       }
+
+      ctx.restore();
     };
 
     const handleMouseMove = (e) => {
@@ -1193,84 +1115,35 @@ export default defineComponent({
 
       const canvas = drawingCanvas.value;
       const rect = canvas.getBoundingClientRect();
-      const scaleX = canvas.width / rect.width;
-      const scaleY = canvas.height / rect.height;
+      
+      // 计算归一化坐标
+      const normalizedX = (e.clientX - rect.left) / rect.width;
+      const normalizedY = (e.clientY - rect.top) / rect.height;
+      
+      // 确保坐标在有效范围内
+      if (normalizedX < 0 || normalizedX > 1 || normalizedY < 0 || normalizedY > 1) return;
 
-      const x = (e.clientX - rect.left) * scaleX;
-      const y = (e.clientY - rect.top) * scaleY;
-
-      // 绘制临时线
-      const ctx = canvas.getContext('2d');
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-      // 重绘所有点
-      points.value.forEach(point => {
-        ctx.fillStyle = '#00FF00';
-        ctx.beginPath();
-        ctx.arc(point.x, point.y, 1, 0, Math.PI * 2);
-        ctx.fill();
-      });
-
-      // 重绘所有线
-      if (points.value.length > 1) {
-        ctx.strokeStyle = '#00FF00';
-        ctx.lineWidth = 1;
-        for (let i = 1; i < points.value.length; i++) {
-          ctx.beginPath();
-          ctx.moveTo(points.value[i - 1].x, points.value[i - 1].y);
-          ctx.lineTo(points.value[i].x, points.value[i].y);
-          ctx.stroke();
-        }
-      }
-
-      // 绘制临时线
-      if (points.value.length > 0) {
-        ctx.strokeStyle = '#00FF00';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(points.value[points.value.length - 1].x, points.value[points.value.length - 1].y);
-        ctx.lineTo(x, y);
-        ctx.stroke();
-      }
+      // 重绘画布，包含预览点
+      redrawCanvas({ x: normalizedX, y: normalizedY });
     };
 
     const handleRightClick = () => {
       if (!isDrawing.value || points.value.length < (areaForm.coordinates.type === 'area' ? 3 : 2)) return;
 
-      const ctx = drawingCanvas.value.getContext('2d');
-      ctx.strokeStyle = '#00FF00';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-
-      // 绘制路径
-      points.value.forEach((p, index) => {
-        if (index === 0) ctx.moveTo(p.x, p.y);
-        else ctx.lineTo(p.x, p.y);
-      });
-
-      // 自动闭合多边形
-      if (areaForm.coordinates.type === 'area') {
-        ctx.lineTo(points.value[0].x, points.value[0].y);
-      }
-      ctx.stroke();
-
-      // 生成标准化坐标
+      // 生成坐标数据（points.value已经是归一化的）
       areaForm.coordinates = {
         type: areaForm.coordinates.type,
-        points: points.value.map(p => ({
-          x: p.x / drawingCanvas.value.width,
-          y: p.y / drawingCanvas.value.height
-        })),
+        points: [...points.value], // points.value已经是归一化坐标
         subtype: areaForm.coordinates.subtype || "simple",
         direction: areaForm.coordinates.direction || "in",
       };
 
-      // 如果是方向检测，绘制箭头
-      if (areaForm.coordinates.subtype === 'directional') {
-        updateDirectionArrow();
-      }
-
+      // 重绘最终的多边形
+      drawPolygon(points.value);
+      
       isDrawing.value = false;
+      const message = areaForm.coordinates.type === 'area' ? '区域绘制完成' : '拌线绘制完成';
+      ElMessage.success(message);
     };
 
     // 保存区域配置
@@ -1302,8 +1175,6 @@ export default defineComponent({
             area_coordinates: areaForm.coordinates
           });
         }
-
-
 
         ElMessage.success('区域配置保存成功');
         areaModalVisible.value = false;
@@ -1363,9 +1234,9 @@ export default defineComponent({
       sensitivity: [{ required: true, message: '请设置检测灵敏度', trigger: 'change' }],
       frequency: [{ required: true, message: '请选择检测频率', trigger: 'change' }],
       save_mode: [{ required: true, message: '请选择保存模式', trigger: 'change' }],
-      scheduleTime: [{ 
-        required: true, 
-        message: '请选择定时检测时间', 
+      scheduleTime: [{
+        required: true,
+        message: '请选择定时检测时间',
         trigger: 'change',
         validator: (rule, value, callback) => {
           if (formState.frequency === 'scheduled' && formState.scheduleMode === 'simple' && !value) {
@@ -1375,9 +1246,9 @@ export default defineComponent({
           }
         }
       }],
-      scheduleDays: [{ 
-        required: true, 
-        message: '请选择定时检测日期', 
+      scheduleDays: [{
+        required: true,
+        message: '请选择定时检测日期',
         trigger: 'change',
         validator: (rule, value, callback) => {
           if (formState.frequency === 'scheduled' && formState.scheduleMode === 'simple' && (!value || value.length === 0)) {
@@ -1423,9 +1294,9 @@ export default defineComponent({
       }
       if (typeMap[areaType.type]) {
         if (areaType.subtype === 'directional') {
-          return typeMap[areaType.type] + '(方向检测:' + (areaType.direction === 'in' ? '进入' : areaType.direction === 'out' ? '离开' : '双向') + ')'
+          return typeMap[areaType.type] + '(方向:' + (areaType.direction === 'in' ? '进入' : areaType.direction === 'out' ? '离开' : '双向') + ')'
         } else {
-          return typeMap[areaType.type] + '(普通检测)'
+          return typeMap[areaType.type] + '(普通)'
         }
       } else {
         return '未设置'
@@ -1471,7 +1342,7 @@ export default defineComponent({
       }
 
       const config = row.schedule_config;
-      
+
       // 简单模式
       if (!config.mode || config.mode === 'simple') {
         const time = config.time || '';
@@ -1491,12 +1362,12 @@ export default defineComponent({
 
         const daysString = days.map(d => dayNames[d]).join(', ');
         return `${time} - ${daysString} ${duration}`;
-      } 
-      
+      }
+
       // 高级模式
       else {
         let result = [];
-        
+
         // 时间设置
         if (config.timeType === 'points' && config.timePoints) {
           // 多时间点
@@ -1509,12 +1380,12 @@ export default defineComponent({
             result.push(`时间段: ${config.startTime}-${config.endTime}, 间隔${config.interval || 5}分钟`);
           }
         }
-        
+
         // 日期设置
         if (config.dateType === 'weekday' && config.weekdays) {
           // 星期几
           const dayNames = {
-            '0': '周日', '1': '周一', '2': '周二', '3': '周三', 
+            '0': '周日', '1': '周一', '2': '周二', '3': '周三',
             '4': '周四', '5': '周五', '6': '周六'
           };
           const weekdays = config.weekdays.map(d => dayNames[d]).join(', ');
@@ -1533,7 +1404,7 @@ export default defineComponent({
             result.push(`特定日期: ${config.specificDates.length}个日期`);
           }
         }
-        
+
         // 执行控制
         const controls = [];
         if (config.duration) {
@@ -1545,11 +1416,11 @@ export default defineComponent({
         if (config.idleTimeout && config.idleTimeout > 0) {
           controls.push(`空闲${config.idleTimeout}分钟自动停止`);
         }
-        
+
         if (controls.length > 0) {
           result.push(controls.join(', '));
         }
-        
+
         return result.join(' | ');
       }
     };
@@ -1619,6 +1490,7 @@ export default defineComponent({
     // 显示添加模态框
     const showAddModal = () => {
       isEdit.value = false;
+      currentStep.value = 1;
       resetForm();
       modalVisible.value = true;
     };
@@ -1629,7 +1501,7 @@ export default defineComponent({
         config_id: null,
         device_id: null,
         models_id: null,
-        enabled: true,
+        enabled: false,
         sensitivity: 0.5,
         target_classes: [],
         frequency: 'realtime',
@@ -1662,11 +1534,11 @@ export default defineComponent({
     // 编辑配置
     const editConfig = (record) => {
       isEdit.value = true;
-
+      currentStep.value = 1;
       // 处理 schedule_config
       let scheduleTime = null;
       let scheduleDays = [];
-      
+
       // 设置默认值
       const defaultSchedule = {
         scheduleMode: 'simple',
@@ -1686,17 +1558,17 @@ export default defineComponent({
 
       if (record.frequency === 'scheduled' && record.schedule_config) {
         const config = record.schedule_config;
-        
+
         // 设置模式
         if (config.mode) {
           defaultSchedule.scheduleMode = config.mode;
         }
-        
+
         // 设置时长
         if (config.duration) {
           defaultSchedule.scheduleDuration = config.duration;
         }
-        
+
         if (config.mode === 'simple' || !config.mode) {
           // 简单模式
           // 解析时间字符串 "HH:MM" 为 Date 对象
@@ -1714,7 +1586,7 @@ export default defineComponent({
           defaultSchedule.scheduleDateType = config.dateType || 'weekday';
           defaultSchedule.scheduleMaxExecutions = config.maxExecutions !== undefined ? config.maxExecutions : -1;
           defaultSchedule.scheduleIdleTimeout = config.idleTimeout || 0;
-          
+
           // 时间设置
           if (config.timeType === 'points' && config.timePoints && config.timePoints.length > 0) {
             // 多时间点
@@ -1732,17 +1604,17 @@ export default defineComponent({
               startDate.setHours(startH, startM, 0, 0);
               defaultSchedule.scheduleStartTime = startDate;
             }
-            
+
             if (config.endTime) {
               const [endH, endM] = config.endTime.split(':').map(Number);
               const endDate = new Date();
               endDate.setHours(endH, endM, 0, 0);
               defaultSchedule.scheduleEndTime = endDate;
             }
-            
+
             defaultSchedule.scheduleInterval = config.interval || 5;
           }
-          
+
           // 日期设置
           if (config.dateType === 'weekday') {
             defaultSchedule.scheduleAdvWeekdays = config.weekdays || [];
@@ -1805,7 +1677,7 @@ export default defineComponent({
                   const timeObj = formState.scheduleTime;
                   const hours = timeObj.getHours().toString().padStart(2, '0');
                   const minutes = timeObj.getMinutes().toString().padStart(2, '0');
-                  
+
                   scheduleConfig = {
                     ...scheduleConfig,
                     time: `${hours}:${minutes}`,
@@ -1833,13 +1705,13 @@ export default defineComponent({
                     // 时间范围
                     const startTimeObj = formState.scheduleStartTime;
                     const endTimeObj = formState.scheduleEndTime;
-                    
+
                     if (startTimeObj && endTimeObj) {
                       const startH = startTimeObj.getHours().toString().padStart(2, '0');
                       const startM = startTimeObj.getMinutes().toString().padStart(2, '0');
                       const endH = endTimeObj.getHours().toString().padStart(2, '0');
                       const endM = endTimeObj.getMinutes().toString().padStart(2, '0');
-                      
+
                       scheduleConfig.startTime = `${startH}:${startM}`;
                       scheduleConfig.endTime = `${endH}:${endM}`;
                       scheduleConfig.interval = formState.scheduleInterval;
@@ -1929,8 +1801,8 @@ export default defineComponent({
     };
 
     const loadArea = () => {
-      if (drawingCanvas.value) {
-        // areaForm.config_type = areaForm.coordinates.type;
+      if (drawingCanvas.value && areaForm.coordinates.points) {
+        // 重新绘制已有的区域坐标
         drawPolygon(areaForm.coordinates.points);
       }
     }
@@ -1940,88 +1812,7 @@ export default defineComponent({
       if (value === 'directional' && (!areaForm.coordinates.points || areaForm.coordinates.points.length < 2)) {
         ElMessage.warning('请先绘制区域再选择方向检测模式');
         areaForm.coordinates.subtype = 'simple';
-      } else if (value === 'directional') {
-        updateDirectionArrow();
-      } else if (value === 'simple') {
-        areaForm.coordinates.direction = null;
-        loadArea();
       }
-    };
-
-    // 更新方向箭头
-    const updateDirectionArrow = () => {
-      if (!areaForm.coordinates.points || areaForm.coordinates.points.length < 2) return;
-
-      // 在线段上绘制箭头
-      const canvas = drawingCanvas.value;
-      if (!canvas) return;
-
-      // 重绘所有点和线
-      const ctx = canvas.getContext('2d');
-      ctx.fillStyle = '#00FF00';
-      ctx.strokeStyle = '#00FF00';
-      ctx.lineWidth = 1;
-
-      // 先清除画布，然后重新绘制所有内容
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-      const points = areaForm.coordinates.points;
-
-      // 绘制多边形
-      ctx.beginPath();
-      ctx.moveTo(points[0].x * drawingCanvas.value.width, points[0].y * drawingCanvas.value.height);
-      points.forEach(point => {
-        ctx.lineTo(point.x * drawingCanvas.value.width, point.y * drawingCanvas.value.height);
-      });
-      if (areaForm.coordinates.type === 'area' && points.length > 2) {
-        ctx.closePath();
-      }
-      ctx.stroke();
-
-      // 如果是方向检测，在第一个和第二个点之间绘制箭头
-      if (areaForm.coordinates.subtype === 'directional' && points.length >= 2) {
-        const p1 = points[0];
-        const p2 = points[1];
-
-        // 计算线段中点
-        const midX = (p1.x + p2.x) / 2 * drawingCanvas.value.width;
-        const midY = (p1.y + p2.y) / 2 * drawingCanvas.value.height;
-
-        // 计算线段角度
-        const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
-
-        // 根据方向绘制不同的箭头
-        if (areaForm.coordinates.direction === 'in' || areaForm.coordinates.direction === 'both') {
-          drawArrow(ctx, midX, midY, angle + Math.PI / 2, '#00FF00');
-        }
-
-        if (areaForm.coordinates.direction === 'out' || areaForm.coordinates.direction === 'both') {
-          drawArrow(ctx, midX, midY, angle - Math.PI / 2, '#00FF00');
-        }
-      }
-    };
-
-    // 绘制箭头函数
-    const drawArrow = (ctx, x, y, angle, color) => {
-      const arrowSize = 10;
-
-      ctx.save();
-      ctx.translate(x, y);
-      ctx.rotate(angle);
-
-      ctx.fillStyle = color;
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(0, 0);
-      ctx.lineTo(-arrowSize / 2, -arrowSize);
-      ctx.lineTo(arrowSize / 2, -arrowSize);
-      ctx.closePath();
-      ctx.fill();
-
-      ctx.stroke();
-
-      ctx.restore();
     };
 
     // 新增定时设置处理方法
@@ -2061,24 +1852,24 @@ export default defineComponent({
     const selectAllWeekdays = () => {
       formState.scheduleAdvWeekdays = ['0', '1', '2', '3', '4', '5', '6'];
     };
-    
+
     const selectWorkdays = () => {
       formState.scheduleAdvWeekdays = ['1', '2', '3', '4', '5'];
     };
-    
+
     const selectWeekends = () => {
       formState.scheduleAdvWeekdays = ['0', '6'];
     };
-    
+
     const clearWeekdays = () => {
       formState.scheduleAdvWeekdays = [];
     };
-    
+
     // 每月日期选择辅助方法
     const selectMonthdays = (days) => {
       formState.scheduleMonthdays = days;
     };
-    
+
     const clearMonthdays = () => {
       formState.scheduleMonthdays = [];
     };
@@ -2087,14 +1878,13 @@ export default defineComponent({
     const selectAllClasses = () => {
       formState.target_classes = targetClasses.value.map(item => item.value);
     };
-    
+
     const clearAllClasses = () => {
       formState.target_classes = [];
     };
 
     return {
       getAreaTypeLabel,
-      updateDirectionArrow,
       handleSubtypeChange,
       loadArea,
       loading,
@@ -2111,13 +1901,13 @@ export default defineComponent({
       targetClasses,
       areaModalVisible,
       areaForm,
-      previewLoading,
-      previewError,
-      previewStream,
-      currentFrame,
-      showFallbackImage,
-      onVideoLoaded,
-      retryPreview,
+      imageLoading,
+      imageError,
+      deviceImage,
+      onImageLoaded,
+      loadDeviceImage,
+      getDeviceIpAddress,
+      getDeviceImageUrl,
       stopPreview,
       saveAreaConfig,
       setInterestArea,
@@ -2126,7 +1916,9 @@ export default defineComponent({
       handleMouseDown,
       handleMouseMove,
       handleRightClick,
-      videoRef,
+      redrawCanvas,
+      initCanvas,
+      deviceImageRef,
       drawingCanvas,
       updateTargetClasses,
       getModelTypeName,
@@ -2165,6 +1957,16 @@ export default defineComponent({
 </script>
 
 <style scoped>
+.form-item-container {
+  display: flex;
+  justify-content: flex-start;
+  gap: 10px;
+}
+.form-item-left {
+  border: 1px solid #dcdfe6;
+  border-radius: 4px;
+  padding: 10px;
+}
 /* 基础样式 */
 .divider-title {
   font-size: 16px;
@@ -2258,13 +2060,16 @@ export default defineComponent({
 }
 
 /* 设备和模型选项 */
-.device-option, .model-option, .class-option {
+.device-option,
+.model-option,
+.class-option {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.device-id, .class-id {
+.device-id,
+.class-id {
   color: #909399;
   font-size: 12px;
   margin-left: auto;
@@ -2476,16 +2281,17 @@ export default defineComponent({
 
 /* 响应式设计 */
 @media screen and (max-width: 768px) {
+
   .form-row,
   .time-range-row {
     flex-direction: column;
     gap: 15px;
   }
-  
+
   .time-separator {
     align-self: center;
   }
-  
+
   .control-grid {
     grid-template-columns: 1fr;
   }
@@ -2708,7 +2514,7 @@ export default defineComponent({
   margin-left: auto;
 }
 
-.video-preview-container {
+.image-preview-container {
   display: flex;
   justify-content: center;
   align-items: center;
@@ -2717,7 +2523,7 @@ export default defineComponent({
   border-radius: 4px;
 }
 
-.video-placeholder {
+.image-placeholder {
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -2747,7 +2553,7 @@ export default defineComponent({
   gap: 10px;
 }
 
-.video-wrapper {
+.image-wrapper {
   position: relative;
   width: 100%;
   height: 100%;
@@ -2755,18 +2561,25 @@ export default defineComponent({
   border-radius: 4px;
 }
 
-.preview-video,
+.device-image,
 .drawing-canvas {
   position: absolute;
   top: 0;
   left: 0;
   width: 100%;
   height: 100%;
+  object-fit: contain;
 }
 
 .drawing-canvas {
   z-index: 1;
   cursor: crosshair;
+  /* 优化Canvas渲染质量 */
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: -webkit-crisp-edges;
+  image-rendering: -moz-crisp-edges;
+  image-rendering: crisp-edges;
+  image-rendering: pixelated;
 }
 
 .drawing-controls {
@@ -2779,18 +2592,9 @@ export default defineComponent({
 .coordinate-hint {
   font-size: 12px;
   color: #909399;
-  margin-top: -10px;
+  margin-top: 10px;
   margin-bottom: 10px;
 }
 
-.fallback-image {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  background-color: #000;
-  display: none;
-}
+
 </style>

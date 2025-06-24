@@ -660,7 +660,7 @@ const sendVideoFrame = async () => {
 
     // 发送帧数据
     ws.send(JSON.stringify({
-      type: 'frame',
+      type: 'video',
       frame_id: frameId.value++,
       frame: base64Image,
       width: targetWidth,

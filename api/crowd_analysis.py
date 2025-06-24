@@ -34,6 +34,7 @@ class AnalysisJobCreate(BaseModel):
     location_info: Optional[LocationInfo] = None
     description: Optional[str] = None
     detect_classes: Optional[List[str]] = None
+    confidence_threshold: Optional[float] = 0.5  # 置信度阈值，默认0.5
     
     @validator('job_name')
     def validate_job_name(cls, v):
@@ -66,6 +67,13 @@ class AnalysisJobCreate(BaseModel):
             if not re.match(cron_pattern, v):
                 raise ValueError("无效的CRON表达式格式，正确格式如: */30 * * * *")
         return v
+    
+    @validator('confidence_threshold')
+    def validate_confidence_threshold(cls, v):
+        if v is not None:
+            if v < 0.1 or v > 1.0:
+                raise ValueError("置信度阈值必须在0.1到1.0之间")
+        return v
 
 class AnalysisJobUpdate(BaseModel):
     job_name: Optional[str] = None
@@ -78,6 +86,7 @@ class AnalysisJobUpdate(BaseModel):
     description: Optional[str] = None
     is_active: Optional[bool] = None
     detect_classes: Optional[List[str]] = None
+    confidence_threshold: Optional[float] = None
     warning_threshold: Optional[int] = None
     warning_message: Optional[str] = None
 
@@ -87,6 +96,7 @@ class AnalysisJobResponse(BaseModel):
     device_ids: List[str]
     models_id: str
     detect_classes: List[str]
+    confidence_threshold: float
     interval: int
     cron_expression: Optional[str]
     tags: List[str]
@@ -110,12 +120,7 @@ async def create_analysis_job(
     for device_id in job_data.device_ids:
         device = db.query(Device).filter(Device.device_id == device_id).first()
         if not device:
-            raise HTTPException(status_code=404, detail=f"设备不存在: {device_id}")
-            
-        # 检查设备是否有检测配置 - 不再需要，因为现在使用任务指定的模型
-        # 但仍然验证设备是否可用
-        # if not device.status:
-        #     raise HTTPException(status_code=400, detail=f"设备 {device_id} 未启用")
+            raise HTTPException(status_code=404, detail=f"设备不存在: {device_id}")          
 
     # 验证模型ID是否存在
     model = db.query(DetectionModel).filter(DetectionModel.models_id == job_data.models_id).first()
@@ -148,6 +153,7 @@ async def create_analysis_job(
         created_at=datetime.now(),
         is_active=False,
         detect_classes=job_data.detect_classes,
+        confidence_threshold=job_data.confidence_threshold,
         # is_active=True
     )
     
@@ -178,6 +184,8 @@ async def create_analysis_job(
             "job_name": job_data.job_name,
             "device_ids": job_data.device_ids,
             "models_id": job_data.models_id,  # 添加模型ID
+            "detect_classes": db_job.detect_classes,
+            "confidence_threshold": db_job.confidence_threshold,
             "interval": job_data.interval,
             "cron_expression": job_data.cron_expression,
             "tags": job_data.tags,
@@ -185,7 +193,6 @@ async def create_analysis_job(
             "description": job_data.description,
             "created_at": db_job.created_at,
             "is_active": db_job.is_active,
-            "detect_classes": db_job.detect_classes,
             "last_run": None,
             "status": "created",
             "last_result": None,
@@ -211,7 +218,7 @@ async def get_analysis_jobs(
     memory_jobs_dict = {job.get("job_id"): job for job in memory_jobs}
     
     # 从数据库获取所有任务
-    db_jobs = db.query(CrowdAnalysisJob).all()
+    db_jobs = db.query(CrowdAnalysisJob).order_by(CrowdAnalysisJob.created_at.desc()).all()
     
     # 转换为响应格式
     responses = []
@@ -226,6 +233,7 @@ async def get_analysis_jobs(
                 "device_ids": db_job.device_ids,
                 "models_id": db_job.models_id,
                 "detect_classes": db_job.detect_classes if db_job.detect_classes else [],
+                "confidence_threshold": db_job.confidence_threshold or 0.5,
                 "interval": db_job.interval or 0,
                 "cron_expression": db_job.cron_expression,
                 "tags": db_job.tags,
@@ -246,6 +254,7 @@ async def get_analysis_jobs(
                 "device_ids": db_job.device_ids,
                 "models_id": db_job.models_id,
                 "detect_classes": db_job.detect_classes if db_job.detect_classes else [],
+                "confidence_threshold": db_job.confidence_threshold or 0.5,
                 "interval": db_job.interval or 0,
                 "cron_expression": db_job.cron_expression,
                 "tags": db_job.tags,
@@ -286,6 +295,7 @@ async def get_analysis_job(
             "device_ids": db_job.device_ids,
             "models_id": db_job.models_id,
             "detect_classes": db_job.detect_classes if db_job.detect_classes else [],
+            "confidence_threshold": db_job.confidence_threshold or 0.5,
             "interval": db_job.interval or 0,
             "cron_expression": db_job.cron_expression,
             "tags": db_job.tags,
@@ -306,6 +316,7 @@ async def get_analysis_job(
             "device_ids": db_job.device_ids,
             "models_id": db_job.models_id,
             "detect_classes": db_job.detect_classes if db_job.detect_classes else [],
+            "confidence_threshold": db_job.confidence_threshold or 0.5,
             "interval": db_job.interval or 0,
             "cron_expression": db_job.cron_expression,
             "tags": db_job.tags,
@@ -386,6 +397,7 @@ async def run_analysis_job_now(
                 device_ids=db_job.device_ids,
                 models_id=db_job.models_id,
                 detect_classes=db_job.detect_classes,
+                confidence_threshold=db_job.confidence_threshold or 0.5,
                 interval=db_job.interval,
                 cron_expression=db_job.cron_expression,
                 tags=db_job.tags,
@@ -505,6 +517,7 @@ async def resume_analysis_job(
         device_ids=job.device_ids,
         models_id=job.models_id,
         detect_classes=job.detect_classes,
+        confidence_threshold=job.confidence_threshold or 0.5,
         interval=job.interval,
         cron_expression=job.cron_expression,
         tags=job.tags,
@@ -717,6 +730,7 @@ async def update_analysis_job(
                     device_ids=db_job.device_ids,
                     models_id=db_job.models_id,
                     detect_classes=db_job.detect_classes,
+                    confidence_threshold=db_job.confidence_threshold or 0.5,
                     interval=db_job.interval,
                     cron_expression=db_job.cron_expression,
                     tags=db_job.tags,
@@ -735,6 +749,7 @@ async def update_analysis_job(
                 device_ids=db_job.device_ids,
                 models_id=db_job.models_id,
                 detect_classes=db_job.detect_classes,
+                confidence_threshold=db_job.confidence_threshold or 0.5,
                 interval=db_job.interval,
                 cron_expression=db_job.cron_expression,
                 tags=db_job.tags,
@@ -751,6 +766,8 @@ async def update_analysis_job(
             "job_name": db_job.job_name,
             "device_ids": db_job.device_ids,
             "models_id": db_job.models_id,
+            "detect_classes": db_job.detect_classes,
+            "confidence_threshold": db_job.confidence_threshold or 0.5,
             "interval": db_job.interval or 0,
             "cron_expression": db_job.cron_expression,
             "tags": db_job.tags,
@@ -758,7 +775,6 @@ async def update_analysis_job(
             "description": db_job.description,
             "created_at": db_job.created_at,
             "is_active": db_job.is_active,
-            "detect_classes": db_job.detect_classes,
             "last_run": memory_job.get("last_run") if memory_job else db_job.last_run,
             "status": memory_job.get("status", "paused" if not db_job.is_active else "created") if memory_job else ("paused" if not db_job.is_active else "created"),
             "last_result": memory_job.get("last_result") if memory_job else db_job.last_result,

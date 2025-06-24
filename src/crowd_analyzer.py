@@ -57,6 +57,7 @@ class CrowdAnalyzer:
     def add_analysis_job(self, job_id: str, job_name: str, device_ids: List[str], 
                           models_id: str,
                           detect_classes: List[str] = None,
+                          confidence_threshold: float = 0.5,
                           interval: int = 300, cron_expression: str = None, 
                           tags: List[str] = ["crowd_analysis"],
                           location_info: Dict = None):
@@ -79,6 +80,7 @@ class CrowdAnalyzer:
             "device_ids": device_ids,
             "models_id": models_id,
             "detect_classes": detect_classes,
+            "confidence_threshold": confidence_threshold,
             "interval": interval,
             "cron_expression": cron_expression,
             "tags": tags,
@@ -98,7 +100,7 @@ class CrowdAnalyzer:
         job = self.scheduler.add_job(
             self._run_analysis,
             trigger=trigger,
-            args=[job_id, device_ids, models_id, tags, location_info, detect_classes],
+            args=[job_id, device_ids, models_id, tags, location_info, detect_classes, confidence_threshold],
             id=job_id,
             replace_existing=True
         )
@@ -132,7 +134,8 @@ class CrowdAnalyzer:
                    for job in self.analysis_jobs.values()]
     
     def _run_analysis(self, job_id: str, device_ids: List[str], 
-                     models_id: str, tags: List[str], location_info: Dict, detect_classes: List[str]):
+                     models_id: str, tags: List[str], location_info: Dict, detect_classes: List[str], 
+                     confidence_threshold: float = 0.5):
         """
         执行人群分析的具体逻辑
         
@@ -166,7 +169,7 @@ class CrowdAnalyzer:
                 return None
             
             # 加载YOLO模型
-            yolo_model = self._get_model(model.file_path, 0.5)  # 使用默认置信度
+            yolo_model = self._get_model(model.file_path, confidence_threshold)  # 使用任务配置的置信度
             if not yolo_model:
                 logger.error(f"模型加载失败: {model.file_path}")
                 with self.lock:
@@ -187,7 +190,7 @@ class CrowdAnalyzer:
             
             # 遍历所有设备
             for device_id in device_ids:
-                result = self._analyze_single_camera(device_id, yolo_model, 0.35, detect_classes)  # 使用默认置信度
+                result = self._analyze_single_camera(device_id, yolo_model, confidence_threshold, detect_classes)  # 使用任务配置的置信度
                 if result:
                     # 确保所有结果都可JSON序列化
                     result_serializable = self._ensure_json_serializable(result)
@@ -698,6 +701,7 @@ class CrowdAnalyzer:
                     device_ids=job.device_ids,
                     models_id=job.models_id,  # 添加模型ID
                     detect_classes=job.detect_classes,
+                    confidence_threshold=job.confidence_threshold or 0.5,
                     interval=job.interval,
                     cron_expression=job.cron_expression,
                     tags=job.tags,

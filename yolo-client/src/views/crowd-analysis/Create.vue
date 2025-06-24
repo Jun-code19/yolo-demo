@@ -84,6 +84,18 @@
           <div class="hint">选择需要检测的对象类别，默认选中第一个类别</div>
         </el-form-item>
 
+        <el-form-item label="置信度阈值" prop="confidence_threshold">
+          <el-slider 
+            v-model="form.confidence_threshold" 
+            :min="0.1" 
+            :max="1.0" 
+            :step="0.05"
+            :format-tooltip="val => `${Math.round(val * 100)}%`"
+            style="width: 100%; margin-right: 20px;"
+          />
+          <div class="hint">检测结果的置信度阈值，数值越高检测越严格。当前值：{{ Math.round(form.confidence_threshold * 100) }}%</div>
+        </el-form-item>
+
       <el-form-item label="执行频率">
         <el-radio-group v-model="frequencyType">
           <el-radio value="interval">间隔执行</el-radio>
@@ -208,6 +220,7 @@ const form = reactive({
   device_ids: [],
   models_id: '',
   detect_classes: [],
+  confidence_threshold: 0.5,
   interval: 300,
   cron_expression: '',
   tags: ['crowd_analysis'],

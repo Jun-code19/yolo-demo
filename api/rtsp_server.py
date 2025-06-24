@@ -13,6 +13,9 @@ from ultralytics import YOLO # 导入YOLO模型
 import torch # 导入PyTorch
 from contextlib import nullcontext # 导入上下文管理器
 from pathlib import Path # 导入路径模块
+import os # 导入操作系统模块
+import re # 导入正则表达式模块
+from urllib.parse import urlparse # 导入URL解析模块
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -35,6 +38,65 @@ max_size = 320  # 减小处理尺寸以提高性能
 active_connections: Dict[str, WebSocket] = {}
 rtsp_sessions: Dict[str, dict] = {}
 
+def extract_ip_from_rtsp_url(rtsp_url: str) -> str:
+    """从RTSP URL中提取IP地址"""
+    try:
+        # 使用正则表达式匹配IP地址
+        # rtsp://username:password@ip:port/path 格式
+        ip_pattern = r'@(\d+\.\d+\.\d+\.\d+):'
+        match = re.search(ip_pattern, rtsp_url)
+        if match:
+            return match.group(1)
+        
+        # 备用方法：使用urlparse
+        parsed_url = urlparse(rtsp_url)
+        if parsed_url.hostname:
+            # 检查是否是IP地址格式
+            ip_regex = r'^\d+\.\d+\.\d+\.\d+$'
+            if re.match(ip_regex, parsed_url.hostname):
+                return parsed_url.hostname
+        
+        # 如果无法提取IP，返回一个默认值
+        logger.warning(f"无法从RTSP URL中提取IP地址: {rtsp_url}")
+        return "unknown_device"
+    except Exception as e:
+        logger.error(f"提取IP地址时出错: {e}")
+        return "unknown_device"
+
+def ensure_storage_directory():
+    """确保storage/devices目录存在"""
+    storage_dir = Path("storage/devices")
+    try:
+        storage_dir.mkdir(parents=True, exist_ok=True)
+        return storage_dir
+    except Exception as e:
+        logger.error(f"创建storage/devices目录失败: {e}")
+        return None
+
+def save_device_snapshot(frame, ip_address: str):
+    """保存设备快照图片"""
+    try:
+        storage_dir = ensure_storage_directory()
+        if storage_dir is None:
+            return False
+        
+        # 使用IP地址作为文件名
+        filename = f"{ip_address}.jpg"
+        filepath = storage_dir / filename
+        
+        # 保存图片，使用高质量JPEG压缩
+        success = cv2.imwrite(str(filepath), frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
+        
+        if success:
+            logger.info(f"设备快照已保存: {filepath}")
+            return True
+        else:
+            logger.error(f"保存设备快照失败: {filepath}")
+            return False
+    except Exception as e:
+        logger.error(f"保存设备快照时出错: {e}")
+        return False
+
 class RTSPManager:
     """管理RTSP流的类"""
     
@@ -45,6 +107,7 @@ class RTSPManager:
         self.frame_ready_events = {}
         self.thread_executors = ThreadPoolExecutor(max_workers=4)  # 专用于RTSP的线程池
         self.stream_status = {}  # 用于线程和异步任务间通信
+        self.stream_urls = {}  # 存储连接ID对应的流URL
     
     async def start_stream(self, connection_id: str, stream_url: str) -> bool:
         """启动RTSP流处理"""
@@ -56,6 +119,7 @@ class RTSPManager:
         self.stop_events[connection_id] = stop_event
         self.frame_buffers[connection_id] = deque(maxlen=5)  # 存储最多5帧
         self.stream_status[connection_id] = {"status": "connecting", "info": None, "error": None}
+        self.stream_urls[connection_id] = stream_url  # 存储流URL
         
         # 在单独的线程中运行RTSP捕获
         self.thread_executors.submit(
@@ -100,6 +164,8 @@ class RTSPManager:
             self.frame_buffers.pop(connection_id)
         if connection_id in self.stream_status:
             self.stream_status.pop(connection_id)
+        if connection_id in self.stream_urls:
+            self.stream_urls.pop(connection_id)
         
         return True
     
@@ -232,6 +298,9 @@ class RTSPManager:
         retry_count = 0
         max_retry = 50  # 最多等待5秒
         
+        # 快照保存参数
+        snapshot_saved = False  # 标记是否已保存快照
+        
         try:
             # 等待RTSP连接成功或失败
             while retry_count < max_retry:
@@ -312,6 +381,22 @@ class RTSPManager:
                             # 获取当前帧的宽高
                             current_width = processed_img.shape[1]
                             current_height = processed_img.shape[0]
+                            
+                            # 保存设备快照（仅在首次获取帧时保存）
+                            if not snapshot_saved and connection_id in self.stream_urls:
+                                try:
+                                    stream_url = self.stream_urls[connection_id]
+                                    ip_address = extract_ip_from_rtsp_url(stream_url)
+                                    
+                                    # 保存原始大小的图片作为快照
+                                    save_success = save_device_snapshot(img, ip_address)
+                                    if save_success:
+                                        snapshot_saved = True
+                                        logger.info(f"设备 {ip_address} 的快照已保存")
+                                    else:
+                                        logger.warning(f"保存设备 {ip_address} 的快照失败")
+                                except Exception as e:
+                                    logger.error(f"保存设备快照时出错: {e}")
                             
                             # 发送数据到WebSocket
                             websocket = active_connections.get(connection_id)
@@ -1053,7 +1138,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 task = asyncio.create_task(process_frame_queue(connection_id))
                 manager.connection_tasks[connection_id] = task               
             # 增加处理视频帧请求的逻辑
-            elif message["type"] == "frame":
+            elif message["type"] == "video":
                 # 处理视频帧
                 if not models_info:
                     await websocket.send_json({
@@ -1106,41 +1191,6 @@ async def websocket_endpoint(websocket: WebSocket):
                         "type": "error",
                         "message": f"Failed to process frame: {str(e)}"
                     })
-            # 增加处理启动RTSP流请求的逻辑
-            elif message["type"] == "start_stream":
-                stream_url = message.get("url", "")
-                device_id = message.get("device_id", None)  # 添加设备ID参数
-                
-                if not stream_url:
-                    await manager.send_json(connection_id, {
-                        "error": "未提供有效的流URL"
-                    })
-                    continue
-                
-                # 存储设备ID（如果有）
-                if device_id:
-                    rtsp_sessions[connection_id]["device_id"] = device_id
-                
-                # 启动RTSP流
-                success = await rtsp_manager.start_stream(connection_id, stream_url)
-                
-                if success:
-                    await manager.send_json(connection_id, {
-                        "message": "RTSP流已启动",
-                        "status": "started"
-                    })
-                else:
-                    await manager.send_json(connection_id, {
-                        "error": "无法启动RTSP流",
-                        "status": "error"
-                    })
-            # 增加处理停止RTSP流请求的逻辑
-            elif message["type"] == "stop_stream":
-                await rtsp_manager.stop_stream(connection_id)
-                await manager.send_json(connection_id, {
-                    "message": "RTSP流已停止",
-                    "status": "stopped"
-                })
             else:
                 # 处理其他现有命令...
                 pass

@@ -330,7 +330,7 @@ const previewStream = ref(null)
 const currentDevice = ref(null)
 const videoRef = ref(null)
 const streamResolution = ref('')
-const ws = ref(null)
+let ws = null
 const currentFrame = ref(null)
 const showFallbackImage = ref(false)
 
@@ -565,38 +565,38 @@ const connectToWebSocket = async () => {
   return new Promise((resolve, reject) => {
     try {
       // 关闭已有的连接
-      if (ws.value && ws.value.readyState === WebSocket.OPEN) {
-        ws.value.close()
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.close()
       }
 
       // 创建新的WebSocket连接
-      ws.value = new WebSocket(`ws://${window.location.host}/ws/rtsp/preview`)
+      ws = new WebSocket(`ws://${window.location.host}/ws/rtsp/preview`)
 
       // 连接超时
       const connectionTimeout = setTimeout(() => {
         reject(new Error('连接超时'))
       }, 10000)
 
-      ws.value.onopen = () => {
+      ws.onopen = () => {
         clearTimeout(connectionTimeout)
         // console.log('WebSocket已连接，正在发送连接请求...')
 
         // 发送连接请求
-        ws.value.send(JSON.stringify({
+        ws.send(JSON.stringify({
           type: 'connect',
           client_type: 'preview_client'
         }))
       }
 
-      ws.value.onmessage = handleWsMessage
+      ws.onmessage = handleWsMessage
 
-      ws.value.onerror = (error) => {
+      ws.onerror = (error) => {
         clearTimeout(connectionTimeout)
         // console.error('WebSocket错误:', error)
         reject(new Error('WebSocket连接错误'))
       }
 
-      ws.value.onclose = () => {
+      ws.onclose = () => {
         // console.log('WebSocket已关闭')
         if (previewVisible.value && !previewError.value) {
           previewError.value = '视频流连接已断开'
@@ -621,9 +621,9 @@ const handleWsMessage = (event) => {
         // console.log('WebSocket连接确认')
 
         // 发送预览请求
-        if (ws.value && ws.value.readyState === WebSocket.OPEN && currentDevice.value) {
+        if (ws && ws.readyState === WebSocket.OPEN && currentDevice.value) {
           // console.log('发送预览请求')
-          ws.value.send(
+          ws.send(
             JSON.stringify({
               type: 'preview_request',
               device_id: currentDevice.value.device_id,
@@ -859,12 +859,12 @@ const retryPreview = () => {
 // 停止预览
 const stopPreview = () => {
   // 关闭WebSocket连接
-  if (ws.value) {
-    if (ws.value.readyState === WebSocket.OPEN) {
-      ws.value.send(JSON.stringify({ type: 'stop' }))
+  if (ws) {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'stop' }))
     }
-    ws.value.close()
-    ws.value = null
+    ws.close()
+    ws = null
   }
 
   // 停止视频流

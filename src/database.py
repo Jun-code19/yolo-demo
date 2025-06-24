@@ -61,6 +61,7 @@ class Device(Base):
     last_heartbeat = Column(DateTime)
     location = Column(String(255))
     area = Column(String(255))
+    created_at = Column(DateTime, default=datetime.now)
     
     detection_configs = relationship("DetectionConfig", back_populates="device", cascade="all, delete-orphan")
     detection_events = relationship("DetectionEvent", back_populates="device", cascade="all, delete-orphan")
@@ -75,18 +76,6 @@ class AnalysisResult(Base):
     start_frame = Column(Integer)
     end_frame = Column(Integer)
     meta_data = Column(JSONB)
-
-# class Video(Base):
-#     __tablename__ = "video"
-    
-#     video_id = Column(String(64), primary_key=True)
-#     device_id = Column(String(64), ForeignKey('device.device_id'))
-#     start_time = Column(DateTime, nullable=False)
-#     end_time = Column(DateTime)
-#     storage_path = Column(Text, nullable=False)
-#     resolution = Column(String(16))
-#     frame_rate = Column(SmallInteger)
-#     analysis_status = Column(Boolean, default=False)
 
 class Alarm(Base):
     __tablename__ = "alarm"
@@ -290,6 +279,7 @@ class CrowdAnalysisJob(Base):
     description = Column(String(512), nullable=True) # 描述
     is_active = Column(Boolean, default=True) # 是否启用
     detect_classes = Column(ARRAY(String), nullable=True) # 检测类别
+    confidence_threshold = Column(Float, default=0.5) # 置信度阈值，默认0.5
     created_at = Column(DateTime, default=datetime.now)
     last_run = Column(DateTime, nullable=True) # 最后执行时间
     last_result = Column(JSONB, nullable=True) # 最后结果
@@ -321,10 +311,10 @@ CrowdAnalysisJob.results = relationship("CrowdAnalysisResult", back_populates="j
 # dev_mode = os.getenv("DEV_MODE", "false").lower() == "true"
 # if dev_mode:
 #     # 开发环境使用localhost
-# DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:admin123@10.83.34.35:5432/eyris_core_db")
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:admin123@10.83.34.35:5432/eyris_core_db")
 # else:
     # 生产环境使用Docker容器名
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:admin123@postgres:5432/yolo")
+# DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:admin123@postgres:5432/yolo")
 
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

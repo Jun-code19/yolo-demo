@@ -158,6 +158,10 @@ export default {
     });
   },
   
+  updateModel(modelId, modelData) {
+    return apiClient.put(`/models/${modelId}`, modelData);
+  },
+  
   deleteModel(modelId) {
     return apiClient.delete(`/models/${modelId}`);
   },

@@ -176,7 +176,7 @@ async def list_push_configs(config_id: str = None, tag: str = None, db: Session 
         if tag:
             query = query.filter(DataPushConfig.tags.any(tag))
         
-        configs = query.all()
+        configs = query.order_by(DataPushConfig.created_at.desc()).all()
         return {
             "status": "success",
             "configs": [

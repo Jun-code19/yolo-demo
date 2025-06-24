@@ -506,27 +506,6 @@ const handleDisconnection = (errorMessage) => {
   } else {
     addLog('info', '连接已断开')
   }
-  
-  // 尝试自动重连
-  // if (reconnectCount < MAX_RECONNECT) {
-  //   reconnectCount++
-  //   const delay = reconnectCount * 2000 // 递增延迟，2秒、4秒、6秒
-    
-  //   addLog('info', `将在${delay/1000}秒后尝试重新连接 (${reconnectCount}/${MAX_RECONNECT})`)
-    
-  //   if (reconnectTimeoutId) {
-  //     clearTimeout(reconnectTimeoutId)
-  //   }
-    
-  //   reconnectTimeoutId = setTimeout(() => {
-  //     if (!isConnected.value) {
-  //       addLog('info', '尝试重新连接...')
-  //       connectWebSocket()
-  //     }
-  //   }, delay)
-  // } else {
-  //   addLog('error', '多次重连失败，请手动重试')
-  // }
 }
 
 // 更新连接时间

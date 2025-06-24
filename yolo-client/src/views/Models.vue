@@ -37,11 +37,14 @@
                   </el-tag>
                 </template>
               </el-table-column>
-              <el-table-column label="操作" width="200" fixed="right">
+              <el-table-column label="操作" width="280" fixed="right">
                 <template #default="scope">
                   <el-button-group>
-                  <el-button type="primary" size="small" @click="viewModelDetails(scope.row)">
-                    查看详情
+                  <el-button type="info" size="small" @click="viewModelDetails(scope.row)">
+                    详情
+                  </el-button>
+                  <el-button type="primary" size="small" @click="editModel(scope.row)">
+                    编辑
                   </el-button>
                   <el-button 
                     :type="scope.row.is_active ? 'warning' : 'success'" 
@@ -187,7 +190,53 @@
       </div>
     </el-dialog>
 
-<!-- 查看所有类别对话框 -->
+    <!-- 编辑模型对话框 -->
+    <el-dialog v-model="editDialogVisible" title="编辑模型信息" width="500px">
+      <el-form :model="editForm" label-width="80px" :rules="editRules" ref="editFormRef">
+        <el-form-item label="模型名称" prop="models_name">
+          <el-input v-model="editForm.models_name" placeholder="请输入模型名称"></el-input>
+        </el-form-item>
+        
+        <el-form-item label="模型类型" prop="models_type">
+          <el-select v-model="editForm.models_type" placeholder="请选择模型类型" style="width: 100%">
+            <el-option label="目标检测" value="object_detection"></el-option>
+            <el-option label="图像分割" value="segmentation"></el-option>
+            <el-option label="关键点检测" value="keypoint"></el-option>
+            <el-option label="姿态估计" value="pose"></el-option>
+            <el-option label="人脸识别" value="face"></el-option>
+            <el-option label="其他类型" value="other"></el-option>
+          </el-select>
+        </el-form-item>
+        
+        <el-form-item label="描述">
+          <el-input v-model="editForm.description" type="textarea" :rows="3" placeholder="请输入模型描述（可选）"></el-input>
+        </el-form-item>
+        
+        <el-form-item label="参数">
+          <el-collapse>
+            <el-collapse-item title="修改模型参数（可选）">
+              <el-form-item v-for="(param, index) in editForm.parameters" :key="index">
+                <div style="display: flex; margin-bottom: 10px;">
+                  <el-input v-model="param.key" placeholder="参数名" style="width: 40%; margin-right: 10px;"></el-input>
+                  <el-input v-model="param.value" placeholder="参数值" style="width: 40%; margin-right: 10px;"></el-input>
+                  <el-button type="danger" @click="removeEditParam(index)">删除</el-button>
+                </div>
+              </el-form-item>
+              <el-button type="primary" @click="addEditParam">添加参数</el-button>
+            </el-collapse-item>
+          </el-collapse>
+        </el-form-item>
+      </el-form>
+      
+      <template #footer>
+        <span class="dialog-footer">
+          <el-button @click="editDialogVisible = false">取消</el-button>
+          <el-button type="primary" @click="updateModel" :loading="updating">更新</el-button>
+        </span>
+      </template>
+    </el-dialog>
+
+    <!-- 查看所有类别对话框 -->
 <el-dialog v-model="allClassesDialogVisible" title="所有检测类别" width="700px" draggable>
   <div style="max-height: 500px; overflow-y: auto;">
     <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;">
@@ -228,6 +277,7 @@ import deviceApi from '@/api/device'
 // 数据加载状态
 const loading = ref(false)
 const uploading = ref(false)
+const updating = ref(false)
 
 // 模型列表
 const models = ref([])
@@ -235,6 +285,7 @@ const models = ref([])
 // 对话框显示状态
 const uploadDialogVisible = ref(false)
 const detailsDialogVisible = ref(false)
+const editDialogVisible = ref(false)
 const allClassesDialogVisible = ref(false);
 
 // 选中的模型
@@ -251,6 +302,15 @@ const uploadForm = ref({
   parameters: []
 })
 
+// 编辑表单
+const editFormRef = ref(null)
+const editForm = ref({
+  models_name: '',
+  models_type: '',
+  description: '',
+  parameters: []
+})
+
 // 表单验证规则
 const uploadRules = {
   modelName: [
@@ -262,6 +322,17 @@ const uploadRules = {
   ],
   modelFile: [
     { required: true, message: '请上传模型文件', trigger: 'change' }
+  ]
+}
+
+// 编辑表单验证规则
+const editRules = {
+  models_name: [
+    { required: true, message: '请输入模型名称', trigger: 'blur' },
+    { min: 2, max: 50, message: '长度在 2 到 50 个字符', trigger: 'blur' }
+  ],
+  models_type: [
+    { required: true, message: '请选择模型类型', trigger: 'change' }
   ]
 }
 
@@ -411,6 +482,88 @@ const viewModelDetails = (model) => {
 // 显示所有类别对话框
 const showAllClasses = () => {
   allClassesDialogVisible.value = true;
+}
+
+// 编辑模型
+const editModel = (model) => {
+  // 初始化编辑表单
+  editForm.value = {
+    models_name: model.models_name,
+    models_type: model.models_type,
+    description: model.description || '',
+    parameters: formatParametersForEdit(model.parameters)
+  }
+  
+  // 存储当前编辑的模型ID
+  editForm.value.models_id = model.models_id
+  
+  editDialogVisible.value = true
+}
+
+// 格式化参数为编辑表单格式
+const formatParametersForEdit = (params) => {
+  if (!params) return []
+  return Object.entries(params).map(([key, value]) => ({
+    key,
+    value: typeof value === 'object' ? JSON.stringify(value) : String(value)
+  }))
+}
+
+// 添加编辑参数
+const addEditParam = () => {
+  editForm.value.parameters.push({ key: '', value: '' })
+}
+
+// 移除编辑参数
+const removeEditParam = (index) => {
+  editForm.value.parameters.splice(index, 1)
+}
+
+// 更新模型
+const updateModel = async () => {
+  if (!editFormRef.value) return
+  
+  await editFormRef.value.validate(async (valid) => {
+    if (!valid) return
+    
+    updating.value = true
+    try {
+      // 准备更新数据
+      const updateData = {
+        models_name: editForm.value.models_name,
+        models_type: editForm.value.models_type,
+        description: editForm.value.description
+      }
+      
+      // 处理自定义参数
+      if (editForm.value.parameters.length > 0) {
+        const params = {}
+        editForm.value.parameters.forEach(p => {
+          if (p.key && p.value) {
+            // 尝试解析JSON，如果失败则作为字符串处理
+            try {
+              params[p.key] = JSON.parse(p.value)
+            } catch {
+              params[p.key] = p.value
+            }
+          }
+        })
+        updateData.parameters = params
+      }
+      
+      // 发送更新请求
+      await deviceApi.updateModel(editForm.value.models_id, updateData)
+      
+      ElMessage.success('模型信息更新成功')
+      editDialogVisible.value = false
+      loadModels() // 重新加载模型列表
+    } catch (error) {
+      // console.error('更新模型失败:', error)
+      ElMessage.error(`更新模型失败: ${error.response?.data?.detail || error.message}`)
+    } finally {
+      updating.value = false
+    }
+  })
 }
 
 // 切换模型激活状态

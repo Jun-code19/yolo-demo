@@ -136,7 +136,7 @@ def get_devices(
     total_count = query.count()
     
     # 应用分页
-    result = query.offset(skip).limit(limit).all()
+    result = query.order_by(Device.ip_address.desc()).offset(skip).limit(limit).all()
     
     # 返回包含总数的响应
     return {
@@ -543,6 +543,13 @@ class ModelBase(BaseModel):
     description: Optional[str] = None
     parameters: Optional[Dict[str, Any]] = None
 
+class ModelUpdate(BaseModel):
+    """更新模型信息的模型"""
+    models_name: Optional[str] = None
+    models_type: Optional[str] = None
+    description: Optional[str] = None
+    parameters: Optional[Dict[str, Any]] = None
+
 class ModelResponse(ModelBase):
     models_id: str
     file_path: str
@@ -560,7 +567,7 @@ class ModelResponse(ModelBase):
 @router.get("/models/", response_model=List[ModelResponse])
 def get_models(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
     """获取所有检测模型列表"""
-    models = db.query(DetectionModel).offset(skip).limit(limit).all()
+    models = db.query(DetectionModel).order_by(DetectionModel.upload_time.desc()).offset(skip).limit(limit).all()
     return models
 
 @router.get("/models/{models_id}", response_model=ModelResponse)
@@ -683,6 +690,38 @@ def delete_model(models_id: str, db: Session = Depends(get_db),
     log_action(db, current_user.user_id, 'delete_model', models_id, f"Deleted model {model.models_name}")
     
     return {"message": "Model deleted successfully"}
+
+@router.put("/models/{models_id}", response_model=ModelResponse)
+def update_model(
+    models_id: str, 
+    model_update: ModelUpdate, 
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)):
+    """更新模型基础信息"""
+    # 检查权限（只有管理员可以修改模型）
+    check_admin_permission(current_user)
+    
+    # 查找模型
+    model = db.query(DetectionModel).filter(DetectionModel.models_id == models_id).first()
+    if not model:
+        raise HTTPException(status_code=404, detail="Model not found")
+    
+    # 更新字段
+    update_data = model_update.dict(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(model, field, value)
+    
+    try:
+        db.commit()
+        db.refresh(model)
+        
+        # 记录操作日志
+        log_action(db, current_user.user_id, 'update_model', models_id, f"Updated model {model.models_name}")
+        
+        return model
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"更新模型失败: {str(e)}")
 
 @router.put("/models/{models_id}/toggle")
 def toggle_models_active(models_id: str, active: bool, db: Session = Depends(get_db),
@@ -2737,7 +2776,7 @@ async def get_edge_servers(
             servers = servers.filter(EdgeServer.is_active == is_active)
 
         total = servers.count()
-        servers = servers.offset(skip).limit(limit).all()
+        servers = servers.order_by(EdgeServer.created_at.desc()).offset(skip).limit(limit).all()
         
         return EdgeServerListResponse(total=total, items=servers)
 

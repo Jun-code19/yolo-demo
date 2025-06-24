@@ -6,9 +6,8 @@
         <el-button @click="router.push('/crowd-analysis')">返回列表</el-button>
         <el-button type="primary" @click="runJob">立即执行</el-button>
         <el-button :type="job.is_active ? 'warning' : 'success'" @click="toggleJobStatus">
-          {{ job.is_active ? '暂停任务' : '恢复任务' }}
+          {{ job.is_active ? '停止任务' : '启动任务' }}
         </el-button>
-        <el-button type="warning" @click="openEditDialog">编辑任务</el-button>
         <el-dropdown @command="handleExport" class="export-button">
           <el-button type="primary" plain>
             数据导出<i class="el-icon-arrow-down el-icon--right"></i>
@@ -44,6 +43,7 @@
         <el-descriptions-item label="最近执行">{{ job.last_run ? formatDate(job.last_run) : '未执行' }}</el-descriptions-item>
         <el-descriptions-item label="监控设备数量">{{ job.device_ids?.length || 0 }}</el-descriptions-item>
         <el-descriptions-item label="检测模型">{{ modelInfo?.model_name || job.models_id }}</el-descriptions-item>
+        <el-descriptions-item label="置信度阈值">{{ Math.round((job.confidence_threshold || 0.5) * 100) }}%</el-descriptions-item>
         <el-descriptions-item label="标签">
           <el-tag v-for="tag in job.tags" :key="tag" size="small" style="margin-right: 5px">
             {{ tag }}
@@ -76,22 +76,6 @@
           <span class="count-label">总人数</span>
         </div>
       </div>
-
-      <!-- 摄像头分析结果表格 -->
-      <!-- <h3 class="sub-title">摄像头分析明细</h3>
-      <el-table :data="cameraCounts" border style="width: 100%">
-        <el-table-column prop="device_name" label="摄像头" width="180" />
-        <el-table-column prop="location" label="位置" width="180" />
-        <el-table-column prop="person_count" label="人数" width="120" />
-        <el-table-column label="预览图" min-width="200">
-          <template #default="scope">
-            <el-image v-if="scope.row.preview_image" :src="getImageUrl(scope.row.preview_image)"
-              style="max-height: 160px; max-width: 280px; cursor: pointer;" fit="contain" :initial-index="0"
-              :z-index="3000" @click="showFullImage(scope.row)" />
-            <span v-else>无预览图</span>
-          </template>
-        </el-table-column>
-      </el-table> -->
     </el-card>
 
     <el-card class="devices-card" v-if="job.device_ids && job.device_ids.length > 0">
@@ -239,153 +223,13 @@
       </div>
     </el-dialog>
 
-    <!-- 编辑任务对话框 -->
-    <el-dialog v-model="editDialogVisible" title="编辑任务" width="50%" :before-close="handleCloseEditDialog"
-      :z-index="9999" :modal="true" :append-to-body="true" class="edit-dialog">
-      <el-alert v-if="editFormError" title="保存失败" :description="editFormError" type="error" show-icon :closable="true"
-        @close="editFormError = ''" style="margin-bottom: 15px;" />
-
-      <el-form ref="editFormRef" :model="editForm" :rules="editRules" label-width="120px">
-        <el-form-item label="任务名称" prop="job_name">
-          <el-input v-model="editForm.job_name" placeholder="请输入任务名称" />
-        </el-form-item>
-
-        <el-form-item label="监控设备" prop="device_ids">
-          <el-select 
-            v-model="editForm.device_ids" 
-            multiple 
-            placeholder="请选择监控设备" 
-            style="width: 100%"
-            popper-class="edit-dialog-select"
-          >
-            <el-option v-for="device in availableDevices" :key="device.device_id" :label="device.device_name"
-              :value="device.device_id">
-              <span>{{ device.device_name }}</span>
-              <span v-if="device.location" style="color: #8492a6; font-size: 13px">
-                ({{ device.location }})
-              </span>
-            </el-option>
-          </el-select>
-        </el-form-item>
-
-        <el-form-item label="检测模型" prop="models_id">
-          <el-select 
-            v-model="editForm.models_id" 
-            placeholder="请选择检测模型" 
-            style="width: 100%" 
-            @change="handleModelChange"
-            popper-class="edit-dialog-select"
-          >
-            <el-option v-for="model in availableModels" :key="model.model_id"
-              :label="`${model.model_name} (${getModelTypeName(model.model_type)})`" :value="model.model_id">
-              <div class="model-option">
-                <span>{{ model.model_name }}</span>
-                <el-tag size="small" effect="plain">{{ getModelTypeName(model.model_type) }}</el-tag>
-              </div>
-            </el-option>
-          </el-select>
-          <div class="hint">所有设备将使用同一个模型进行分析</div>
-        </el-form-item>
-
-        <el-form-item label="检测类别" v-if="modelClasses.length > 0" prop="detect_classes">
-          <el-select 
-            v-model="editForm.detect_classes" 
-            multiple 
-            placeholder="请选择要检测的目标类别" 
-            style="width: 100%"
-            collapse-tags 
-            collapse-tags-tooltip 
-            :max-collapse-tags="4"
-            popper-class="edit-dialog-select"
-          >
-            <el-option v-for="(classItem, index) in modelClasses" :key="classItem.value" :label="classItem.label"
-              :value="classItem.value">
-              <div class="class-option">
-                <span>{{ classItem.label }}</span>
-                <span class="class-id">{{ classItem.value }}</span>
-              </div>
-            </el-option>
-          </el-select>
-          <div class="hint">选择需要检测的对象类别</div>
-        </el-form-item>
-
-        <el-form-item label="执行频率">
-          <el-radio-group v-model="editFrequencyType">
-            <el-radio value="interval">间隔执行</el-radio>
-            <el-radio value="cron">CRON表达式</el-radio>
-          </el-radio-group>
-        </el-form-item>
-
-        <el-form-item label="执行间隔(秒)" v-if="editFrequencyType === 'interval'">
-          <el-input-number v-model="editForm.interval" :min="60" :step="60" />
-        </el-form-item>
-
-        <el-form-item label="CRON表达式" v-if="editFrequencyType === 'cron'" prop="cron_expression">
-          <el-input v-model="editForm.cron_expression" placeholder="例如: */30 * * * *" />
-          <div class="cron-hint">例: "*/30 * * * *" 表示每30分钟执行一次</div>
-        </el-form-item>
-
-        <el-form-item label="标签">
-          <el-tag v-for="tag in editForm.tags" :key="tag" closable @close="removeEditTag(tag)"
-            style="margin-right: 5px">
-            {{ tag }}
-          </el-tag>
-          <el-input v-if="editInputVisible" ref="editSaveTagInput" v-model="editInputValue" size="small"
-            @keyup.enter="handleEditInputConfirm" @blur="handleEditInputConfirm" />
-          <el-button v-else size="small" @click="showEditInput">+ 添加标签</el-button>
-        </el-form-item>
-
-        <el-form-item label="位置信息">
-          <el-input v-model="editForm.location_info.name" placeholder="位置名称" />
-        </el-form-item>
-
-        <el-form-item label="位置坐标">
-          <el-row :gutter="10">
-            <el-col :span="11">
-              <el-input v-model="editForm.location_info.coordinates[0]" placeholder="经度" type="number" />
-            </el-col>
-            <el-col :span="11">
-              <el-input v-model="editForm.location_info.coordinates[1]" placeholder="纬度" type="number" />
-            </el-col>
-          </el-row>
-        </el-form-item>
-
-        <el-form-item label="位置地址">
-          <el-input v-model="editForm.location_info.address" placeholder="详细地址" />
-        </el-form-item>
-
-        <el-form-item label="区域代码">
-          <el-input v-model="editForm.location_info.area_code" placeholder="区域代码" />
-        </el-form-item>
-
-        <el-form-item label="人数预警阈值">
-          <el-input-number v-model="editForm.warning_threshold" :min="0" placeholder="0表示不预警" />
-          <div class="hint">当检测人数超过此阈值时触发预警，0表示不预警</div>
-        </el-form-item>
-
-        <el-form-item label="预警消息">
-          <el-input v-model="editForm.warning_message" placeholder="预警消息模板，支持{location}、{count}、{threshold}等变量" />
-        </el-form-item>
-
-        <el-form-item label="描述">
-          <el-input v-model="editForm.description" type="textarea" placeholder="任务描述" />
-        </el-form-item>
-      </el-form>
-
-      <template #footer>
-        <div class="dialog-footer">
-          <el-button @click="handleCloseEditDialog">取消</el-button>
-          <el-button type="primary" @click="submitEditForm" :loading="editSubmitting">保存</el-button>
-        </div>
-      </template>
-    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onBeforeUnmount, watch, nextTick, computed } from 'vue'
+import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { crowdAnalysisApi } from '@/api/crowd_analysis'
 import { formatDate, formatDateTime } from '@/utils/date'
 import * as echarts from 'echarts'
@@ -405,56 +249,6 @@ const historyLoading = ref(false)
 const historyViewMode = ref('chart')
 const historyData = ref([])
 let chart = null
-
-// 编辑表单相关变量
-const editDialogVisible = ref(false)
-const editFormRef = ref(null)
-const editSubmitting = ref(false)
-const editInputVisible = ref(false)
-const editInputValue = ref('')
-const editSaveTagInput = ref(null)
-const editFrequencyType = ref('interval')
-const editFormError = ref('')
-const availableDevices = ref([])
-const availableModels = ref([])
-const modelClasses = ref([])
-
-const editForm = reactive({
-  job_name: '',
-  device_ids: [],
-  models_id: '',
-  detect_classes: [],
-  interval: 300,
-  cron_expression: '',
-  tags: [],
-  location_info: {
-    name: '',
-    coordinates: [0, 0],
-    address: '',
-    area_code: ''
-  },
-  warning_threshold: 0,
-  warning_message: '',
-  description: ''
-})
-
-const editRules = {
-  job_name: [{ required: true, message: '请输入任务名称', trigger: 'blur' }],
-  device_ids: [{ required: true, message: '请选择至少一个监控设备', trigger: 'change' }],
-  models_id: [{ required: true, message: '请选择检测模型', trigger: 'change' }],
-  cron_expression: [
-    {
-      validator: (rule, value, callback) => {
-        if (editFrequencyType.value === 'cron' && !value) {
-          callback(new Error('请输入CRON表达式'))
-        } else {
-          callback()
-        }
-      },
-      trigger: 'blur'
-    }
-  ]
-}
 
 onMounted(() => {
   fetchJobDetail()
@@ -937,199 +731,6 @@ const refreshHistoryData = async () => {
   }
 }
 
-// 处理模型变更，获取模型支持的类别
-const handleModelChange = async (modelId) => {
-  if (!modelId) {
-    modelClasses.value = []
-    editForm.detect_classes = []
-    return
-  }
-
-  try {
-    const res = await crowdAnalysisApi.getModelClasses(modelId)
-    const classesObj = res.data.classes || {}
-    modelClasses.value = Object.entries(classesObj).map(([key, name]) => ({
-      label: name, // 显示的名称
-      value: key   // 对应的键
-    }));
-
-  } catch (error) {
-    // console.error('获取模型类别失败:', error)
-    ElMessage.error('获取模型支持的类别失败')
-    modelClasses.value = []
-  }
-}
-
-// 监听频率类型变化
-watch(editFrequencyType, (val) => {
-  if (val === 'interval') {
-    editForm.cron_expression = ''
-  } else {
-    // 默认CRON表达式 - 每30分钟
-    if (!editForm.cron_expression) {
-      editForm.cron_expression = '*/30 * * * *'
-    }
-  }
-})
-
-// 打开编辑对话框
-const openEditDialog = async () => {
-  // 获取可用设备和模型
-  if (availableDevices.value.length === 0) {
-    await fetchAvailableDevices()
-  }
-
-  if (availableModels.value.length === 0) {
-    await fetchAvailableModels()
-  }
-
-  // 填充编辑表单数据
-  Object.assign(editForm, {
-    job_name: job.value.job_name,
-    device_ids: [...(job.value.device_ids || [])],
-    models_id: job.value.models_id || '',
-    detect_classes: [...(job.value.detect_classes || [])],
-    interval: job.value.interval || 300,
-    cron_expression: job.value.cron_expression || '',
-    tags: [...(job.value.tags || [])],
-    location_info: {
-      name: job.value.location_info?.name || '',
-      coordinates: [...(job.value.location_info?.coordinates || [0, 0])],
-      address: job.value.location_info?.address || '',
-      area_code: job.value.location_info?.area_code || ''
-    },
-    warning_threshold: job.value.warning_threshold || 0,
-    warning_message: job.value.warning_message || '',
-    description: job.value.description || ''
-  })
-
-  // 设置频率类型
-  editFrequencyType.value = job.value.cron_expression ? 'cron' : 'interval'
-
-  // 如果有模型ID，获取模型支持的类别
-  if (job.value.models_id) {
-    await handleModelChange(job.value.models_id)
-  }
-
-  editDialogVisible.value = true
-}
-
-// 关闭编辑对话框
-const handleCloseEditDialog = () => {
-  editDialogVisible.value = false
-  editFormError.value = ''
-}
-
-// 移除编辑标签
-const removeEditTag = (tag) => {
-  editForm.tags.splice(editForm.tags.indexOf(tag), 1)
-}
-
-// 显示标签输入框
-const showEditInput = () => {
-  editInputVisible.value = true
-  nextTick(() => {
-    editSaveTagInput.value.focus()
-  })
-}
-
-// 处理标签输入确认
-const handleEditInputConfirm = () => {
-  const value = editInputValue.value.trim()
-  if (value && editForm.tags.indexOf(value) === -1) {
-    editForm.tags.push(value)
-  }
-  editInputVisible.value = false
-  editInputValue.value = ''
-}
-
-// 获取可用设备列表
-const fetchAvailableDevices = async () => {
-  try {
-    const res = await crowdAnalysisApi.getAvailableDevices()
-    availableDevices.value = res.data
-  } catch (error) {
-    ElMessage.error('获取监控设备列表失败')
-    // console.error(error)
-  }
-}
-
-// 获取可用模型列表
-const fetchAvailableModels = async () => {
-  try {
-    const res = await crowdAnalysisApi.getAvailableModels()
-    availableModels.value = res.data.filter(model => model.is_active);
-  } catch (error) {
-    ElMessage.error('获取检测模型列表失败')
-  }
-}
-
-// 获取模型类型名称
-const getModelTypeName = (type) => {
-  const typeMap = {
-    'object_detection': '目标检测',
-    'segmentation': '图像分割',
-    'keypoint': '关键点检测',
-    'pose': '姿态估计',
-    'face': '人脸识别',
-    'other': '其他类型'
-  }
-  return typeMap[type] || type
-}
-
-// 提交编辑表单
-const submitEditForm = async () => {
-  if (!editFormRef.value) return
-
-  editFormError.value = ''
-
-  await editFormRef.value.validate(async (valid) => {
-    if (!valid) return
-
-    editSubmitting.value = true
-    try {
-      // 处理表单数据
-      const formData = JSON.parse(JSON.stringify(editForm)) // 深拷贝避免修改原始表单
-
-      // 根据频率类型设置
-      if (editFrequencyType.value === 'interval') {
-        delete formData.cron_expression
-      } else {
-        delete formData.interval
-      }
-
-      // 发送请求
-      await crowdAnalysisApi.updateAnalysisJob(job.value.job_id, formData)
-      ElMessage.success('更新成功')
-
-      // 重新加载任务详情
-      fetchJobDetail()
-
-      // 关闭对话框
-      editDialogVisible.value = false
-    } catch (error) {
-      // console.error('更新任务失败:', error)
-
-      let errorMessage = '更新失败'
-      if (error.response) {
-        if (error.response.data && error.response.data.detail) {
-          errorMessage = error.response.data.detail
-        } else if (error.response.status === 422) {
-          errorMessage = '请求数据验证失败，请检查表单输入'
-        } else {
-          errorMessage = `服务器错误 (${error.response.status})`
-        }
-      } else if (error.message) {
-        errorMessage = error.message
-      }
-
-      editFormError.value = errorMessage
-      ElMessage.error(errorMessage)
-    } finally {
-      editSubmitting.value = false
-    }
-  })
-}
 </script>
 
 <style scoped>

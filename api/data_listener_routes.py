@@ -162,7 +162,7 @@ async def get_listener_configs(
         
         # 分页
         total = query.count()
-        configs = query.offset((page - 1) * size).limit(size).all()
+        configs = query.order_by(ListenerConfig.created_at.desc()).offset((page - 1) * size).limit(size).all()
         
         # 获取状态信息
         config_list = []
