@@ -60,16 +60,16 @@
         </el-table-column>
 
         <!-- 保存模式列 -->
-        <el-table-column label="保存模式" prop="save_mode" min-width="100">
+        <el-table-column label="保存模式" prop="save_mode" min-width="150">
           <template #default="scope">
             <el-tag :type="getSaveModeType(scope.row.save_mode)">
-              {{ getSaveModeLabel(scope.row.save_mode) }}
+              {{ getSaveModeLabel(scope.row.save_mode, scope.row.max_storage_days) }}
             </el-tag>
           </template>
         </el-table-column>
 
         <!-- 区域设置列 -->
-        <el-table-column label="区域设置" prop="area_coordinates" min-width="150">
+        <el-table-column label="智能方案" prop="area_coordinates" min-width="150">
           <template #default="scope">
             <el-tag>
               {{ getAreaTypeLabel(scope.row.area_coordinates) }}
@@ -83,7 +83,7 @@
             <el-button-group>
               <el-button type="warning" size="small" @click="scope.row.enabled ? null : setInterestArea(scope.row)"
                 :disabled="scope.row.enabled"> <!-- 禁用按钮 -->
-                区域
+                智能
               </el-button><!-- 设置感兴趣区域按钮 -->
               <el-button type="primary" size="small" @click="scope.row.enabled ? null : editConfig(scope.row)"
                 :disabled="scope.row.enabled"> <!-- 禁用按钮 -->
@@ -614,86 +614,15 @@
       </template>
     </el-dialog>
 
-    <!-- 区域设置对话框 -->
-    <el-dialog v-model="areaModalVisible" title="感兴趣区域设置" width="800px" top="5vh" destroy-on-close @close="stopPreview">
-      <el-form :model="areaForm" label-position="top">
-        <div class="form-item-container">
-          <!-- 配置类型 -->
-          <el-form-item label="1. 画线类型" class="form-item-left">
-            <el-radio-group v-model="areaForm.coordinates.type">
-              <el-radio value="area">区域设置</el-radio>
-              <el-radio value="line">拌线设置</el-radio>
-            </el-radio-group>
-          </el-form-item>
 
-          <!-- 新增检测模式选择 -->
-          <el-form-item label="2. 检测模式" class="form-item-left">
-            <el-radio-group v-model="areaForm.coordinates.subtype" @change="handleSubtypeChange">
-              <el-radio value="simple">普通检测</el-radio>
-              <el-radio value="directional">方向检测</el-radio>
-            </el-radio-group>
-          </el-form-item>
-          
-          <!-- 新增方向选择 -->
-          <el-form-item label="3. 检测方向" v-if="areaForm.coordinates.subtype === 'directional'" class="form-item-left">
-            <el-radio-group v-model="areaForm.coordinates.direction">
-              <el-radio value="in">入方向</el-radio>
-              <el-radio value="out">出方向</el-radio>
-              <el-radio value="both">双向</el-radio>
-            </el-radio-group>
-          </el-form-item>
-        </div>
-        <!-- 设备画面预览和绘制区域 -->
-        <div class="image-preview-container">
-          <div v-if="imageLoading" class="loading-wrapper">
-            <el-skeleton animated :rows="8" />
-            <div class="loading-text">正在加载设备画面...</div>
-          </div>
-          <div v-else-if="imageError" class="error-wrapper">
-            <el-icon :size="64">
-              <CircleClose />
-            </el-icon>
-            <p>{{ imageError }}</p>
-            <el-button @click="loadDeviceImage">重试</el-button>
-          </div>
-          <div v-else-if="!deviceImage" class="image-placeholder">
-            <el-icon :size="64">
-              <VideoCamera />
-            </el-icon>
-            <p>暂无设备画面图片</p>
-          </div>
-          <div v-else class="image-wrapper">
-            <img ref="deviceImageRef" :src="deviceImage" class="device-image" @load="onImageLoaded" />
-            <canvas ref="drawingCanvas" class="drawing-canvas" @mousedown="handleMouseDown" @mousemove="handleMouseMove"
-              @contextmenu.prevent="handleRightClick">
-            </canvas>
-            <div class="drawing-controls">
-              <el-button type="primary" @click="startDrawing">开始绘制</el-button>
-              <el-button @click="clearDrawing">清除</el-button>
-            </div>
-          </div>
-        </div>
-
-        <!-- <el-form-item label="区域坐标">
-          <el-input v-model="coordinatesDisplay" placeholder="绘制完成后自动生成坐标" readonly />
-        </el-form-item> -->
-        <div class="coordinate-hint">提示：左键添加顶点，右键完成绘制</div>
-      </el-form>
-
-      <template #footer>
-        <span class="dialog-footer">
-          <el-button @click="areaModalVisible = false">取消</el-button>
-          <el-button type="primary" @click="saveAreaConfig">保存</el-button>
-        </span>
-      </template>
-    </el-dialog>
   </div>
 </template>
 
 <script>
 import { defineComponent, ref, reactive, onMounted, computed } from 'vue';
+import { useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
-import { Plus, Delete, Edit, VideoPause, VideoPlay, InfoFilled, Calendar, Operation, CircleCloseFilled, Files, VideoCamera, CircleCheckFilled, Clock, Setting } from '@element-plus/icons-vue';
+import { Plus, Delete, Edit, VideoPause, VideoPlay, InfoFilled, Calendar, Operation, CircleCloseFilled, Files, VideoCamera, CircleCheckFilled, Clock, Setting, CircleClose } from '@element-plus/icons-vue';
 import deviceApi from '@/api/device'
 import { detectionConfigApi } from '@/api/detection';
 import { startDetection, stopDetection } from '@/api/detection_server';
@@ -714,9 +643,12 @@ export default defineComponent({
     VideoCamera,
     CircleCheckFilled,
     Clock,
-    Setting
+    Setting,
+    CircleClose
   },
   setup() {
+    const router = useRouter();
+
     // 数据加载状态
     const loading = ref(false);
     const submitLoading = ref(false);
@@ -732,457 +664,22 @@ export default defineComponent({
     const isEdit = ref(false);
     const formRef = ref(null);
 
-    // 区域对话框状态
-    const areaModalVisible = ref(false);
-    const currentConfigId = ref(null);
-
-    // 区域表单数据
-    const areaForm = reactive({
-      coordinates: {
-        type: 'area',           // "line"或 "area"
-        points: [],                // 归一化坐标
-        subtype: "simple",    // 可选值：directional（方向检测）、simple（普通检测）
-        direction: "in",   // 方向：in(入方向), out(出方向), both(双向)
-      }
-    });
-
-    // 坐标显示计算属性
-    const coordinatesDisplay = computed(() => {
-      if (!areaForm.coordinates || !areaForm.coordinates.points) return '';
-      return JSON.stringify(areaForm.coordinates.points.map(p => [p.x, p.y]));
-    });
-
-    // 绘制相关状态
-    const isDrawing = ref(false);
-    const points = ref([]);
-    const drawingCanvas = ref(null);
-
-    // 图片预览相关
-    const imageLoading = ref(false)
-    const imageError = ref(null)
-    const deviceImage = ref(null)
-    const currentDevice = ref(null)
-    const deviceImageRef = ref(null)
-    const imageResolution = ref('')
-
     // 高级定时设置当前标签
     const scheduleActiveTab = ref('time');
 
-    // 初始化Canvas以获得清晰的绘制效果
-    const initCanvas = () => {
-      if (!drawingCanvas.value || !deviceImageRef.value) return
-
-      const canvas = drawingCanvas.value
-      const image = deviceImageRef.value
-      const ctx = canvas.getContext('2d')
-      
-      // 获取设备像素比
-      const devicePixelRatio = window.devicePixelRatio || 1
-      
-      // 设置Canvas的实际大小（考虑设备像素比）
-      const displayWidth = image.clientWidth
-      const displayHeight = image.clientHeight
-      
-      canvas.width = displayWidth * devicePixelRatio
-      canvas.height = displayHeight * devicePixelRatio
-      
-      // 设置CSS尺寸
-      canvas.style.width = displayWidth + 'px'
-      canvas.style.height = displayHeight + 'px'
-      
-      // 缩放绘图上下文以匹配设备像素比
-      ctx.scale(devicePixelRatio, devicePixelRatio)
-      
-      // 设置绘图质量
-      ctx.imageSmoothingEnabled = false
-      ctx.lineCap = 'round'
-      ctx.lineJoin = 'round'
-    }
-
-    // 图片加载完成
-    const onImageLoaded = () => {
-      if (!deviceImageRef.value) return
-
-      const { naturalWidth, naturalHeight } = deviceImageRef.value
-      imageResolution.value = `${naturalWidth}x${naturalHeight}`
-      
-      // 初始化Canvas
-      setTimeout(() => {
-        initCanvas()
-        
-        // 图片加载完成后，如果有坐标数据，重新绘制
-        if (areaForm.coordinates.points && areaForm.coordinates.points.length > 0) {
-          drawPolygon(areaForm.coordinates.points)
-        }
-      }, 100)
-    }
-
-    // 从设备ID获取IP地址
-    const getDeviceIpAddress = (deviceId) => {
-      const device = deviceList.value.find(d => d.device_id === deviceId)
-      return device ? device.ip_address : null
-    }
-
-    // 获取设备图片URL
-    const getDeviceImageUrl = (ipAddress) => {
-      // 使用后端提供的图片服务API
-      const imagePath = `storage/devices/${ipAddress}.jpg`
-      return `/api/v2/data-listeners/images/${encodeURIComponent(imagePath)}`
-    }
-
-    // 加载设备图片
-    const loadDeviceImage = () => {
-      if (!currentDevice.value) {
-        imageError.value = '设备信息不完整'
-        return
-      }
-
-      imageLoading.value = true
-      imageError.value = null
-      deviceImage.value = null
-
-      const ipAddress = getDeviceIpAddress(currentDevice.value.device_id)
-      if (!ipAddress) {
-        imageLoading.value = false
-        imageError.value = '无法获取设备IP地址'
-        return
-      }
-
-      // 使用后端图片服务API构建图片URL
-      const imageUrl = getDeviceImageUrl(ipAddress)
-      
-      // 创建新的Image对象来检测图片是否存在
-      const img = new Image()
-      
-      img.onload = () => {
-        deviceImage.value = imageUrl
-        imageLoading.value = false
-      }
-      
-      img.onerror = () => {
-        imageLoading.value = false
-        imageError.value = '设备画面图片不存在，请先进行设备预览以生成画面快照'
-      }
-      
-      // 添加时间戳避免缓存
-      img.src = `${imageUrl}?t=${Date.now()}`
-    }
-
-    // 停止预览（保持接口兼容性）
-    const stopPreview = () => {
-      // 重置状态
-      deviceImage.value = null
-      imageResolution.value = ''
-    }
-    // 设置感兴趣区域方法
+    // 设置感兴趣区域方法（跳转到新页面）
     const setInterestArea = (config) => {
-      currentConfigId.value = config.config_id;
-      // 检查 area_coordinates 是否有效
-      if (config.area_coordinates && Object.keys(config.area_coordinates).length > 0) {
-        areaForm.coordinates = config.area_coordinates; // 直接使用对象
-      } else {
-        areaForm.coordinates = {
-          type: 'area',
-          points: [],
-          subtype: "simple",
-          direction: "in"
-        };
-      }
-
-      areaModalVisible.value = true;
-
-      // 设置当前设备并加载图片
-      currentDevice.value = config
-
-      // 延迟一帧，确保DOM加载完成再开始加载图片
-      setTimeout(() => {
-        loadDeviceImage()
-      }, 100)
-    };
-
-    const drawPolygon = (points) => {
-      if (!drawingCanvas.value || !points || points.length === 0) {
-        return
-      }
-      try {
-        const canvas = drawingCanvas.value;
-        const ctx = canvas.getContext('2d');
-        const devicePixelRatio = window.devicePixelRatio || 1
-        
-        // 获取Canvas的显示尺寸
-        const displayWidth = canvas.clientWidth
-        const displayHeight = canvas.clientHeight
-        
-        // 先清除画布
-        ctx.clearRect(0, 0, displayWidth, displayHeight);
-
-        if (points.length > 0) {
-          ctx.save()
-          
-          // 设置绘制样式
-          ctx.strokeStyle = '#00ff00';
-          ctx.lineWidth = 2;
-          ctx.lineCap = 'round';
-          ctx.lineJoin = 'round';
-          
-          // 开始绘制路径
-          ctx.beginPath();
-          
-          // 移动到第一个点
-          const firstPoint = points[0]
-          const startX = Math.round(firstPoint.x * displayWidth) + 0.5
-          const startY = Math.round(firstPoint.y * displayHeight) + 0.5
-          ctx.moveTo(startX, startY);
-          
-          // 绘制其他点
-          points.forEach((point, index) => {
-            if (index > 0) {
-              const x = Math.round(point.x * displayWidth) + 0.5
-              const y = Math.round(point.y * displayHeight) + 0.5
-              ctx.lineTo(x, y);
-            }
-          });
-          
-          // 根据类型决定是否闭合路径和填充
-          if (areaForm.coordinates.type === 'area') {
-            // 区域设置：闭合路径并填充
-            ctx.closePath();
-            ctx.fillStyle = 'rgba(0, 255, 0, 0.15)'; // 半透明填充
-            ctx.fill();
-          }
-          // 拌线设置：不闭合路径，不填充
-          
-          // 描边
-          ctx.stroke();
-          
-          // 绘制顶点
-          points.forEach(point => {
-            const x = Math.round(point.x * displayWidth)
-            const y = Math.round(point.y * displayHeight)
-            
-            ctx.beginPath();
-            ctx.arc(x, y, 4, 0, Math.PI * 2);
-            ctx.fillStyle = '#ff4444';
-            ctx.fill();
-            ctx.strokeStyle = '#ffffff';
-            ctx.lineWidth = 1;
-            ctx.stroke();
-          });
-          
-          ctx.restore()
+      router.push({
+        name: 'SmartConfigSetting',
+        params: {
+          configId: config.config_id
+        },
+        query: {
+          deviceId: config.device_id
         }
-      } catch (error) {
-        console.warn('绘制多边形时出错:', error)
-      }
+      });
     };
 
-    // 绘制相关方法
-    const startDrawing = () => {
-      if (areaForm.coordinates.type) {
-        isDrawing.value = true;
-        points.value = [];
-        areaForm.coordinates.points = [];
-        loadArea();
-      } else {
-        ElMessage.info('请选择画线类型');
-      }
-
-    };
-
-    const clearDrawing = () => {
-      const canvas = drawingCanvas.value;
-      const ctx = canvas.getContext('2d');
-      const displayWidth = canvas.clientWidth;
-      const displayHeight = canvas.clientHeight;
-      
-      ctx.clearRect(0, 0, displayWidth, displayHeight);
-      points.value = [];
-      areaForm.coordinates.points = [];
-      areaForm.coordinates.subtype = 'simple';
-      isDrawing.value = false;
-    };
-
-    const handleMouseDown = (e) => {
-      if (!isDrawing.value) return;
-
-      const canvas = drawingCanvas.value;
-      const rect = canvas.getBoundingClientRect();
-      
-      // 计算归一化坐标（0-1之间）
-      const normalizedX = (e.clientX - rect.left) / rect.width;
-      const normalizedY = (e.clientY - rect.top) / rect.height;
-      
-      // 确保坐标在有效范围内
-      if (normalizedX < 0 || normalizedX > 1 || normalizedY < 0 || normalizedY > 1) return;
-
-      points.value.push({ x: normalizedX, y: normalizedY });
-
-          // 重新绘制所有内容
-       redrawCanvas();
-    };
-
-    // 重绘Canvas内容
-    const redrawCanvas = (previewPoint = null) => {
-      if (!drawingCanvas.value) return;
-
-      const canvas = drawingCanvas.value;
-      const ctx = canvas.getContext('2d');
-      const displayWidth = canvas.clientWidth;
-      const displayHeight = canvas.clientHeight;
-
-      // 清除画布
-      ctx.clearRect(0, 0, displayWidth, displayHeight);
-
-      if (points.value.length === 0 && !previewPoint) return;
-
-      ctx.save();
-
-      // 绘制已有的点和线
-      if (points.value.length > 0) {
-        // 绘制点
-        points.value.forEach(point => {
-          const x = Math.round(point.x * displayWidth);
-          const y = Math.round(point.y * displayHeight);
-          
-          ctx.beginPath();
-          ctx.arc(x, y, 4, 0, Math.PI * 2);
-          ctx.fillStyle = '#ff4444';
-          ctx.fill();
-          ctx.strokeStyle = '#ffffff';
-          ctx.lineWidth = 1;
-          ctx.stroke();
-        });
-
-        // 绘制连线
-        if (points.value.length > 1) {
-          ctx.beginPath();
-          ctx.strokeStyle = '#00ff00';
-          ctx.lineWidth = 2;
-          ctx.lineCap = 'round';
-          ctx.lineJoin = 'round';
-
-          const firstPoint = points.value[0];
-          ctx.moveTo(
-            Math.round(firstPoint.x * displayWidth) + 0.5,
-            Math.round(firstPoint.y * displayHeight) + 0.5
-          );
-
-          for (let i = 1; i < points.value.length; i++) {
-            const point = points.value[i];
-            ctx.lineTo(
-              Math.round(point.x * displayWidth) + 0.5,
-              Math.round(point.y * displayHeight) + 0.5
-            );
-          }
-          
-          // 如果是区域类型且绘制完成，则闭合路径
-          if (areaForm.coordinates.type === 'area' && !isDrawing.value && points.value.length >= 3) {
-            ctx.closePath();
-            ctx.fillStyle = 'rgba(0, 255, 0, 0.15)';
-            ctx.fill();
-          }
-          
-          ctx.stroke();
-        }
-
-        // 绘制预览线（鼠标移动时）
-        if (previewPoint && points.value.length > 0) {
-          ctx.beginPath();
-          // ctx.strokeStyle = 'rgba(0, 255, 0, 0.5)';
-          ctx.strokeStyle = '#00ff00';
-          ctx.lineWidth = 1;
-          // ctx.setLineDash([5, 5]);
-
-          const lastPoint = points.value[points.value.length - 1];
-          ctx.moveTo(
-            Math.round(lastPoint.x * displayWidth) + 0.5,
-            Math.round(lastPoint.y * displayHeight) + 0.5
-          );
-          ctx.lineTo(
-            Math.round(previewPoint.x * displayWidth) + 0.5,
-            Math.round(previewPoint.y * displayHeight) + 0.5
-          );
-          ctx.stroke();
-          // ctx.setLineDash([]);
-        }
-      }
-
-      ctx.restore();
-    };
-
-    const handleMouseMove = (e) => {
-      if (!isDrawing.value || points.value.length === 0) return;
-
-      const canvas = drawingCanvas.value;
-      const rect = canvas.getBoundingClientRect();
-      
-      // 计算归一化坐标
-      const normalizedX = (e.clientX - rect.left) / rect.width;
-      const normalizedY = (e.clientY - rect.top) / rect.height;
-      
-      // 确保坐标在有效范围内
-      if (normalizedX < 0 || normalizedX > 1 || normalizedY < 0 || normalizedY > 1) return;
-
-      // 重绘画布，包含预览点
-      redrawCanvas({ x: normalizedX, y: normalizedY });
-    };
-
-    const handleRightClick = () => {
-      if (!isDrawing.value || points.value.length < (areaForm.coordinates.type === 'area' ? 3 : 2)) return;
-
-      // 生成坐标数据（points.value已经是归一化的）
-      areaForm.coordinates = {
-        type: areaForm.coordinates.type,
-        points: [...points.value], // points.value已经是归一化坐标
-        subtype: areaForm.coordinates.subtype || "simple",
-        direction: areaForm.coordinates.direction || "in",
-      };
-
-      // 重绘最终的多边形
-      drawPolygon(points.value);
-      
-      isDrawing.value = false;
-      const message = areaForm.coordinates.type === 'area' ? '区域绘制完成' : '拌线绘制完成';
-      ElMessage.success(message);
-    };
-
-    // 保存区域配置
-    const saveAreaConfig = async () => {
-      try {
-        if (!areaForm.coordinates) { //|| !areaForm.coordinates.points
-          throw new Error('无效的坐标数据');
-        }
-
-        if (areaForm.coordinates.subtype === 'directional' && !areaForm.coordinates.direction) {
-          ElMessage.error('请选择有效的检测方向');
-          return;
-        }
-        // 几何有效性验证
-        // if (areaForm.coordinates.points.length < (areaForm.coordinates.type === 'area' ? 3 : 2)) {
-        //   ElMessage.error('请绘制有效的多边形区域');
-        //   return;
-        // }
-        // console.log(areaForm.coordinates);
-
-        if (areaForm.coordinates.points.length == 0) {
-          // 调用API保存区域配置
-          await detectionConfigApi.updateConfig(currentConfigId.value, {
-            area_coordinates: {}
-          });
-        } else {
-          // 调用API保存区域配置
-          await detectionConfigApi.updateConfig(currentConfigId.value, {
-            area_coordinates: areaForm.coordinates
-          });
-        }
-
-        ElMessage.success('区域配置保存成功');
-        areaModalVisible.value = false;
-        loadConfigList();
-      } catch (error) {
-        ElMessage.error(`保存失败: ${error.message}`);
-      }
-    };
     // 表单状态
     const formState = reactive({
       config_id: null,
@@ -1287,20 +784,38 @@ export default defineComponent({
       return typeMap[type] || type
     }
 
-    const getAreaTypeLabel = (areaType) => {
-      const typeMap = {
-        'area': '区域',
-        'line': '拌线'
+    const getAreaTypeLabel = (areaCoordinates) => {
+      if (!areaCoordinates || Object.keys(areaCoordinates).length === 0) {
+        return '未设置';
       }
-      if (typeMap[areaType.type]) {
-        if (areaType.subtype === 'directional') {
-          return typeMap[areaType.type] + '(方向:' + (areaType.direction === 'in' ? '进入' : areaType.direction === 'out' ? '离开' : '双向') + ')'
-        } else {
-          return typeMap[areaType.type] + '(普通)'
+
+      let result = '';
+
+      // 根据分析类型确定主要描述
+      if (areaCoordinates.analysisType === 'behavior') {
+        result = '行为分析';
+        if (areaCoordinates.behaviorType === 'area') {
+          result += '-区域检测';
+        } else if (areaCoordinates.behaviorType === 'line') {
+          result += '-拌线检测';
+        }
+
+        if (areaCoordinates.behaviorSubtype === 'directional') {
+          const directionText = areaCoordinates.behaviorDirection === 'in' ? '进入' : '离开';
+          result += `(${directionText})`;
+        }
+      } else if (areaCoordinates.analysisType === 'counting') {
+        result = '人数统计';
+        if (areaCoordinates.countingType === 'occupancy') {
+          result += '-区域统计';
+        } else if (areaCoordinates.countingType === 'flow') {
+          result += '-人流统计';
         }
       } else {
-        return '未设置'
+        result = '无智能方案';
       }
+
+      return result;
     }
 
     // 获取设备名称
@@ -1426,12 +941,12 @@ export default defineComponent({
     };
 
     // 获取保存模式标签
-    const getSaveModeLabel = (saveMode) => {
+    const getSaveModeLabel = (saveMode, maxStorageDays) => {
       const map = {
         'none': '暂无',
-        'screenshot': '截图',
-        'video': '视频',
-        'both': '截图+视频'
+        'screenshot': '截图(' + maxStorageDays + '天)',
+        'video': '视频(无)',
+        'both': '截图(' + maxStorageDays + '天)'+ '|' + '视频(无)'
       };
       return map[saveMode] || saveMode;
     };
@@ -1439,10 +954,10 @@ export default defineComponent({
     // 获取保存模式标签类型
     const getSaveModeType = (saveMode) => {
       const map = {
-        'none': 'warning',
+        'none': 'info',
         'screenshot': 'success',
-        'video': 'primary',
-        'both': 'info'
+        'video': 'warning',
+        'both': 'danger'
       };
       return map[saveMode] || '';
     };
@@ -1800,21 +1315,6 @@ export default defineComponent({
       }
     };
 
-    const loadArea = () => {
-      if (drawingCanvas.value && areaForm.coordinates.points) {
-        // 重新绘制已有的区域坐标
-        drawPolygon(areaForm.coordinates.points);
-      }
-    }
-
-    // 检查是否已绘制内容
-    const handleSubtypeChange = (value) => {
-      if (value === 'directional' && (!areaForm.coordinates.points || areaForm.coordinates.points.length < 2)) {
-        ElMessage.warning('请先绘制区域再选择方向检测模式');
-        areaForm.coordinates.subtype = 'simple';
-      }
-    };
-
     // 新增定时设置处理方法
     const handleScheduleModeChange = (mode) => {
       // 切换模式时，保留相关设置
@@ -1885,8 +1385,6 @@ export default defineComponent({
 
     return {
       getAreaTypeLabel,
-      handleSubtypeChange,
-      loadArea,
       loading,
       submitLoading,
       configList,
@@ -1897,29 +1395,8 @@ export default defineComponent({
       formRef,
       formState,
       rules,
-      coordinatesDisplay,
       targetClasses,
-      areaModalVisible,
-      areaForm,
-      imageLoading,
-      imageError,
-      deviceImage,
-      onImageLoaded,
-      loadDeviceImage,
-      getDeviceIpAddress,
-      getDeviceImageUrl,
-      stopPreview,
-      saveAreaConfig,
       setInterestArea,
-      startDrawing,
-      clearDrawing,
-      handleMouseDown,
-      handleMouseMove,
-      handleRightClick,
-      redrawCanvas,
-      initCanvas,
-      deviceImageRef,
-      drawingCanvas,
       updateTargetClasses,
       getModelTypeName,
       getDeviceName,
@@ -1960,13 +1437,15 @@ export default defineComponent({
 .form-item-container {
   display: flex;
   justify-content: flex-start;
-  gap: 10px;
+  gap: 20px;
 }
+
 .form-item-left {
   border: 1px solid #dcdfe6;
   border-radius: 4px;
   padding: 10px;
 }
+
 /* 基础样式 */
 .divider-title {
   font-size: 16px;
@@ -2513,88 +1992,4 @@ export default defineComponent({
 .header-right {
   margin-left: auto;
 }
-
-.image-preview-container {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  height: 400px;
-  background-color: #f5f7fa;
-  border-radius: 4px;
-}
-
-.image-placeholder {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
-  color: #909399;
-}
-
-.loading-wrapper {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
-  width: 100%;
-}
-
-.loading-text {
-  margin-top: 10px;
-  color: #909399;
-}
-
-.error-wrapper {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
-  color: #f56c6c;
-  gap: 10px;
-}
-
-.image-wrapper {
-  position: relative;
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
-  border-radius: 4px;
-}
-
-.device-image,
-.drawing-canvas {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-}
-
-.drawing-canvas {
-  z-index: 1;
-  cursor: crosshair;
-  /* 优化Canvas渲染质量 */
-  image-rendering: -webkit-optimize-contrast;
-  image-rendering: -webkit-crisp-edges;
-  image-rendering: -moz-crisp-edges;
-  image-rendering: crisp-edges;
-  image-rendering: pixelated;
-}
-
-.drawing-controls {
-  position: absolute;
-  bottom: 10px;
-  left: 10px;
-  z-index: 2;
-}
-
-.coordinate-hint {
-  font-size: 12px;
-  color: #909399;
-  margin-top: 10px;
-  margin-bottom: 10px;
-}
-
-
 </style>

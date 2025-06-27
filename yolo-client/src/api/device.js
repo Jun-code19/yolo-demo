@@ -157,6 +157,32 @@ export default {
       }
     });
   },
+
+  // 支持进度追踪的模型上传
+  uploadModelWithProgress(formData, options = {}) {
+    // 为大文件上传创建专用的axios实例
+    const uploadClient = axios.create({
+      baseURL: '/api/v1',
+      timeout: 30 * 60 * 1000, // 30分钟超时
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      }
+    });
+
+    // 添加认证token
+    const token = localStorage.getItem('token');
+    if (token) {
+      uploadClient.defaults.headers.Authorization = `Bearer ${token}`;
+    }
+
+    return uploadClient.post('/models/', formData, {
+      ...options,
+      // 上传进度回调
+      onUploadProgress: options.onUploadProgress || ((progressEvent) => {
+        console.log('Upload progress:', Math.round((progressEvent.loaded / progressEvent.total) * 100) + '%');
+      })
+    });
+  },
   
   updateModel(modelId, modelData) {
     return apiClient.put(`/models/${modelId}`, modelData);

@@ -139,7 +139,6 @@ class DetectionConfig(Base):
     save_duration = Column(Integer, default=10)
     max_storage_days = Column(Integer, default=30)
     area_coordinates = Column(JSONB)  # 新增字段，用于存储区域坐标
-    area_type = Column(Text, default="none")  # 新增字段，用于存储区域类型(拌线/区域)
     schedule_config = Column(JSONB)  # 定时检测配置
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
@@ -311,10 +310,10 @@ CrowdAnalysisJob.results = relationship("CrowdAnalysisResult", back_populates="j
 # dev_mode = os.getenv("DEV_MODE", "false").lower() == "true"
 # if dev_mode:
 #     # 开发环境使用localhost
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:admin123@10.83.34.35:5432/eyris_core_db")
+# DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:admin123@10.83.34.35:5432/eyris_core_db")
 # else:
     # 生产环境使用Docker容器名
-# DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:admin123@postgres:5432/yolo")
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:admin123@postgres:5432/yolo")
 
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

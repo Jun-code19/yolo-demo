@@ -245,12 +245,15 @@ async def get_map_image(map_id: int, db: Session = Depends(get_db)):
 
 @heatmap_router.delete("/maps/{map_id}")
 async def delete_map(map_id: int, db: Session = Depends(get_db)):
-    """删除地图（级联删除相关区域和绑定）"""
+    """删除地图（级联删除相关区域、绑定和图片文件）"""
     try:
         db_map = db.query(HeatmapMap).filter(HeatmapMap.id == map_id).first()
         
         if not db_map:
             raise HTTPException(status_code=404, detail="地图不存在")
+        
+        map_name = db_map.name
+        map_file_path = db_map.file_path
         
         # 获取该地图下的所有区域
         areas = db.query(HeatmapArea).filter(HeatmapArea.map_id == map_id).all()
@@ -271,11 +274,34 @@ async def delete_map(map_id: int, db: Session = Depends(get_db)):
         for config in dashboard_configs:
             config.is_active = False
         
+        # 删除地图图片文件
+        file_deleted = False
+        file_error = None
+        try:
+            if map_file_path and os.path.exists(map_file_path):
+                os.remove(map_file_path)
+                file_deleted = True
+                print(f"删除地图文件: {map_file_path}")
+        except OSError as e:
+            file_error = str(e)
+            print(f"删除地图文件失败: {e}")
+        
         # 软删除地图
         db_map.is_active = False
         db.commit()
         
-        return {"success": True, "message": "地图及相关数据删除成功"}
+        message = f"地图 '{map_name}' 及相关数据删除成功"
+        if file_deleted:
+            message += "，图片文件已删除"
+        elif file_error:
+            message += f"，但图片文件删除失败: {file_error}"
+        
+        return {
+            "success": True, 
+            "message": message,
+            "file_deleted": file_deleted,
+            "file_path": map_file_path if file_deleted else None
+        }
         
     except HTTPException:
         raise

@@ -100,6 +100,7 @@
             :on-exceed="handleExceed"
             :on-remove="handleRemove"
             :file-list="uploadForm.fileList"
+            :before-upload="beforeUpload"
           >
             <el-icon class="el-icon--upload"><upload-filled /></el-icon>
             <div class="el-upload__text">
@@ -107,10 +108,30 @@
             </div>
             <template #tip>
               <div class="el-upload__tip">
-                仅支持 .pt/.onnx/.pth/.weights 格式的模型文件
+                仅支持 .pt/.onnx/.pth/.weights 格式的模型文件<br>
+                <span style="color: #f56c6c;">建议文件大小不超过 2GB，大文件上传可能需要较长时间</span>
               </div>
             </template>
           </el-upload>
+          
+          <!-- 上传进度显示 -->
+          <div v-if="uploadProgress.visible" class="upload-progress">
+            <div class="progress-info">
+              <span>{{ uploadProgress.fileName }}</span>
+              <span>{{ uploadProgress.percent }}%</span>
+            </div>
+            <el-progress 
+              :percentage="uploadProgress.percent" 
+              :status="uploadProgress.status"
+              :show-text="false"
+            ></el-progress>
+            <div class="progress-details">
+              <span>已上传: {{ formatFileSize(uploadProgress.loaded) }}</span>
+              <span>总大小: {{ formatFileSize(uploadProgress.total) }}</span>
+              <span v-if="uploadProgress.speed">速度: {{ uploadProgress.speed }}</span>
+              <span v-if="uploadProgress.remainingTime">剩余时间: {{ uploadProgress.remainingTime }}</span>
+            </div>
+          </div>
         </el-form-item>
         
         <el-form-item label="描述">
@@ -135,8 +156,10 @@
       
       <template #footer>
         <span class="dialog-footer">
-          <el-button @click="uploadDialogVisible = false">取消</el-button>
-          <el-button type="primary" @click="uploadModel" :loading="uploading">上传</el-button>
+          <el-button @click="cancelUpload">{{ uploading ? '取消上传' : '取消' }}</el-button>
+          <el-button type="primary" @click="uploadModel" :loading="uploading" :disabled="uploadProgress.visible">
+            {{ uploading ? '上传中...' : '上传' }}
+          </el-button>
         </span>
       </template>
     </el-dialog>
@@ -339,6 +362,22 @@ const editRules = {
 // 新增的 hoveredIndex 变量
 const hoveredIndex = ref(null);
 
+// 上传进度追踪
+const uploadProgress = ref({
+  visible: false,
+  percent: 0,
+  status: '',
+  fileName: '',
+  loaded: 0,
+  total: 0,
+  speed: '',
+  remainingTime: '',
+  startTime: null
+});
+
+// 取消上传的控制器
+let uploadController = null;
+
 const isChinese = (str) => {
   return /[\u4e00-\u9fa5]/.test(str); // 正则表达式检查是否包含中文字符
 }
@@ -392,6 +431,33 @@ const handleFileChange = (file) => {
   uploadForm.value.modelFile = file.raw
 }
 
+// 上传前检查
+const beforeUpload = (file) => {
+  // 检查文件大小 (2GB = 2 * 1024 * 1024 * 1024)
+  const maxSize = 2 * 1024 * 1024 * 1024; // 2GB
+  if (file.size > maxSize) {
+    ElMessage.error(`文件大小不能超过 2GB，当前文件大小为 ${formatFileSize(file.size)}`);
+    return false;
+  }
+  
+  // 检查文件格式
+  const allowedFormats = ['.pt', '.onnx', '.pth', '.weights'];
+  const fileName = file.name.toLowerCase();
+  const isValidFormat = allowedFormats.some(format => fileName.endsWith(format));
+  
+  if (!isValidFormat) {
+    ElMessage.error('请上传正确格式的模型文件 (.pt/.onnx/.pth/.weights)');
+    return false;
+  }
+  
+  // 大文件上传提示
+  if (file.size > 100 * 1024 * 1024) { // 100MB以上
+    ElMessage.warning('检测到大文件，上传可能需要较长时间，请耐心等待');
+  }
+  
+  return true;
+}
+
 // 文件数量超出限制
 const handleExceed = () => {
   ElMessage.warning('只能上传一个模型文件')
@@ -424,7 +490,26 @@ const uploadModel = async () => {
       return
     }
     
+    // 再次检查文件大小
+    if (!beforeUpload(uploadForm.value.modelFile)) {
+      return
+    }
+    
     uploading.value = true
+    
+    // 初始化进度追踪
+    uploadProgress.value = {
+      visible: true,
+      percent: 0,
+      status: 'active',
+      fileName: uploadForm.value.modelFile.name,
+      loaded: 0,
+      total: uploadForm.value.modelFile.size,
+      speed: '',
+      remainingTime: '',
+      startTime: Date.now()
+    }
+    
     try {
       // 创建FormData
       const formData = new FormData()
@@ -447,19 +532,139 @@ const uploadModel = async () => {
         formData.append('parameters', JSON.stringify(params))
       }
       
-      // 发送请求
-      await deviceApi.uploadModel(formData)
+      // 创建上传控制器
+      uploadController = new AbortController()
+      
+      // 发送请求，使用优化的上传API
+      await deviceApi.uploadModelWithProgress(formData, {
+        signal: uploadController.signal,
+        onUploadProgress: (progressEvent) => {
+          updateUploadProgress(progressEvent)
+        }
+      })
+      
+      // 上传成功
+      uploadProgress.value.status = 'success'
+      uploadProgress.value.percent = 100
       
       ElMessage.success('模型上传成功')
       uploadDialogVisible.value = false
+      
+      // 延迟隐藏进度条
+      setTimeout(() => {
+        uploadProgress.value.visible = false
+      }, 2000)
+      
       loadModels() // 重新加载模型列表
     } catch (error) {
-      // console.error('上传模型失败:', error)
-      ElMessage.error(`上传模型失败: ${error.response?.data?.detail || error.message}`)
+      // 检查是否是用户取消的请求
+      if (error.name === 'AbortError' || error.code === 'ERR_CANCELED') {
+        // 用户取消，不显示错误消息
+        return
+      }
+      
+      uploadProgress.value.status = 'exception'
+      
+      // 针对不同错误类型显示不同消息
+      let errorMessage = '上传模型失败'
+      if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
+        errorMessage = '上传超时，请检查网络连接或尝试上传较小的文件'
+      } else if (error.response?.status === 413) {
+        errorMessage = '文件太大，请选择小于2GB的模型文件'
+      } else if (error.response?.data?.detail) {
+        errorMessage = `上传失败: ${error.response.data.detail}`
+      } else {
+        errorMessage = `上传失败: ${error.message}`
+      }
+      
+      ElMessage.error(errorMessage)
+      
+      // 延迟隐藏进度条
+      setTimeout(() => {
+        uploadProgress.value.visible = false
+      }, 3000)
     } finally {
       uploading.value = false
+      uploadController = null
     }
   })
+}
+
+// 更新上传进度
+const updateUploadProgress = (progressEvent) => {
+  const { loaded, total } = progressEvent
+  const percent = Math.round((loaded / total) * 100)
+  const currentTime = Date.now()
+  const elapsedTime = (currentTime - uploadProgress.value.startTime) / 1000 // 秒
+  
+  uploadProgress.value.loaded = loaded
+  uploadProgress.value.percent = percent
+  
+  if (elapsedTime > 1) { // 至少1秒后开始计算速度
+    const speed = loaded / elapsedTime // 字节/秒
+    uploadProgress.value.speed = formatSpeed(speed)
+    
+    if (speed > 0) {
+      const remainingBytes = total - loaded
+      const remainingSeconds = remainingBytes / speed
+      uploadProgress.value.remainingTime = formatTime(remainingSeconds)
+    }
+  }
+}
+
+// 格式化速度
+const formatSpeed = (bytesPerSecond) => {
+  if (bytesPerSecond < 1024) {
+    return `${bytesPerSecond.toFixed(0)} B/s`
+  } else if (bytesPerSecond < 1024 * 1024) {
+    return `${(bytesPerSecond / 1024).toFixed(1)} KB/s`
+  } else {
+    return `${(bytesPerSecond / (1024 * 1024)).toFixed(1)} MB/s`
+  }
+}
+
+// 格式化时间
+const formatTime = (seconds) => {
+  if (seconds < 60) {
+    return `${Math.round(seconds)}秒`
+  } else if (seconds < 3600) {
+    const minutes = Math.floor(seconds / 60)
+    const remainingSeconds = Math.round(seconds % 60)
+    return `${minutes}分${remainingSeconds}秒`
+  } else {
+    const hours = Math.floor(seconds / 3600)
+    const minutes = Math.floor((seconds % 3600) / 60)
+    return `${hours}小时${minutes}分钟`
+  }
+}
+
+// 取消上传
+const cancelUpload = () => {
+  if (uploading.value && uploadController) {
+    // 取消正在进行的上传请求
+    uploadController.abort()
+    uploadController = null
+    
+    // 重置状态
+    uploading.value = false
+    uploadProgress.value.visible = false
+    uploadProgress.value.status = 'exception'
+    
+    ElMessage.warning('上传已取消')
+  }
+  
+  // 关闭对话框
+  uploadDialogVisible.value = false
+  
+  // 重置表单
+  uploadForm.value = {
+    modelName: '',
+    modelType: '',
+    description: '',
+    modelFile: null,
+    fileList: [],
+    parameters: []
+  }
 }
 
 // 查看模型详情
@@ -694,5 +899,34 @@ const formatParameters = (params) => {
 .model-details {
   max-height: 600px;
   overflow-y: auto;
+}
+
+.upload-progress {
+  margin-top: 15px;
+  padding: 15px;
+  border: 1px solid #e4e7ed;
+  border-radius: 4px;
+  background-color: #fafafa;
+}
+
+.progress-info {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-size: 14px;
+  color: #606266;
+}
+
+.progress-details {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+  font-size: 12px;
+  color: #909399;
+}
+
+.progress-details span {
+  flex: 1;
+  text-align: center;
 }
 </style> 

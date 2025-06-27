@@ -7,7 +7,7 @@ import threading # 导入线程模块
 import logging # 导入日志模块
 import uuid # 导入UUID模块
 import os # 导入操作系统模块
-from datetime import datetime # 导入日期时间模块
+from datetime import datetime, timedelta # 导入日期时间模块
 from pathlib import Path # 导入路径模块
 from typing import List, Optional # 导入列表和可选类型
 from collections import deque # 导入双端队列
@@ -36,7 +36,7 @@ from src.crowd_analyzer import crowd_analyzer
 # 导入数据库模块
 from src.database import (
     SessionLocal, DetectionConfig, DetectionEvent, Device, 
-    DetectionModel, DetectionPerformance, SaveMode,
+    DetectionModel, DetectionPerformance, SaveMode, ExternalEvent,
     EventStatus, Base, engine, get_db, ListenerType
 )
 # 导入认证模块
@@ -90,10 +90,7 @@ class DetectionTask:
         self.models_type = models_type
         self.target_class = target_class
         self.save_mode = save_mode
-        # self.region_of_interest = region_of_interest
-        # self.area_type = area_type  #区域或者拌线类型字段
-        self.area_coordinates = area_coordinates  #点坐标值，前端生成的归一化坐标
-        
+        self.area_coordinates = area_coordinates  #点坐标值，前端生成的归一化坐标  
         self.class_colors = {}  # 用于存储每个类别的固定颜色
         self.class_names = None  # 用于存储类别名称
 
@@ -120,6 +117,13 @@ class DetectionTask:
 
         # 初始化 ObjectTracker
         self.object_tracker = ObjectTracker(max_age=self.max_age, min_hits=self.min_hits, iou_threshold=self.iou_threshold)
+        
+        # 设置智能分析区域坐标
+        if self.area_coordinates:
+            # 这里需要等到有实际帧时才能设置，因为需要frame_shape
+            self.area_coordinates_set = False
+        else:
+            self.area_coordinates_set = True
     
     def load_model(self): # 加载YOLO模型
         """加载YOLO模型"""
@@ -293,12 +297,8 @@ class DetectionTask:
         try:
             # 如果模型已经加载，跳过加载步骤
             if not hasattr(self, 'model') or self.model is None:
-                logger.info(f"开始加载模型: {self.config_id}")
                 if not self.load_model():
-                    logger.error(f"无法启动检测任务 {self.config_id}，模型加载失败")
                     return
-            else:
-                logger.info(f"模型已预加载: {self.config_id}")
             
             # 启动读取帧的线程
             self.thread = threading.Thread(target=self.read_frame)
@@ -328,7 +328,8 @@ class DetectionTask:
                         # 使用 try-except 捕获模型推理过程中的错误
                         try:
                             results = self.model(detect_frame, conf=self.confidence,iou=0.45,max_det=300,device=self.device)
-
+                            # 获取速度
+                            speed = results[0].speed
                             # 处理检测结果
                             detections = []
                             for r in results:
@@ -346,41 +347,32 @@ class DetectionTask:
                                             "class_name": class_name
                                         })                          
                             
+                            # 首次设置区域坐标
+                            if self.area_coordinates and not self.area_coordinates_set:
+                                self.object_tracker.set_area_coordinates(self.area_coordinates, detect_frame.shape)
+                                self.area_coordinates_set = True
+                            
                             if detections:
                                 if self.models_type == 'pose':
-                                    # 向WebSocket客户端推送检测结果
+                                    # 姿态检测结果
                                     img_result = self.display_pose_results(detect_frame, results[0])
                                 else:
-                                    if self.area_coordinates and self.area_coordinates['subtype'] == 'directional':
-                                        # 开启目标追踪功能
+                                    # 智能分析处理
+                                    if self.area_coordinates and self.area_coordinates.get('analysisType'):
+                                        # 开启目标追踪功能进行智能分析
                                         self.object_tracker.update(detections)
-                                            # 传递显示框的状态到draw_tracks方法
                                         img_result = self.object_tracker.draw_tracks(
                                             detect_frame.copy(), 
                                             max_trajectory_length=self.max_trajectory_length,
-                                            show_boxes=True,  # 传递显示框的状态
+                                            show_boxes=True,
                                         )
-                                    elif self.area_coordinates and self.area_coordinates['subtype'] == 'simple':
-                                        # 开启目标追踪功能
-                                        self.object_tracker.update(detections)
-                                            # 传递显示框的状态到draw_tracks方法
-                                        img_result = self.object_tracker.draw_tracks(
-                                            detect_frame.copy(), 
-                                            max_trajectory_length=self.max_trajectory_length,
-                                            show_boxes=True,  # 传递显示框的状态
-                                        )
+                                        # 处理智能分析事件
+                                        self._process_smart_analysis_events(img_result, detections, speed)
                                     else:
-                                        img_result = self.display_detection_results(detect_frame,results[0])
-                            
-                            if detections and data_pusher.push_configs:
-                                speed = results[0].speed
-                                self.push_detection_data(detections, img_result, speed)
-
-                            # 判断是否需要创建检测事件
-                            if self.save_mode.value != 'none':
-                                if detections and (current_time - self.last_detection_time) > cooldown_period:
-                                    self.last_detection_time = current_time
-                                    self.save_detection_event(img_result, detections)
+                                        # 普通检测：仅显示检测结果，没有智能分析
+                                        img_result = self.display_detection_results(detect_frame, results[0])
+                                        # 处理检测事件                                        
+                                        self._process_detection_events(cooldown_period, current_time, speed, img_result, detections)                            
 
                             if not self.clients:
                                 continue  # 没有客户端连接，跳过下面步骤
@@ -418,115 +410,8 @@ class DetectionTask:
             finally:
                 self.loop.close()
                 logger.info(f"事件循环已关闭: {self.config_id}")  
-    
-    def push_detection_data(self, detections, frame_rgb, speed): # 推送检测数据
-        """推送检测数据"""
-        push_data = {
-            "timestamp": datetime.now().isoformat(),
-            "device_id": self.device_id,
-            "config_id": self.config_id,
-            "detections": detections
-        }
-        # 增加标签，使推送更灵活
-        data_pusher.push_data(
-            data=push_data, 
-            image=frame_rgb, 
-            tags=["detection", f"device_{self.device_id}"],
-            config_id=self.config_id  # 为了兼容性保留
-        )
-        
-        # 记录性能统计信息
-        db = SessionLocal()
-        try:
-            perf = DetectionPerformance(
-                device_id=self.device_id,
-                config_id=self.config_id,
-                detection_time=speed['inference'],
-                preprocessing_time=speed['preprocess'],
-                postprocessing_time=speed['postprocess'],
-                frame_width=frame_rgb.shape[1],
-                frame_height=frame_rgb.shape[0],
-                objects_detected=len(detections)
-            )
-            db.add(perf)
-            db.commit()
-        except Exception as e:
-            logger.error(f"保存性能数据失败: {e}")
-            db.rollback()
-        finally:
-            db.close()
-
-    def normalize_points(self, points, frame_shape): #归一化坐标转换
-        """归一化坐标转换"""
-        h,w = frame_shape[:2]
-        return [(int(p['x']*w), int(p['y']*h)) for p in points]
-
-    def draw_roi(self, frame, roi_type, roi_points, # 绘制线段/区域 ROI（支持line/area类型）
-            line_color=(0,255,0), fill_color=(0,0,0,0), 
-            thickness=2, line_type=cv2.LINE_AA): 
-        """
-        绘制线段/区域 ROI（支持line/area类型）
-        :param frame: 输入图像
-        :param roi_type: ROI类型（'line'或'area'）
-        :param roi_points: ROI坐标列表 [[x1,y1], [x2,y2],...]
-        :param line_color: 线段/边框颜色 (BGR格式)
-        :param fill_color: 填充颜色 (BGR+Alpha格式)
-        :param thickness: 线宽
-        :param line_type: 线型（默认抗锯齿）
-        """
-        if roi_type not in ['line', 'area']:
-            raise ValueError("Invalid ROI type. Must be 'line' or 'area'")
-        
-        line = self.normalize_points(roi_points, frame.shape)
-
-        # 转换为整数坐标
-        roi_array = np.array(line, np.int32)
-        
-        if roi_type == 'line':
-            # 线段绘制（至少需要2个点）
-            if len(roi_array) < 2:
-                return
-            # 绘制线段轮廓
-            cv2.polylines(frame, [roi_array], False, line_color, thickness, line_type)
-            # 绘制中间点标记（可选）
-            for pt in roi_array:
-                cv2.circle(frame, tuple(pt), 3, line_color, -1)
-                
-        elif roi_type == 'area':
-            # 区域绘制
-            if len(roi_array) < 3:
-                # 最小包围矩形
-                x_coords = [p[0] for p in roi_array]
-                y_coords = [p[1] for p in roi_array]
-                x1, x2 = int(min(x_coords)), int(max(x_coords))
-                y1, y2 = int(min(y_coords)), int(max(y_coords))
-                cv2.rectangle(frame, (x1, y1), (x2, y2), line_color, thickness)
-            else:
-                # 多边形绘制
-                cv2.polylines(frame, [roi_array], True, line_color, thickness, line_type)
-                # 区域填充（支持透明度）
-                if fill_color[3]!= 0:
-                    cv2.fillPoly(frame, [roi_array], fill_color[:3])  # 填充颜色（BGR）
-                    # 绘制半透明覆盖层
-                    overlay = frame.copy()
-                    cv2.fillPoly(overlay, [roi_array], fill_color)
-                    frame = cv2.addWeighted(frame, 0.7, overlay, 0.3, 0)
-
-    def generate_colors(self, num_classes): # 生成颜色
-        hsv_tuples = [(x / num_classes, 1., 1.) for x in range(num_classes)]
-        colors = list(map(lambda x: colorsys.hsv_to_rgb(*x), hsv_tuples))
-        colors = list(map(lambda x: (int(x[0] * 255), int(x[1] * 255), int(x[2] * 255)), colors))
-        return colors
-
-    def get_class_color(self, class_id): # 获取类别颜色
-        if class_id not in self.class_colors:
-            if not self.class_colors:
-                colors = self.generate_colors(len(self.class_names))
-                self.class_colors = {i: color for i, color in enumerate(colors)}
-            else:
-                self.class_colors[class_id] = tuple(np.random.randint(0, 255, 3).tolist())
-        return self.class_colors[class_id]
-
+       
+    # 显示检测结果
     def display_detection_results(self, img, results): # 显示检测结果
         if not hasattr(results, 'boxes') or results.boxes is None:
             return img
@@ -593,6 +478,22 @@ class DetectionTask:
 
         return img
 
+    def get_class_color(self, class_id): # 获取类别颜色
+        if class_id not in self.class_colors:
+            if not self.class_colors:
+                colors = self.generate_colors(len(self.class_names))
+                self.class_colors = {i: color for i, color in enumerate(colors)}
+            else:
+                self.class_colors[class_id] = tuple(np.random.randint(0, 255, 3).tolist())
+        return self.class_colors[class_id]
+
+    def generate_colors(self, num_classes): # 生成颜色
+        hsv_tuples = [(x / num_classes, 1., 1.) for x in range(num_classes)]
+        colors = list(map(lambda x: colorsys.hsv_to_rgb(*x), hsv_tuples))
+        colors = list(map(lambda x: (int(x[0] * 255), int(x[1] * 255), int(x[2] * 255)), colors))
+        return colors
+
+    # 启动/停止检测任务线程
     def start(self): # 启动检测任务线程
         """启动检测任务线程"""
         if self.thread and self.thread.is_alive():
@@ -656,6 +557,16 @@ class DetectionTask:
         #     except Exception as e:
         #         logger.error(f"停止事件循环失败: {e}")
     
+    # 保存检测事件到数据库并存储图像/视频
+    def _process_detection_events(self, cooldown_period, current_time, speed, img_result, detections): # 处理检测事件
+        """处理检测事件"""
+        # 判断是否需要创建检测事件
+        if self.save_mode.value != 'none':
+            if detections and (current_time - self.last_detection_time) > cooldown_period:
+                self.last_detection_time = current_time
+                self.save_detection_event(img_result, detections)
+                self.push_detection_data(detections, img_result, speed)
+
     def save_detection_event(self, frame, detections): # 保存检测事件到数据库并存储图像/视频
         """保存检测事件到数据库并存储图像/视频"""
         try:
@@ -670,8 +581,8 @@ class DetectionTask:
             if not config:
                 logger.error(f"未找到检测配置: {self.config_id}")
                 db.close()
-                return
-            
+                return        
+
             # 创建检测事件记录
             event = DetectionEvent(
                 event_id=event_id,
@@ -743,84 +654,358 @@ class DetectionTask:
                 db.rollback()
         finally:
             if 'db' in locals() and db:
-                db.close()
+                db.close()  
     
-    def draw_detections(self, frame, detections): # 在图像上绘制检测框和标签
-        """在图像上绘制检测框和标签"""
-        annotated_frame = frame.copy()
+    def push_detection_data(self, detections, frame_rgb, speed): # 推送检测数据
+        """推送检测数据"""
+        if not data_pusher.push_configs:
+            return
         
-        # 绘制每个检测框
-        for detection in detections:
-            # 获取边界框坐标
-            bbox = detection["bbox"]
-            x1, y1, x2, y2 = map(int, bbox)
+        push_data = {
+            "timestamp": datetime.now().isoformat(),
+            "device_id": self.device_id,
+            "config_id": self.config_id,
+            "detections": detections
+        }
+        # 增加标签，使推送更灵活
+        data_pusher.push_data(
+            data=push_data, 
+            image=frame_rgb, 
+            tags=["detection", f"device_{self.device_id}"],
+            config_id=self.config_id  # 为了兼容性保留
+        )
+        
+        # 记录性能统计信息
+        db = SessionLocal()
+        try:
+            perf = DetectionPerformance(
+                device_id=self.device_id,
+                config_id=self.config_id,
+                detection_time=speed['inference'],
+                preprocessing_time=speed['preprocess'],
+                postprocessing_time=speed['postprocess'],
+                frame_width=frame_rgb.shape[1],
+                frame_height=frame_rgb.shape[0],
+                objects_detected=len(detections)
+            )
+            db.add(perf)
+            db.commit()
+        except Exception as e:
+            logger.error(f"保存性能数据失败: {e}")
+            db.rollback()
+        finally:
+            db.close()
+
+    # 处理智能分析事件
+    def _process_smart_analysis_events(self, img_result, detections, speed): # 处理智能分析事件
+        """处理智能分析事件"""
+        try:
+            # 获取触发的行为事件
+            triggered_events = self.object_tracker.triggered_events
             
-            # 获取类别和置信度
-            class_name = detection["class_name"]
-            confidence = detection["confidence"]
+            for event_key, event_info in triggered_events.items():
+                # 创建检测事件记录（用于行为分析）
+                if self.area_coordinates.get('analysisType') == 'behavior':
+                    self._create_behavior_event(event_info, img_result, detections)
+                    self.push_behavior_event(event_info, img_result, detections, speed)
+                elif self.area_coordinates.get('analysisType') == 'counting':
+                    self._create_counting_event(event_info, img_result, detections)
+                    self.push_counting_event(event_info, img_result, detections, speed)
+                    if self.area_coordinates.get('countingType') == 'occupancy':
+                        self._check_alert(event_info['current_count'])                
+                # 输出日志
+                logger.info(f"智能分析事件: {event_info['event_type']}, 轨迹ID: {event_info['track_id']}")
             
-            # 为不同类别选择不同颜色
-            # 使用类别ID来确定颜色，确保同一类别总是相同颜色
-            color_id = detection["class_id"] % 10
-            colors = [
-                (255, 0, 0),     # 红
-                (0, 255, 0),     # 绿
-                (0, 0, 255),     # 蓝
-                (255, 255, 0),   # 黄
-                (0, 255, 255),   # 青
-                (255, 0, 255),   # 紫
-                (255, 128, 0),   # 橙
-                (128, 0, 255),   # 紫蓝
-                (0, 128, 255),   # 浅蓝
-                (255, 0, 128)    # 粉红
-            ]
-            color = colors[color_id]
+            # 清空已处理的事件
+            self.object_tracker.triggered_events.clear()
             
-            # 绘制边界框
-            # cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), color, 2)
-            cv2.rectangle(annotated_frame, (int(x1), int(y1)), (int(x2), int(y2)), color, 2)
+        except Exception as e:
+            logger.error(f"处理智能分析事件失败: {e}")
+    
+    def _create_behavior_event(self, event_info, frame, detections): # 创建行为事件记录
+        """创建行为事件记录"""
+        try:
+            # 保存事件到数据库
+            db = SessionLocal()
+            event_id = str(uuid.uuid4())
+            current_time = datetime.now()
             
-            # 准备标签文本
-            label = f"{class_name}: {confidence:.2f}"
+            # 获取检测配置信息
+            config = db.query(DetectionConfig).filter(DetectionConfig.config_id == self.config_id).first()
             
-            # 绘制背景和文本
-            # 获取文本大小
-            # (text_width, text_height), baseline = cv2.getTextSize(
-            #     label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+            if not config:
+                logger.error(f"未找到检测配置: {self.config_id}")
+                db.close()
+                return           
+
+            # 创建检测事件记录
+            event = DetectionEvent(
+                event_id=event_id,
+                config_id=self.config_id,
+                device_id=self.device_id,
+                timestamp=current_time,
+                event_type='smart_behavior',# 智能行为事件
+                confidence=max([d["confidence"] for d in detections]) if detections else 0.0,
+                bounding_box=detections,
+                status=EventStatus.new,
+                created_at=current_time
+            )
+
+            # 保存事件元数据
+            event.meta_data = {
+                "analysis_type": self.area_coordinates.get('analysisType'),
+                "behavior_type": self.area_coordinates.get('behaviorType'),
+                "behavior_subtype": self.area_coordinates.get('behaviorSubtype'),
+                "event_type": event_info['event_type'],
+                "event_description": self._get_event_description(event_info['event_type'])               
+            }
             
-            # # 绘制标签背景
-            # cv2.rectangle(
-            #     annotated_frame, 
-            #     (x1, y1 - text_height - 5), 
-            #     (x1 + text_width, y1), 
-            #     color, 
-            #     -1  # 填充矩形
-            # )
+            # 根据保存模式保存图像/视频
+            save_dir = Path(f"storage/events/{current_time.strftime('%Y-%m-%d')}/{self.device_id}")
+            save_dir.mkdir(parents=True, exist_ok=True)
             
-            # 绘制文本
-            cv2.putText(
-                annotated_frame, 
-                label, 
-                (x1, y1 - 5), 
-                cv2.FONT_HERSHEY_SIMPLEX, 
-                0.5, 
-                color, 
-                1
+            if self.save_mode in [SaveMode.screenshot, SaveMode.both]:   
+                # 保存带检测框的截图（原图）
+                thumbnail_path = save_dir / f"{event_id}.jpg"
+                cv2.imwrite(str(thumbnail_path), frame)
+                event.thumbnail_path = str(thumbnail_path)
+          
+            # 提交事件
+            db.add(event)
+            db.commit()
+            logger.info(f"已保存智能行为事件: {event_id}")
+            
+        except Exception as e:
+            logger.error(f"保存智能行为事件失败: {e}")
+            if 'db' in locals() and db:
+                db.rollback()
+        finally:
+            if 'db' in locals() and db:
+                db.close()
+        
+    def _create_counting_event(self, event_info, frame, detections): # 创建人数统计事件记录
+        """创建人数统计事件记录"""
+        try:
+            # 保存事件到数据库
+            db = SessionLocal()
+            event_id = str(uuid.uuid4())
+            current_time = datetime.now()
+            
+            # 获取检测配置信息
+            config = db.query(DetectionConfig).filter(DetectionConfig.config_id == self.config_id).first()
+            
+            if not config:
+                logger.error(f"未找到检测配置: {self.config_id}")
+                db.close()
+                return
+            
+            # 创建检测事件记录
+            event = DetectionEvent(
+                event_id=event_id,
+                config_id=self.config_id,
+                device_id=self.device_id,
+                timestamp=current_time,
+                event_type='smart_counting',# 智能人数统计事件
+                confidence=max([d["confidence"] for d in detections]) if detections else 0.0,
+                bounding_box=detections,
+                status=EventStatus.new,
+                created_at=current_time
+            )
+
+            # 保存事件元数据
+            event.meta_data = {
+                "analysis_type": self.area_coordinates.get('analysisType'),
+                "counting_type": self.area_coordinates.get('countingType'),
+                "counting_subtype": 'area_counting' if self.area_coordinates.get('countingType') == 'occupancy' else 'flow_counting',
+                "event_type": event_info['event_type'],
+                "event_description": self._get_event_description(event_info['event_type']),
+                "current_count": event_info['current_count'],
+                "today_in_count": event_info['today_in_count'],
+                "today_out_count": event_info['today_out_count']
+            }
+            
+            # 根据保存模式保存图像/视频
+            save_dir = Path(f"storage/events/{current_time.strftime('%Y-%m-%d')}/{self.device_id}")
+            save_dir.mkdir(parents=True, exist_ok=True)
+            
+            if self.save_mode in [SaveMode.screenshot, SaveMode.both]:   
+                # 保存带检测框的截图（原图）
+                thumbnail_path = save_dir / f"{event_id}.jpg"
+                cv2.imwrite(str(thumbnail_path), frame)
+                event.thumbnail_path = str(thumbnail_path)
+          
+            # 提交事件
+            db.add(event)
+            db.commit()
+            logger.info(f"已保存智能人数统计事件: {event_id}")
+            
+        except Exception as e:
+            logger.error(f"保存智能人数统计事件失败: {e}")
+            if 'db' in locals() and db:
+                db.rollback()
+        finally:
+            if 'db' in locals() and db:
+                db.close()
+
+    def push_behavior_event(self, event_info, frame, detections, speed): # 推送行为事件
+        """推送行为事件"""
+        if not data_pusher.push_configs:
+            return
+        
+        if self.area_coordinates and self.area_coordinates.get('pushLabel'):
+            push_label = self.area_coordinates.get('pushLabel')
+       
+            push_data = {
+                "timestamp": datetime.now().isoformat(),
+                "device_id": self.device_id,
+                "config_id": self.config_id,
+                "detections": detections,
+                "analysis_type": self.area_coordinates.get('analysisType'),
+                "behavior_type": self.area_coordinates.get('behaviorType'),
+                "behavior_subtype": self.area_coordinates.get('behaviorSubtype'),
+                "event_type": event_info['event_type'],
+                "event_description": self._get_event_description(event_info['event_type'])
+            }
+            # 增加标签，使推送更灵活
+            data_pusher.push_data(
+                data=push_data, 
+                image=frame, 
+                tags=[push_label, f"device_{self.device_id}"],
+                config_id=self.config_id  # 为了兼容性保留
             )
         
-        return annotated_frame
-    
+            # 记录性能统计信息
+            db = SessionLocal()
+            try:
+                perf = DetectionPerformance(
+                    device_id=self.device_id,
+                    config_id=self.config_id,
+                    detection_time=speed['inference'],
+                    preprocessing_time=speed['preprocess'],
+                    postprocessing_time=speed['postprocess'],
+                    frame_width=frame.shape[1],
+                    frame_height=frame.shape[0],
+                    objects_detected=len(detections)
+                )
+                db.add(perf)
+                db.commit()
+            except Exception as e:
+                logger.error(f"保存性能数据失败: {e}")
+                db.rollback()
+            finally:
+                db.close()
+
+    def push_counting_event(self, event_info, frame, detections, speed): # 推送人数统计事件
+        """推送人数统计事件"""
+        """推送行为事件"""
+        if not data_pusher.push_configs:
+            return
+        
+        if self.area_coordinates and self.area_coordinates.get('pushLabel'):
+            push_label = self.area_coordinates.get('pushLabel')
+       
+            push_data = {
+                "timestamp": datetime.now().isoformat(),
+                "device_id": self.device_id,
+                "config_id": self.config_id,
+                "detections": detections,
+                "analysis_type": self.area_coordinates.get('analysisType'),
+                "counting_type": self.area_coordinates.get('countingType'),
+                "counting_subtype": self.area_coordinates.get('countingSubtype'),
+                "event_type": event_info['event_type'],
+                "event_description": self._get_event_description(event_info['event_type']),
+                "current_count": event_info['current_count'],
+                "today_in_count": event_info['today_in_count'],
+                "today_out_count": event_info['today_out_count']
+            }
+            # 增加标签，使推送更灵活
+            data_pusher.push_data(
+                data=push_data, 
+                image=frame, 
+                tags=[push_label, f"device_{self.device_id}"],
+                config_id=self.config_id  # 为了兼容性保留
+            )
+        
+            # 记录性能统计信息
+            db = SessionLocal()
+            try:
+                perf = DetectionPerformance(
+                    device_id=self.device_id,
+                    config_id=self.config_id,
+                    detection_time=speed['inference'],
+                    preprocessing_time=speed['preprocess'],
+                    postprocessing_time=speed['postprocess'],
+                    frame_width=frame.shape[1],
+                    frame_height=frame.shape[0],
+                    objects_detected=len(detections)
+                )
+                db.add(perf)
+                db.commit()
+            except Exception as e:
+                logger.error(f"保存性能数据失败: {e}")
+                db.rollback()
+            finally:
+                db.close()
+
+    def _check_alert(self, current_count):
+        """检查人数是否超过预警阈值"""
+
+        if self.area_coordinates.get('enableAlert') == False or self.area_coordinates.get('alertThreshold') == None:
+            return
+        
+        if not data_pusher.push_configs:
+            return
+
+        if current_count >= self.area_coordinates.get('alertThreshold'):
+            # 生成预警消息
+            warning_msg = f"人群密度预警：{self.device_id} 区域人数达到 {current_count}人，超过预警阈值({self.area_coordinates.get('alertThreshold')}人)"
+            
+            # 发送预警（可以通过数据推送模块发送到外部系统）
+            if self.area_coordinates.get('pushLabel'):
+                push_label = self.area_coordinates.get('pushLabel')
+                data_pusher.push_data(
+                    data={
+                        "analysis_type": 'counting',
+                        "counting_type": 'occupancy',
+                        "config_id": self.config_id,
+                        "device_id": self.device_id,
+                        "alert_threshold": self.area_coordinates.get('alertThreshold'),
+                        "current_count": current_count,
+                        "message": warning_msg,
+                        "timestamp": datetime.now().isoformat()
+                    },
+                    tags=[push_label, f"device_{self.device_id}"],
+                )
+            
+            logger.warning(f"人群密度预警: {warning_msg}")
+
+    def _get_event_description(self, event_type): # 获取事件描述
+        """获取事件描述"""
+        descriptions = {
+            'area_enter': '进入检测区域',
+            'area_exit': '离开检测区域',
+            'line_cross': '穿越检测线',
+            'line_cross_in': '穿越检测线（进入方向）',
+            'line_cross_out': '穿越检测线（离开方向）',
+            'enter_area': '进入统计区域',
+            'exit_area': '离开统计区域',
+            'occupancy_change_increase': '区域内人数增加',
+            'occupancy_change_decrease': '区域内人数减少'
+        }
+        return descriptions.get(event_type, '未知事件')
+
+    # 向所有WebSocket客户端广播检测结果
     def broadcast_img_result(self, pose_frame, detections): # 向所有WebSocket客户端广播检测结果
         """向所有WebSocket客户端广播检测结果"""
         if not self.clients:
             return  # 没有客户端连接，跳过
         
         try:     
-            if(self.area_coordinates): 
-                roi_type = self.area_coordinates['type']
+            if(self.area_coordinates and self.area_coordinates['analysisType']): 
+                roi_type = self.area_coordinates['behaviorType'] if self.area_coordinates['analysisType'] == 'behavior' else self.area_coordinates['countingType']
                 roi_points = self.area_coordinates['points']
                 if roi_type and roi_points:
-                    self.draw_roi(pose_frame, roi_type, roi_points)               
+                    self.draw_roi(pose_frame, roi_type, roi_points)   #暂时只是绘制区域显示，没有具体的作用还需要调整           
             
             # 将帧转换为JPEG，增加质量参数
             _, buffer = cv2.imencode('.jpg', pose_frame, [cv2.IMWRITE_JPEG_QUALITY, 90])  # 提高JPEG质量
@@ -836,6 +1021,27 @@ class DetectionTask:
                 "detections": detections
             }
             
+            # 添加智能分析统计信息
+            # if self.object_tracker and self.area_coordinates:
+            #     analysis_type = self.area_coordinates.get('analysisType')
+            #     if analysis_type == 'counting':
+            #         counting_stats = self.object_tracker.get_counting_stats()
+            #         message["smart_analysis"] = {
+            #             "analysis_type": analysis_type,
+            #             "counting_type": self.area_coordinates.get('countingType'),
+            #             "current_count": counting_stats.get('current_count', 0),
+            #             "today_in_count": counting_stats.get('today_in_count', 0),
+            #             "today_out_count": counting_stats.get('today_out_count', 0),
+            #             "total_today": counting_stats.get('total_today', 0)
+            #         }
+            #     elif analysis_type == 'behavior':
+            #         message["smart_analysis"] = {
+            #             "analysis_type": analysis_type,
+            #             "behavior_type": self.area_coordinates.get('behaviorType'),
+            #             "behavior_subtype": self.area_coordinates.get('behaviorSubtype', 'simple'),
+            #             "behavior_direction": self.area_coordinates.get('behaviorDirection', '')
+            #         }
+            
             # 将消息放入队列（线程安全）
             if self.loop and self.loop.is_running():
                 self.loop.call_soon_threadsafe(
@@ -845,63 +1051,62 @@ class DetectionTask:
         except Exception as e:
             logger.error(f"广播检测结果失败: {e}")
 
-    def broadcast_detection_result(self, frame, detections): # 向所有WebSocket客户端广播检测结果
-        """向所有WebSocket客户端广播检测结果"""
-        if not self.clients:
-            return  # 没有客户端连接，跳过
-        
-        try:
-            # 图像压缩处理
-            h, w = frame.shape[:2]
-            max_width = 1280  # 提高最大宽度以保持更高的分辨率
-            scale = 1
-            
-            if w > max_width:
-                scale = max_width / w
-                new_w = int(w * scale)
-                new_h = int(h * scale)
-                frame_resized = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
-            else:
-                frame_resized = frame
-            
-            # 调整检测框坐标
-            adjusted_detections = []
-            for detection in detections:
-                adjusted_detection = detection.copy()
-                adjusted_detection["bbox"] = [
-                    int(detection["bbox"][0] * scale),
-                    int(detection["bbox"][1] * scale),
-                    int(detection["bbox"][2] * scale),
-                    int(detection["bbox"][3] * scale)
-                ]
-                adjusted_detections.append(adjusted_detection)
+    def normalize_points(self, points, frame_shape): #归一化坐标转换
+        """归一化坐标转换"""
+        h,w = frame_shape[:2]
+        return [(int(p['x']*w), int(p['y']*h)) for p in points]
 
-            # 绘制检测框和标签
-            annotated_frame = self.draw_detections(frame_resized, adjusted_detections)
-            
-            # 将帧转换为JPEG，增加质量参数
-            _, buffer = cv2.imencode('.jpg', annotated_frame, [cv2.IMWRITE_JPEG_QUALITY, 90])  # 提高JPEG质量
-            jpg_bytes = buffer.tobytes()
-            base64_image = base64.b64encode(jpg_bytes).decode('utf-8')
-            
-            # 创建消息
-            message = {
-                "device_id": self.device_id,
-                "config_id": self.config_id,
-                "timestamp": time.time(),
-                "image": base64_image,
-                "detections": adjusted_detections
-            }
-            
-            # 将消息放入队列（线程安全）
-            if self.loop and self.loop.is_running():
-                self.loop.call_soon_threadsafe(
-                    lambda: self.message_queue.put_nowait(message)
-                )
+    def draw_roi(self, frame, roi_type, roi_points, # 绘制线段/区域 ROI（支持line/area类型）
+            line_color=(0,255,0), fill_color=(0,0,0,0), 
+            thickness=2, line_type=cv2.LINE_AA): 
+        """
+        绘制线段/区域 ROI（支持line/area类型）
+        :param frame: 输入图像
+        :param roi_type: ROI类型（'line'或'area'或'occupancy'或'flow'） 
+        :param roi_points: ROI坐标列表 [[x1,y1], [x2,y2],...]
+        :param line_color: 线段/边框颜色 (BGR格式)
+        :param fill_color: 填充颜色 (BGR+Alpha格式)
+        :param thickness: 线宽
+        :param line_type: 线型（默认抗锯齿）
+        """
+        if roi_type not in ['line', 'area', 'occupancy', 'flow']:
+            raise ValueError("Invalid ROI type. Must be 'line' or 'area' or 'occupancy' or 'flow'")
         
-        except Exception as e:
-            logger.error(f"广播检测结果失败: {e}")
-            
+        line = self.normalize_points(roi_points, frame.shape)
+
+        # 转换为整数坐标
+        roi_array = np.array(line, np.int32)
+        
+        if roi_type == 'line' or roi_type == 'flow':
+            # 线段绘制（至少需要2个点）
+            if len(roi_array) < 2:
+                return
+            # 绘制线段轮廓
+            cv2.polylines(frame, [roi_array], False, line_color, thickness, line_type)
+            # 绘制中间点标记（可选）
+            for pt in roi_array:
+                cv2.circle(frame, tuple(pt), 3, line_color, -1)
+                
+        elif roi_type == 'area' or roi_type == 'occupancy':
+            # 区域绘制
+            if len(roi_array) < 3:
+                # 最小包围矩形
+                x_coords = [p[0] for p in roi_array]
+                y_coords = [p[1] for p in roi_array]
+                x1, x2 = int(min(x_coords)), int(max(x_coords))
+                y1, y2 = int(min(y_coords)), int(max(y_coords))
+                cv2.rectangle(frame, (x1, y1), (x2, y2), line_color, thickness)
+            else:
+                # 多边形绘制
+                cv2.polylines(frame, [roi_array], True, line_color, thickness, line_type)
+                # 区域填充（支持透明度）
+                if fill_color[3]!= 0:
+                    cv2.fillPoly(frame, [roi_array], fill_color[:3])  # 填充颜色（BGR）
+                    # 绘制半透明覆盖层
+                    overlay = frame.copy()
+                    cv2.fillPoly(overlay, [roi_array], fill_color)
+                    frame = cv2.addWeighted(frame, 0.7, overlay, 0.3, 0)
+
     async def broadcast_worker(self): # 处理消息广播的工作协程
         """处理消息广播的工作协程"""
         logger.info(f"广播工作协程已启动: {self.config_id}")
@@ -982,6 +1187,7 @@ class DetectionServer:
         self.tasks = {}  # 存储所有检测任务，格式: {config_id: DetectionTask}
         self.models_cache = {}  # 缓存已加载的模型，格式: {model_path: model}
         self.scheduled_jobs = {}  # 存储所有定时任务，格式: {config_id: job_id}
+        self.cleanup_task = None  # 全局清理任务
     
     # 启动特定配置的检测任务
     async def start_detection(self, config_id: str, db: Session, user_id: str = None):
@@ -1562,6 +1768,288 @@ class DetectionServer:
         finally:
             db.close()
 
+    async def start_global_cleanup_task(self):#启动全局清理任务
+        """启动全局清理任务"""
+        if self.cleanup_task is None or self.cleanup_task.done():
+            self.cleanup_task = asyncio.create_task(self._global_cleanup_worker())
+            
+            # 计算下次清理时间并显示
+            now = datetime.now()
+            next_cleanup = now.replace(hour=2, minute=0, second=0, microsecond=0)
+            if now >= next_cleanup:
+                next_cleanup += timedelta(days=1)
+            
+            logger.info(f"全局事件清理任务已启动 - 下次清理时间: {next_cleanup.strftime('%Y-%m-%d %H:%M:%S')}")
+    
+    async def _global_cleanup_worker(self):#全局清理工作协程，每天凌晨2点执行一次
+        """全局清理工作协程，每天凌晨2点执行一次"""
+        while True:
+            try:
+                # 计算到下一个凌晨2点的等待时间
+                now = datetime.now()
+                
+                # 设置今天凌晨2点的时间
+                target_time = now.replace(hour=2, minute=0, second=0, microsecond=0)
+                
+                # 如果当前时间已经过了今天的凌晨2点，则设置为明天凌晨2点
+                if now >= target_time:
+                    target_time += timedelta(days=1)
+                
+                # 计算等待时间（秒）
+                wait_seconds = (target_time - now).total_seconds()
+                
+                logger.info(f"全局清理任务已调度，将在 {target_time.strftime('%Y-%m-%d %H:%M:%S')} 执行下次清理")
+                
+                # 等待到目标时间
+                await asyncio.sleep(wait_seconds)
+                
+                # 执行清理任务
+                logger.info("开始执行全局清理任务...")
+                await self._cleanup_all_expired_events()
+                logger.info("全局清理任务执行完成")
+                
+            except asyncio.CancelledError:
+                logger.info("全局清理任务已被取消")
+                break
+            except Exception as e:
+                logger.error(f"全局清理任务错误: {e}")
+                # 出错后等待1小时再重试
+                await asyncio.sleep(3600)
+    
+    async def _cleanup_all_expired_events(self):#清理所有配置的过期事件
+        """清理所有配置的过期事件"""
+        start_time = datetime.now()
+        try:
+            logger.info("开始执行全局清理任务...")
+            
+            # 1. 清理检测事件
+            await self._cleanup_detection_events()
+            
+            # 2. 清理外部数据事件
+            await self._cleanup_external_events()
+            
+            # 3. 清理空的日期目录
+            try:
+                await self._cleanup_empty_directories()
+            except Exception as e:
+                logger.warning(f"清理空目录失败: {e}")
+            
+            # 计算执行时间
+            execution_time = (datetime.now() - start_time).total_seconds()
+            logger.info(f"全局清理任务执行完成 - 总执行时间: {execution_time:.2f}秒")
+            
+        except Exception as e:
+            logger.error(f"全局清理任务失败: {e}")
+    
+    async def _cleanup_detection_events(self):
+        """清理检测事件"""
+        db = SessionLocal()
+        try:
+            current_time = datetime.now()
+            
+            # 获取所有检测配置
+            configs = db.query(DetectionConfig).all()
+            
+            total_deleted_events = 0
+            total_deleted_files = 0
+            processed_configs = 0
+            failed_configs = 0
+            
+            logger.info(f"开始清理检测事件，共有 {len(configs)} 个配置需要处理")
+            
+            for config in configs:
+                try:
+                    # 获取最大存储天数，如果为0则设置为30天
+                    max_storage_days = config.max_storage_days if config.max_storage_days > 0 else 30
+                    
+                    # 计算过期时间点
+                    expire_time = current_time - timedelta(days=max_storage_days)
+                    
+                    # 查询要删除的事件
+                    events_to_delete = db.query(DetectionEvent).filter(
+                        DetectionEvent.config_id == config.config_id,
+                        DetectionEvent.created_at < expire_time
+                    ).all()
+                    
+                    if not events_to_delete:
+                        continue  # 没有过期事件，跳过
+                    
+                    # 删除关联的文件
+                    deleted_files_count = 0
+                    for event in events_to_delete:
+                        # 删除缩略图文件
+                        if event.thumbnail_path and Path(event.thumbnail_path).exists():
+                            try:
+                                Path(event.thumbnail_path).unlink()
+                                deleted_files_count += 1
+                            except Exception as e:
+                                logger.warning(f"删除缩略图文件失败: {event.thumbnail_path}, 错误: {e}")
+                        
+                        # 删除视频片段文件
+                        if hasattr(event, 'snippet_path') and event.snippet_path and Path(event.snippet_path).exists():
+                            try:
+                                Path(event.snippet_path).unlink()
+                                deleted_files_count += 1
+                            except Exception as e:
+                                logger.warning(f"删除视频文件失败: {event.snippet_path}, 错误: {e}")
+                    
+                    # 删除数据库记录
+                    deleted_events_count = db.query(DetectionEvent).filter(
+                        DetectionEvent.config_id == config.config_id,
+                        DetectionEvent.created_at < expire_time
+                    ).delete()
+                    
+                    if deleted_events_count > 0:
+                        total_deleted_events += deleted_events_count
+                        total_deleted_files += deleted_files_count
+                        processed_configs += 1
+                        logger.info(f"配置 {config.config_id} (设备: {config.device_id}) 清理了 {deleted_events_count} 条过期事件 (>{max_storage_days}天), {deleted_files_count} 个文件")
+                
+                except Exception as e:
+                    failed_configs += 1
+                    logger.error(f"清理配置 {config.config_id} 的过期事件失败: {e}")
+                    continue
+            
+            # 提交所有删除操作
+            if total_deleted_events > 0:
+                db.commit()
+            
+            # 输出清理统计
+            logger.info(f"检测事件清理完成 - 处理配置 {processed_configs}/{len(configs)} 个, 失败 {failed_configs} 个")
+            logger.info(f"检测事件删除统计: {total_deleted_events} 条记录, {total_deleted_files} 个文件")
+            
+        except Exception as e:
+            logger.error(f"清理检测事件失败: {e}")
+            if 'db' in locals():
+                db.rollback()
+        finally:
+            if 'db' in locals():
+                db.close()
+    
+    async def _cleanup_empty_directories(self):#清理空的存储目录
+        """清理空的存储目录"""
+        storage_path = Path("storage/events")
+        if not storage_path.exists():
+            return
+        
+        deleted_dirs = 0
+        try:
+            # 遍历所有日期目录
+            for date_dir in storage_path.iterdir():
+                if date_dir.is_dir():
+                    # 检查设备目录
+                    for device_dir in date_dir.iterdir():
+                        if device_dir.is_dir() and not any(device_dir.iterdir()):
+                            # 删除空的设备目录
+                            device_dir.rmdir()
+                            deleted_dirs += 1
+                    
+                    # 如果日期目录也空了，删除它
+                    if not any(date_dir.iterdir()):
+                        date_dir.rmdir()
+                        deleted_dirs += 1
+            
+            if deleted_dirs > 0:
+                logger.info(f"清理了 {deleted_dirs} 个空目录")
+                
+        except Exception as e:
+            logger.warning(f"清理空目录时出错: {e}")
+    
+    async def _cleanup_external_events(self):#清理所有外部的数据事件
+        """清理所有外部的数据事件"""
+        try:
+            db = SessionLocal()
+            current_time = datetime.now()
+            
+            # 外部事件保留100天
+            expire_time = current_time - timedelta(days=100)
+            
+            # 查询要删除的外部事件（用于删除关联的文件）
+            events_to_delete = db.query(ExternalEvent).filter(
+                ExternalEvent.created_at < expire_time
+            ).all()
+            
+            if not events_to_delete:
+                logger.info("没有找到过期的外部数据事件")
+                return
+            
+            deleted_files_count = 0
+            deleted_events_count = 0
+            
+            logger.info(f"开始清理外部数据事件，共有 {len(events_to_delete)} 条过期事件需要处理")
+            
+            # 删除关联的图片文件
+            for event in events_to_delete:
+                try:
+                    image_paths = []
+                    
+                    # 从normalized_data中查找图片路径
+                    if event.normalized_data and isinstance(event.normalized_data, dict):
+                        # 检查processed_images字段
+                        processed_images = event.normalized_data.get('processed_images', {})
+                        if isinstance(processed_images, dict):
+                            # 遍历processed_images中的所有字段（如pic_data、spic_data等）
+                            for field_name, image_data in processed_images.items():
+                                if isinstance(image_data, dict):
+                                    # 检查original_path
+                                    if 'original_path' in image_data and image_data['original_path']:
+                                        image_paths.append(image_data['original_path'])
+                                    
+                                    # 检查thumbnail_path
+                                    if 'thumbnail_path' in image_data and image_data['thumbnail_path']:
+                                        image_paths.append(image_data['thumbnail_path'])                       
+                    
+                    # 删除所有找到的图片文件
+                    for image_path in set(image_paths):  # 使用set去重
+                        if image_path and isinstance(image_path, str):
+                            # 处理Windows路径分隔符
+                            image_path = image_path.replace('\\', '/')
+                            
+                            # 处理相对路径和绝对路径
+                            if not Path(image_path).is_absolute():
+                                # 如果是相对路径，直接使用，因为通常相对于项目根目录
+                                full_path = Path(image_path)
+                                if not full_path.exists():
+                                    # 如果直接路径不存在，尝试在常见的存储目录中查找
+                                    for base_dir in ['storage', 'uploads', 'images', 'data']:
+                                        full_path = Path(base_dir) / image_path
+                                        if full_path.exists():
+                                            break
+                            else:
+                                full_path = Path(image_path)
+                            
+                            if full_path.exists():
+                                try:
+                                    full_path.unlink()
+                                    deleted_files_count += 1
+                                    logger.debug(f"已删除外部事件图片: {full_path}")
+                                except Exception as e:
+                                    logger.warning(f"删除外部事件图片失败: {full_path}, 错误: {e}")
+                
+                except Exception as e:
+                    logger.warning(f"处理外部事件文件删除失败 (事件ID: {getattr(event, 'event_id', 'unknown')}): {e}")
+                    continue
+            
+            # 删除数据库记录
+            deleted_events_count = db.query(ExternalEvent).filter(
+                ExternalEvent.created_at < expire_time
+            ).delete()
+            
+            # 提交删除操作
+            if deleted_events_count > 0:
+                db.commit()
+                logger.info(f"外部数据事件清理完成: 删除 {deleted_events_count} 条记录 (>100天), {deleted_files_count} 个图片文件")
+            else:
+                logger.info("没有需要清理的外部数据事件")
+                
+        except Exception as e:
+            logger.error(f"清理外部数据事件失败: {e}")
+            if 'db' in locals():
+                db.rollback()
+        finally:
+            if 'db' in locals():
+                db.close()
+    
 # 创建检测服务器实例
 detection_server = DetectionServer()
 
@@ -1612,32 +2100,46 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"启动数据监听服务失败: {e}")
     
+    # 6. 启动全局清理任务
+    try:
+        await detection_server.start_global_cleanup_task()
+    except Exception as e:
+        logger.error(f"启动全局清理任务失败: {e}")
+    
     yield
     
     # 关闭服务（顺序与启动相反）
     logger.info("检测服务器关闭中...")
     
-    # 1. 停止数据监听服务
+    # 1. 停止全局清理任务
+    try:
+        if detection_server.cleanup_task:
+            detection_server.cleanup_task.cancel()
+            logger.info("全局清理任务已停止")
+    except Exception as e:
+        logger.error(f"停止全局清理任务失败: {e}")
+    
+    # 2. 停止数据监听服务
     try:
         await data_listener_manager.stop_all()
         logger.info("数据监听服务已停止")
     except Exception as e:
         logger.error(f"停止数据监听服务失败: {e}")
     
-    # 2. 停止人群分析服务
+    # 3. 停止人群分析服务
     try:
         crowd_analyzer.stop()
     except Exception as e:
         logger.error(f"停止人群分析服务失败: {e}")
     
-    # 3. 停止检测任务
+    # 4. 停止检测任务
     for config_id, task in list(detection_server.tasks.items()):
         try:
             task.stop()
         except Exception as e:
             logger.error(f"停止检测任务 {config_id} 失败: {e}")
     
-    # 4. 停止数据推送服务
+    # 5. 停止数据推送服务
     try:
         data_pusher.shutdown_push_service()
     except Exception as e:
@@ -1678,7 +2180,7 @@ async def stop_detection_api(config_id: str, db: Session = Depends(get_db), curr
 
 # 获取所有检测任务的状态API
 @app.get("/api/v2/detection/status")
-async def get_detection_status(): # 获取所有检测任务的状态
+async def get_detection_status():
     """获取所有检测任务的状态"""
     tasks_status = {}
     for config_id, task in detection_server.tasks.items():
@@ -1689,7 +2191,124 @@ async def get_detection_status(): # 获取所有检测任务的状态
             "clients_count": len(task.clients)
         }
     
-    return {"status": "success", "tasks": tasks_status}
+    return {
+        "status": "success",
+        "tasks": tasks_status,
+        "total_tasks": len(tasks_status)
+    }
+
+# 手动清理过期事件API
+@app.post("/api/v2/detection/cleanup-expired-events")
+async def cleanup_expired_events_api(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """手动清理过期检测事件和外部事件"""
+    try:
+        log_action(db, current_user.user_id, 'cleanup_expired_events', 'system', "手动清理过期事件")
+        
+        # 执行完整的清理操作（包括检测事件和外部事件）
+        await detection_server._cleanup_all_expired_events()
+        
+        return {
+            "status": "success",
+            "message": "过期事件清理完成（包括检测事件和外部事件）"
+        }
+    except Exception as e:
+        logger.error(f"手动清理过期事件失败: {e}")
+        return {
+            "status": "error",
+            "message": f"清理失败: {str(e)}"
+        }
+
+# 手动清理外部事件API
+@app.post("/api/v2/detection/cleanup-external-events")
+async def cleanup_external_events_api(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """手动清理外部数据事件"""
+    try:
+        log_action(db, current_user.user_id, 'cleanup_external_events', 'system', "手动清理外部数据事件")
+        
+        # 执行外部事件清理
+        await detection_server._cleanup_external_events()
+        
+        return {
+            "status": "success",
+            "message": "外部数据事件清理完成"
+        }
+    except Exception as e:
+        logger.error(f"手动清理外部事件失败: {e}")
+        return {
+            "status": "error",
+            "message": f"清理失败: {str(e)}"
+        }
+
+# 获取清理任务状态API
+@app.get("/api/v2/detection/cleanup-status")
+async def get_cleanup_status_api(current_user: User = Depends(get_current_user)):
+    """获取清理任务状态"""
+    try:
+        now = datetime.now()
+        
+        # 计算下次清理时间
+        next_cleanup = now.replace(hour=2, minute=0, second=0, microsecond=0)
+        if now >= next_cleanup:
+            next_cleanup += timedelta(days=1)
+        
+        # 检查清理任务状态
+        cleanup_task_running = (detection_server.cleanup_task is not None and 
+                               not detection_server.cleanup_task.done())
+        
+        # 获取数据库中的事件统计
+        db = SessionLocal()
+        try:
+            # 统计检测事件
+            total_detection_events = db.query(DetectionEvent).count()
+            expired_detection_events = 0
+            
+            # 统计各配置的过期事件
+            configs = db.query(DetectionConfig).all()
+            for config in configs:
+                max_storage_days = config.max_storage_days if config.max_storage_days > 0 else 30
+                expire_time = now - timedelta(days=max_storage_days)
+                count = db.query(DetectionEvent).filter(
+                    DetectionEvent.config_id == config.config_id,
+                    DetectionEvent.created_at < expire_time
+                ).count()
+                expired_detection_events += count
+            
+            # 统计外部事件
+            total_external_events = db.query(ExternalEvent).count()
+            expire_time_external = now - timedelta(days=100)
+            expired_external_events = db.query(ExternalEvent).filter(
+                ExternalEvent.created_at < expire_time_external
+            ).count()
+            
+        finally:
+            db.close()
+        
+        return {
+            "status": "success",
+            "data": {
+                "cleanup_task_running": cleanup_task_running,
+                "next_cleanup_time": next_cleanup.strftime('%Y-%m-%d %H:%M:%S'),
+                "current_time": now.strftime('%Y-%m-%d %H:%M:%S'),
+                "time_until_next_cleanup": str(next_cleanup - now).split('.')[0],  # 去掉微秒
+                "statistics": {
+                    "detection_events": {
+                        "total": total_detection_events,
+                        "expired": expired_detection_events
+                    },
+                    "external_events": {
+                        "total": total_external_events,
+                        "expired": expired_external_events,
+                        "retention_days": 100
+                    }
+                }
+            }
+        }
+    except Exception as e:
+        logger.error(f"获取清理任务状态失败: {e}")
+        return {
+            "status": "error",
+            "message": f"获取状态失败: {str(e)}"
+        }
 
 # 加载模型API端点
 @app.post("/api/v2/model/load")

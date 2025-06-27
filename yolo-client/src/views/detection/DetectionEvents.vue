@@ -52,8 +52,35 @@
       </el-form>
     </el-card>
     <el-card class="main-card">
+      <!-- 批量操作工具栏 -->
+      <div class="batch-operations" v-if="selectedEvents.length > 0">
+        <!-- <el-space> -->
+          <span style="font-size: small;margin-right: 12px;">已选择 {{ selectedEvents.length }} 个事件</span>
+          <el-button type="primary" size="small" @click="batchUpdateStatus('viewed')">
+            <el-icon><View /></el-icon>
+            批量标记已查看
+          </el-button>
+          <el-button type="warning" size="small" @click="batchUpdateStatus('flagged')">
+            <el-icon><Flag /></el-icon>
+            批量标记重要
+          </el-button>
+          <el-button type="info" size="small" @click="batchUpdateStatus('archived')">
+            <el-icon><FolderOpened /></el-icon>
+            批量归档
+          </el-button>
+          <el-button type="danger" size="small" @click="batchDeleteEvents">
+            <el-icon><Delete /></el-icon>
+            批量删除
+          </el-button>
+          <el-button size="small" @click="clearSelection">
+            清除选择
+          </el-button>
+        <!-- </el-space> -->
+      </div>
       <!-- 事件列表 -->
-      <el-table :data="eventList" :loading="loading" row-key="event_id" style="width: 100%">
+      <el-table :data="eventList" :loading="loading" row-key="event_id" style="width: 100%" 
+                @selection-change="handleSelectionChange">
+        <el-table-column type="selection" width="55" />
         <el-table-column prop="device_id" label="设备" min-width="120">
           <template #default="{ row }">
             <span>{{ getDeviceName(row.device_id) }}</span>
@@ -209,7 +236,7 @@
 <script>
 import { defineComponent, ref, reactive, onMounted } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { Search, Delete, View, Star, Download, StarFilled, ArrowDown } from '@element-plus/icons-vue';
+import { Search, Delete, View, Star, Download, StarFilled, ArrowDown, Flag, FolderOpened } from '@element-plus/icons-vue';
 import dayjs from 'dayjs';
 import { detectionEventApi } from '@/api/detection';
 import deviceApi from '@/api/device';
@@ -223,7 +250,9 @@ export default defineComponent({
     Star,
     Download,
     StarFilled,
-    ArrowDown
+    ArrowDown,
+    Flag,
+    FolderOpened
   },
   setup() {
     // 数据加载状态
@@ -234,12 +263,17 @@ export default defineComponent({
     const deviceList = ref([]);
     const eventTypes = ref([
       { label: '目标检测', value: 'object_detection' },
+      { label: '智能行为', value: 'smart_behavior' },
+      { label: '智能人数统计', value: 'smart_counting' },
       { label: '图像分割', value: 'segmentation' },
       { label: '关键点检测', value: 'keypoint' },
       { label: '姿态估计', value: 'pose' },
       { label: '人脸识别', value: 'face' },
       { label: '其他类型', value: 'other' }
     ]);
+
+    // 批量操作相关
+    const selectedEvents = ref([]);
 
     // 分页
     const page = ref(1);
@@ -320,6 +354,8 @@ export default defineComponent({
     const getEventTypeColor = (eventType) => {
       const colorMap = {
         'object_detection': 'primary',
+        'smart_behavior': 'success',
+        'smart_counting': 'warning',
         'segmentation': 'success',
         'keypoint': 'warning',
         'pose': 'danger',
@@ -333,6 +369,8 @@ export default defineComponent({
     const getEventTypeName = (eventType) => {
       const typeMap = {
         'object_detection': '目标检测',
+        'smart_behavior': '智能行为',
+        'smart_counting': '智能人数统计',
         'segmentation': '图像分割',
         'keypoint': '关键点检测',
         'pose': '姿态估计',
@@ -590,6 +628,91 @@ export default defineComponent({
       ElMessage.info('下载功能正在开发中');
     };
 
+    // 批量操作方法
+    const handleSelectionChange = (selection) => {
+      selectedEvents.value = selection;
+    };
+
+    const clearSelection = () => {
+      selectedEvents.value = [];
+    };
+
+    const batchUpdateStatus = async (status) => {
+      if (selectedEvents.value.length === 0) {
+        ElMessage.warning('请先选择要操作的事件');
+        return;
+      }
+
+      try {
+        const eventIds = selectedEvents.value.map(event => event.event_id);
+        await detectionEventApi.batchUpdateStatus(eventIds, status);
+        
+        // 更新本地数据
+        selectedEvents.value.forEach(selectedEvent => {
+          const event = eventList.value.find(e => e.event_id === selectedEvent.event_id);
+          if (event) {
+            event.status = status;
+          }
+        });
+        
+        ElMessage.success(`批量更新状态成功，共 ${eventIds.length} 个事件`);
+        clearSelection();
+      } catch (error) {
+        ElMessage.error('批量更新状态失败: ' + error.message);
+      }
+    };
+
+    const batchDeleteEvents = async () => {
+      if (selectedEvents.value.length === 0) {
+        ElMessage.warning('请先选择要删除的事件');
+        return;
+      }
+
+      ElMessageBox.confirm(
+        `确认删除选中的 ${selectedEvents.value.length} 个事件吗？此操作将同时删除相关的图片和视频文件。`,
+        '批量删除确认',
+        {
+          confirmButtonText: '确认删除',
+          cancelButtonText: '取消',
+          type: 'warning',
+          dangerouslyUseHTMLString: true
+        }
+      ).then(async () => {
+        try {
+          const eventIds = selectedEvents.value.map(event => event.event_id);
+          const response = await detectionEventApi.batchDeleteEvents(eventIds);
+          
+          // 从列表中移除已删除的事件
+          const deletedIds = new Set(eventIds);
+          eventList.value = eventList.value.filter(event => !deletedIds.has(event.event_id));
+          
+          // 如果当前查看的事件被删除，关闭模态框
+          if (selectedEvent.value && deletedIds.has(selectedEvent.value.event_id)) {
+            eventModalVisible.value = false;
+          }
+          
+          clearSelection();
+          
+          let message = `成功删除 ${response.data.deleted_count} 个事件`;
+          if (response.data.files_deleted && response.data.files_deleted.length > 0) {
+            message += `，同时删除了 ${response.data.files_deleted.length} 个文件`;
+          }
+          if (response.data.files_failed && response.data.files_failed.length > 0) {
+            message += `，${response.data.files_failed.length} 个文件删除失败`;
+          }
+          
+          ElMessage.success(message);
+          
+          // 如果有错误，显示详细信息
+          if (response.data.errors && response.data.errors.length > 0) {
+            console.warn('部分事件删除失败:', response.data.errors);
+          }
+        } catch (error) {
+          ElMessage.error('批量删除事件失败: ' + error.message);
+        }
+      }).catch(() => {});
+    };
+
     // 初始化
     onMounted(() => {
       loadDeviceList();
@@ -601,6 +724,7 @@ export default defineComponent({
       eventList,
       deviceList,
       eventTypes,
+      selectedEvents,
       page,
       pageSize,
       total,
@@ -635,7 +759,11 @@ export default defineComponent({
       showImagePreview,
       hasVideo,
       playVideo,
-      downloadEvent
+      downloadEvent,
+      handleSelectionChange,
+      clearSelection,
+      batchUpdateStatus,
+      batchDeleteEvents
     };
   }
 });
@@ -714,5 +842,16 @@ export default defineComponent({
   color: #909399;
   font-size: 12px;
   margin-left: auto;
+}
+
+.batch-operations {
+  padding: 12px 16px;
+  background-color: #f0f9ff;
+  border: 1px solid #e1f5fe;
+  border-radius: 6px;
+  margin-bottom: 16px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
 }
 </style> 

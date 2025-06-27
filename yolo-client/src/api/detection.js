@@ -150,6 +150,13 @@ export const detectionEventApi = {
     return apiClient.delete(`/detection/events/${eventId}`);
   },
   
+  // 批量删除检测事件
+  batchDeleteEvents(eventIds) {
+    return apiClient.post('/detection/events/batch-delete', {
+      event_ids: eventIds
+    });
+  },
+  
   // 批量更新事件状态
   batchUpdateStatus(eventIds, status) {
     return apiClient.put('/detection/events/batch-update', {

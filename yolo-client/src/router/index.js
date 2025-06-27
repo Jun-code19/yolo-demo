@@ -102,6 +102,15 @@ const routes = [
     }
   },
   {
+    path: '/detection/smart-config/:configId',
+    name: 'SmartConfigSetting',
+    component: () => import('../views/detection/SmartConfigSetting.vue'),
+    meta: {
+      requiresAuth: true,
+      title: '智能方案设置'
+    }
+  },
+  {
     path: '/push/config',
     name: 'PushConfig',
     component: () => import('../views/dataPush/PushConfig.vue'),

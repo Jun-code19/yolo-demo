@@ -229,11 +229,84 @@ def delete_device(device_id: str, db: Session = Depends(get_db), current_user: U
         raise HTTPException(status_code=404, detail="Device not found")
     
     device_name = device.device_name
+    device_ip = device.ip_address
+    
     try:
+        # 删除相关的检测配置及其所有关联数据
+        configs = db.query(DetectionConfig).filter(DetectionConfig.device_id == device_id).all()
+        for config in configs:
+            # 删除配置相关的数据推送配置（可选关联）
+            data_push_configs = db.query(DataPushConfig).filter(DataPushConfig.config_id == config.config_id).all()
+            for push_config in data_push_configs:
+                db.delete(push_config)
+            
+            # 删除配置相关的检测日志
+            detection_logs = db.query(DetectionLog).filter(DetectionLog.config_id == config.config_id).all()
+            for log in detection_logs:
+                db.delete(log)
+            
+            # 删除配置相关的性能记录
+            performance_records = db.query(DetectionPerformance).filter(DetectionPerformance.config_id == config.config_id).all()
+            for perf in performance_records:
+                db.delete(perf)
+            
+            # 删除配置相关的检测事件
+            events = db.query(DetectionEvent).filter(DetectionEvent.config_id == config.config_id).all()
+            for event in events:
+                # 删除事件关联的图片文件
+                try:
+                    if event.thumbnail_path and os.path.exists(event.thumbnail_path):
+                        os.remove(event.thumbnail_path)
+                    if event.snippet_path and os.path.exists(event.snippet_path):
+                        os.remove(event.snippet_path)
+                except OSError as e:
+                    print(f"删除事件文件失败: {e}")
+                
+                db.delete(event)
+            
+            # 删除检测配置
+            db.delete(config)
+        
+        # 删除设备级别的检测事件（可能存在没有config_id的旧事件）
+        device_events = db.query(DetectionEvent).filter(DetectionEvent.device_id == device_id).all()
+        for event in device_events:
+            # 删除事件关联的图片文件
+            try:
+                if event.thumbnail_path and os.path.exists(event.thumbnail_path):
+                    os.remove(event.thumbnail_path)
+                if event.snippet_path and os.path.exists(event.snippet_path):
+                    os.remove(event.snippet_path)
+            except OSError as e:
+                print(f"删除事件文件失败: {e}")
+            
+            db.delete(event)
+        
+        # 删除设备相关的性能记录（设备级别）
+        device_performance_records = db.query(DetectionPerformance).filter(DetectionPerformance.device_id == device_id).all()
+        for perf in device_performance_records:
+            db.delete(perf)
+        
+        # 删除设备相关的检测日志（设备级别）
+        device_logs = db.query(DetectionLog).filter(DetectionLog.device_id == device_id).all()
+        for log in device_logs:
+            db.delete(log)
+        
+        # 删除设备快照图片
+        try:
+            device_image_path = f"storage/devices/{device_ip}.jpg"
+            if os.path.exists(device_image_path):
+                os.remove(device_image_path)
+                print(f"删除设备图片: {device_image_path}")
+        except OSError as e:
+            print(f"删除设备图片失败: {e}")
+        
+        # 删除设备记录
         db.delete(device)
         db.commit()
-        log_action(db, current_user.user_id, 'delete_device', device_id, f"删除设备 {device_name}")
-        return {"message": "Device deleted successfully"}
+        
+        log_action(db, current_user.user_id, 'delete_device', device_id, 
+                  f"删除设备 {device_name} 及其相关数据和图片文件")
+        return {"message": "Device and related data deleted successfully"}
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
@@ -591,6 +664,14 @@ async def upload_model(
     # 检查权限（只有管理员可以上传模型）
     check_admin_permission(current_user)
     
+    # 检查文件大小 (2GB限制)
+    MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024  # 2GB
+    if models_file.size and models_file.size > MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=413, 
+            detail=f"文件太大。最大允许大小为 2GB，当前文件大小为 {models_file.size / (1024*1024*1024):.2f}GB"
+        )
+    
     # 检查文件格式
     file_ext = os.path.splitext(models_file.filename)[1].lower()
     if file_ext not in ['.pt', '.onnx', '.pth', '.weights']:
@@ -603,10 +684,19 @@ async def upload_model(
     models_dir = Path("models")
     models_dir.mkdir(exist_ok=True)
     
-    # 保存文件
+    # 流式保存文件，避免大文件内存问题
     file_path = models_dir / f"{models_id}{file_ext}"
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(models_file.file, buffer)
+    try:
+        with open(file_path, "wb") as buffer:
+            # 使用较小的块大小进行流式保存，避免内存溢出
+            chunk_size = 8192  # 8KB chunks
+            while chunk := models_file.file.read(chunk_size):
+                buffer.write(chunk)
+    except Exception as e:
+        # 如果保存失败，清理已创建的文件
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        raise HTTPException(status_code=500, detail=f"文件保存失败: {str(e)}")
     
     # 获取文件大小
     file_size = os.path.getsize(file_path)
@@ -675,21 +765,71 @@ def delete_model(models_id: str, db: Session = Depends(get_db),
     if not model:
         raise HTTPException(status_code=404, detail="Model not found")
     
-    # 删除文件
+    model_name = model.models_name
+    model_file_path = model.file_path
+    
     try:
-        os.remove(model.file_path)
-    except OSError as e:
-        # 如果文件不存在，继续删除数据库记录
-        print(f"Error deleting file: {e}")
-    
-    # 删除数据库记录
-    db.delete(model)
-    db.commit()
-    
-    # 记录操作日志
-    log_action(db, current_user.user_id, 'delete_model', models_id, f"Deleted model {model.models_name}")
-    
-    return {"message": "Model deleted successfully"}
+        # 检查是否有检测配置使用此模型
+        configs_using_model = db.query(DetectionConfig).filter(DetectionConfig.models_id == models_id).all()
+        if configs_using_model:
+            # 删除使用此模型的检测配置
+            for config in configs_using_model:
+                # 删除配置相关的数据推送配置（可选关联）
+                data_push_configs = db.query(DataPushConfig).filter(DataPushConfig.config_id == config.config_id).all()
+                for push_config in data_push_configs:
+                    db.delete(push_config)
+                
+                # 删除配置相关的检测日志
+                detection_logs = db.query(DetectionLog).filter(DetectionLog.config_id == config.config_id).all()
+                for log in detection_logs:
+                    db.delete(log)
+                
+                # 删除配置相关的性能记录
+                performance_records = db.query(DetectionPerformance).filter(DetectionPerformance.config_id == config.config_id).all()
+                for perf in performance_records:
+                    db.delete(perf)
+                
+                # 删除配置相关的检测事件
+                events = db.query(DetectionEvent).filter(DetectionEvent.config_id == config.config_id).all()
+                for event in events:
+                    # 删除事件关联的图片文件
+                    try:
+                        if event.thumbnail_path and os.path.exists(event.thumbnail_path):
+                            os.remove(event.thumbnail_path)
+                        if event.snippet_path and os.path.exists(event.snippet_path):
+                            os.remove(event.snippet_path)
+                    except OSError as e:
+                        print(f"删除事件文件失败: {e}")
+                    
+                    db.delete(event)
+                
+                # 删除检测计划（DetectionSchedule - 通过级联删除自动处理）
+                # 注意：DetectionSchedule在数据库模型中配置了cascade="all, delete-orphan"，所以会自动删除
+                
+                # 删除检测配置
+                db.delete(config)
+        
+        # 删除模型文件
+        try:
+            if os.path.exists(model_file_path):
+                os.remove(model_file_path)
+                print(f"删除模型文件: {model_file_path}")
+        except OSError as e:
+            # 如果文件不存在，继续删除数据库记录
+            print(f"删除模型文件失败: {e}")
+        
+        # 删除数据库记录
+        db.delete(model)
+        db.commit()
+        
+        # 记录操作日志
+        log_action(db, current_user.user_id, 'delete_model', models_id, 
+                  f"删除模型 {model_name} 及其相关配置和文件")
+        
+        return {"message": "Model and related configurations deleted successfully"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
 
 @router.put("/models/{models_id}", response_model=ModelResponse)
 def update_model(
@@ -751,10 +891,20 @@ class Point(BaseModel):
     y: float
 
 class AreaCoordinates(BaseModel):
-    type: Optional[str] = None
+    alertThreshold: Optional[int] = None # 报警阈值
+    analysisType: Optional[str] = None # 分析类型 counting/behavior
+    confidence: Optional[float] = None # 置信度阈值
+    countingInterval: Optional[int] = None # 计数间隔
+    countingType: Optional[str] = None # 计数类型 occupancy/flow
+    behaviorDirection: Optional[str] = None  # 方向 in/out
+    enableAlert: Optional[bool] = None # 是否启用报警
+    flowDirection: Optional[str] = None # 人流方向 in/out/bidirectional
+    flowPeriod: Optional[str] = None # 人流周期 10s/30s/60s/realtime
+    maxCapacity: Optional[int] = None # 最大容量 100
     points: Optional[List[Point]] = None  # 使用 Point 模型来表示坐标点
-    subtype: Optional[str] = None  # 可选值：directional（方向检测）、simple（普通检测）
-    direction: Optional[str] = None  # 方向（left_right/right_left/top_bottom/bottom_top）
+    pushLabel: Optional[str] = None # 推送标签
+    behaviorSubtype: Optional[str] = None  # 可选值：directional（方向检测）、simple（普通检测）
+    behaviorType: Optional[str] = None # 检测类型 area/line
 # 添加检测配置的Pydantic模型
 class DetectionConfigBase(BaseModel):
     device_id: str
@@ -780,7 +930,6 @@ class DetectionConfigUpdate(BaseModel):
     save_mode: Optional[str] = None
     save_duration: Optional[int] = None
     max_storage_days: Optional[int] = None
-    # area_type:Optional[str] = None
     area_coordinates:Optional[AreaCoordinates] = None
     schedule_config: Optional[Dict[str, Any]] = None  # 定时检测配置
 
@@ -803,7 +952,6 @@ class DetectionConfigDetailResponse(DetectionConfigBase):
     password: str
     models_name: str
     models_type: str
-    area_type: Optional[str] = None
     area_coordinates: dict # 定义为列表，包含坐标对
     created_at: datetime
     updated_at: datetime
@@ -933,7 +1081,6 @@ async def get_detection_configs(
             "save_mode": config.save_mode.value if hasattr(config.save_mode, "value") else config.save_mode,
             "save_duration": config.save_duration,
             "max_storage_days": config.max_storage_days,
-            "area_type": config.area_type,
             "area_coordinates": area_coordinates,
             "schedule_config": config.schedule_config,
             "created_at": config.created_at,
@@ -1116,15 +1263,7 @@ async def update_detection_config(
     if config_update.max_storage_days is not None:
         db_config.max_storage_days = config_update.max_storage_days
 
-    # if config_update.area_type is not None:  
-    #     db_config.area_type = config_update.area_type
-
     if config_update.area_coordinates is not None:  
-        # area_coordinates = config_update.area_coordinates
-        # if area_coordinates and isinstance(area_coordinates, dict) and "points" in area_coordinates and len(area_coordinates["points"]) > 0:
-        #     db_config.area_coordinates = area_coordinates
-        # else:
-        #     raise HTTPException(status_code=422, detail="Invalid area coordinates")
         db_config.area_coordinates = config_update.area_coordinates.dict()
     
     # 更新时间戳
@@ -1187,6 +1326,39 @@ async def delete_detection_config(
         raise HTTPException(status_code=404, detail="检测配置不存在")
     
     try:
+        # 删除相关的数据推送配置（可选关联）
+        data_push_configs = db.query(DataPushConfig).filter(DataPushConfig.config_id == config_id).all()
+        for push_config in data_push_configs:
+            db.delete(push_config)
+        
+        # 删除相关的检测日志
+        detection_logs = db.query(DetectionLog).filter(DetectionLog.config_id == config_id).all()
+        for log in detection_logs:
+            db.delete(log)
+        
+        # 删除相关的性能记录
+        performance_records = db.query(DetectionPerformance).filter(DetectionPerformance.config_id == config_id).all()
+        for perf in performance_records:
+            db.delete(perf)
+        
+        # 删除相关的检测事件
+        events = db.query(DetectionEvent).filter(DetectionEvent.config_id == config_id).all()
+        for event in events:
+            # 删除事件关联的图片文件
+            try:
+                if event.thumbnail_path and os.path.exists(event.thumbnail_path):
+                    os.remove(event.thumbnail_path)
+                if event.snippet_path and os.path.exists(event.snippet_path):
+                    os.remove(event.snippet_path)
+            except OSError as e:
+                print(f"删除事件文件失败: {e}")
+            
+            db.delete(event)
+        
+        # 删除检测计划（DetectionSchedule - 通过级联删除自动处理）
+        # 注意：DetectionSchedule在数据库模型中配置了cascade="all, delete-orphan"，所以会自动删除
+        
+        # 删除检测配置
         db.delete(db_config)
         db.commit()
         log_action(db, current_user.user_id, 'delete_detection_config', config_id, f"Deleted detection config {config_id}")
@@ -1553,20 +1725,146 @@ async def delete_detection_event(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)):
     """
-    删除检测事件
+    删除检测事件及其关联的图片文件
     """
     db_event = db.query(DetectionEvent).filter(DetectionEvent.event_id == event_id).first()
     if not db_event:
         raise HTTPException(status_code=404, detail="检测事件不存在")
     
     try:
+        # 删除关联的图片文件
+        files_deleted = []
+        files_failed = []
+        
+        # 删除缩略图
+        if db_event.thumbnail_path:
+            try:
+                if os.path.exists(db_event.thumbnail_path):
+                    os.remove(db_event.thumbnail_path)
+                    files_deleted.append(db_event.thumbnail_path)
+            except OSError as e:
+                files_failed.append(f"缩略图: {str(e)}")
+        
+        # 删除视频片段
+        if db_event.snippet_path:
+            try:
+                if os.path.exists(db_event.snippet_path):
+                    os.remove(db_event.snippet_path)
+                    files_deleted.append(db_event.snippet_path)
+            except OSError as e:
+                files_failed.append(f"视频片段: {str(e)}")
+        
+        # 删除数据库记录
         db.delete(db_event)
         db.commit()
-        log_action(db, current_user.user_id, 'delete_detection_event', event_id, f"Deleted detection event {event_id}")
-        return {"message": "检测事件已成功删除"}
+        
+        # 构建日志消息
+        log_message = f"删除检测事件 {event_id}"
+        if files_deleted:
+            log_message += f", 已删除文件: {', '.join(files_deleted)}"
+        if files_failed:
+            log_message += f", 文件删除失败: {', '.join(files_failed)}"
+        
+        log_action(db, current_user.user_id, 'delete_detection_event', event_id, log_message)
+        
+        return {
+            "message": "检测事件已成功删除",
+            "files_deleted": files_deleted,
+            "files_failed": files_failed
+        }
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"删除检测事件失败: {str(e)}")
+
+# 批量删除检测事件
+@router.post("/detection/events/batch-delete", tags=["检测事件"])
+async def batch_delete_detection_events(
+    request_data: Dict[str, List[str]],
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)):
+    """
+    批量删除检测事件及其关联的图片文件
+    """
+    try:
+        event_ids = request_data.get('event_ids', [])
+        if not event_ids:
+            raise HTTPException(status_code=400, detail="请提供要删除的事件ID列表")
+        
+        # 查询要删除的事件
+        events = db.query(DetectionEvent).filter(DetectionEvent.event_id.in_(event_ids)).all()
+        
+        if not events:
+            raise HTTPException(status_code=404, detail="未找到要删除的事件")
+        
+        deleted_count = 0
+        all_files_deleted = []
+        all_files_failed = []
+        errors = []
+        
+        for event in events:
+            try:
+                # 删除关联的图片文件
+                event_files_deleted = []
+                event_files_failed = []
+                
+                # 删除缩略图
+                if event.thumbnail_path:
+                    try:
+                        if os.path.exists(event.thumbnail_path):
+                            os.remove(event.thumbnail_path)
+                            event_files_deleted.append(event.thumbnail_path)
+                    except OSError as e:
+                        event_files_failed.append(f"缩略图: {str(e)}")
+                
+                # 删除视频片段
+                if event.snippet_path:
+                    try:
+                        if os.path.exists(event.snippet_path):
+                            os.remove(event.snippet_path)
+                            event_files_deleted.append(event.snippet_path)
+                    except OSError as e:
+                        event_files_failed.append(f"视频片段: {str(e)}")
+                
+                # 删除事件记录
+                db.delete(event)
+                deleted_count += 1
+                
+                all_files_deleted.extend(event_files_deleted)
+                all_files_failed.extend(event_files_failed)
+                
+            except Exception as e:
+                errors.append(f"删除事件 {event.event_id} 失败: {str(e)}")
+        
+        db.commit()
+        
+        # 构建日志消息
+        log_message = f"批量删除检测事件: 成功{deleted_count}个, 失败{len(errors)}个"
+        if all_files_deleted:
+            log_message += f", 已删除文件: {len(all_files_deleted)}个"
+        if all_files_failed:
+            log_message += f", 文件删除失败: {len(all_files_failed)}个"
+        
+        log_action(db, current_user.user_id, 'batch_delete_detection_events', '批量删除', log_message)
+        
+        result = {
+            "message": f"批量删除完成，成功删除 {deleted_count} 个事件",
+            "deleted_count": deleted_count,
+            "total_requested": len(event_ids),
+            "files_deleted": all_files_deleted,
+            "files_failed": all_files_failed
+        }
+        
+        if errors:
+            result["errors"] = errors
+            result["message"] += f"，{len(errors)} 个事件删除失败"
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"批量删除检测事件失败: {str(e)}")
 
 # 获取设备的检测统计数据
 @router.get("/detection/stats", response_model=List[dict], tags=["检测统计"])
@@ -2319,34 +2617,55 @@ def get_system_status(db: Session = Depends(get_db)):
             {"name": "网页服务", "status": "stopped"}
         ]
         
-        # 尝试从docker或系统服务获取状态
+        # 容器名称映射
+        container_patterns = [
+            'yolo-detect-server',    # 检测服务
+            'yolo-data-server',      # 数据服务  
+            'yolo-postgres',         # 数据库服务
+            'yolo-frontend'          # 网页服务
+        ]
+        
+        # 尝试从docker获取服务状态
         try:
-            # 尝试使用docker ps获取服务状态
-            docker_status_cmd = "docker ps --format '{{.Names}}'"
-            docker_result = subprocess.run(docker_status_cmd, shell=True, capture_output=True, text=True)
+            # 使用列表形式执行docker命令，避免引号问题，兼容Windows和Linux
+            docker_result = subprocess.run(
+                ['docker', 'ps', '--format', '{{.Names}}'], 
+                capture_output=True, 
+                text=True,
+                timeout=10
+            )
             
-            if docker_result.returncode == 0:
+            print(f"Docker命令返回码: {docker_result.returncode}")
+            print(f"Docker输出: '{docker_result.stdout}'")
+            if docker_result.stderr:
+                print(f"Docker错误: {docker_result.stderr}")
+            
+            if docker_result.returncode == 0 and docker_result.stdout.strip():
                 docker_output = docker_result.stdout.strip()
+                running_containers = docker_output.split('\n')
                 
-                # 解析docker输出，匹配实际的容器名称
-                if docker_output:
-                    running_containers = docker_output.split('\n')
-                    
-                    # 检测服务
-                    if any(container for container in running_containers if 'yolo-detect-server' in container):
+                print(f"运行中的容器: {running_containers}")
+                
+                # 使用精确匹配检查每个服务的状态
+                for container_name in running_containers:
+                    container_name = container_name.strip()
+                    if container_name == 'yolo-detect-server':
                         services[0]["status"] = "running"
-                    
-                    # 数据服务
-                    if any(container for container in running_containers if 'yolo-data-server' in container):
-                        services[1]["status"] = "running"
-                    
-                    # 数据库服务
-                    if any(container for container in running_containers if 'yolo-postgres' in container):
+                        print("检测服务: running")
+                    elif container_name == 'yolo-data-server':
+                        services[1]["status"] = "running" 
+                        print("数据服务: running")
+                    elif container_name == 'yolo-postgres':
                         services[2]["status"] = "running"
-                    
-                    # 网页服务
-                    if any(container for container in running_containers if 'yolo-frontend' in container):
+                        print("数据库服务: running")
+                    elif container_name == 'yolo-frontend':
                         services[3]["status"] = "running"
+                        print("网页服务: running")
+            else:
+                print("Docker命令执行失败或没有返回结果")
+                
+        except subprocess.TimeoutExpired:
+            print("Docker命令执行超时")
         except Exception as e:
             print(f"获取Docker服务状态失败: {str(e)}")
         
