@@ -30,14 +30,14 @@ class ObjectTracker:
         try:
             # Windows系统中文字体路径
             self.font_path = "C:/Windows/Fonts/simhei.ttf"  # 黑体
-            self.font = ImageFont.truetype(self.font_path, 24)
-            self.font_small = ImageFont.truetype(self.font_path, 18)
+            self.font = ImageFont.truetype(self.font_path, 30)
+            self.font_small = ImageFont.truetype(self.font_path, 24)
         except:
             try:
                 # 尝试其他常见中文字体
-                self.font_path = "C:/Windows/Fonts/msyh.ttc"  # 微软雅黑
-                self.font = ImageFont.truetype(self.font_path, 24)
-                self.font_small = ImageFont.truetype(self.font_path, 18)
+                self.font_path = "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"  # 微软雅黑
+                self.font = ImageFont.truetype(self.font_path, 30)
+                self.font_small = ImageFont.truetype(self.font_path, 24)
             except:
                 # 如果都找不到，使用默认字体
                 self.font = ImageFont.load_default()
@@ -472,21 +472,23 @@ class ObjectTracker:
         # 将OpenCV图像转换为PIL图像
         frame_pil = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
         draw = ImageDraw.Draw(frame_pil)
-        
         # 选择字体大小
-        if font_size <= 18:
+        if font_size <= 24:
             current_font = self.font_small
         else:
             current_font = self.font
-        
         # 绘制文字（PIL的颜色是RGB格式）
         pil_color = (color[2], color[1], color[0])  # BGR转RGB
-        draw.text(position, text, font=current_font, fill=pil_color)
-        
+
+        try:
+            draw.text(position, text, font=current_font, fill=pil_color)
+        except Exception as e:
+            print(f"绘制文字失败: {e}")
+
         # 将PIL图像转换回OpenCV图像
         frame_cv = cv2.cvtColor(np.array(frame_pil), cv2.COLOR_RGB2BGR)
         frame[:] = frame_cv[:]
-    
+
     def _draw_analysis_info(self, frame):
         """绘制智能分析信息"""
         if not self.area_coordinates:
@@ -500,7 +502,7 @@ class ObjectTracker:
             if counting_type == 'occupancy':
                 # 区域人数统计 - 显示当前人数
                 info_text = f"当前人数: {self.current_count}"
-                self._draw_chinese_text(frame, info_text, (10, 10), 24, (0, 255, 0))
+                self._draw_chinese_text(frame, info_text, (10, 10), 30, (0, 255, 0))
                 
                 # 显示今日统计
                 # today_text = f"今日进入: {self.today_in_count} | 今日离开: {self.today_out_count}"
@@ -519,7 +521,7 @@ class ObjectTracker:
                 else:
                     info_text = f"总通过: {self.today_in_count + self.today_out_count}"
                 
-                self._draw_chinese_text(frame, info_text, (10, 10), 24, (0, 255, 255))
+                self._draw_chinese_text(frame, info_text, (10, 10), 30, (0, 255, 255))
                 
         elif analysis_type == 'behavior':
             # 行为分析 - 显示检测模式
@@ -535,7 +537,7 @@ class ObjectTracker:
                 direction_text = '进入' if behavior_direction == 'in' else '离开'
                 info_text += f" ({direction_text})"
             
-            self._draw_chinese_text(frame, info_text, (10, 10), 20, (255, 165, 0))
+            self._draw_chinese_text(frame, info_text, (10, 10), 30, (255, 165, 0))
     
     def get_counting_stats(self):
         """获取计数统计信息"""

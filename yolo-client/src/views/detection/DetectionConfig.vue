@@ -295,7 +295,7 @@
                   </el-form-item>
                   <el-form-item label="执行时长" class="form-item">
                     <div class="input-with-unit">
-                      <el-input-number v-model="formState.scheduleDuration" :min="1" :max="120" :step="1"
+                      <el-input-number v-model="formState.scheduleDuration" :min="1" :max="1440" :step="5"
                         controls-position="right"></el-input-number>
                       <span class="unit-label">分钟</span>
                     </div>
@@ -775,6 +775,8 @@ export default defineComponent({
     const getModelTypeName = (type) => {
       const typeMap = {
         'object_detection': '目标检测',
+        'smart_behavior': '智能行为',
+        'smart_counting': '智能人数统计',
         'segmentation': '图像分割',
         'keypoint': '关键点检测',
         'pose': '姿态估计',
@@ -1350,19 +1352,35 @@ export default defineComponent({
 
     // 星期几选择辅助方法
     const selectAllWeekdays = () => {
-      formState.scheduleAdvWeekdays = ['0', '1', '2', '3', '4', '5', '6'];
+      if (formState.scheduleMode === 'simple') {
+        formState.scheduleDays = ['0', '1', '2', '3', '4', '5', '6'];
+      } else {
+        formState.scheduleAdvWeekdays = ['0', '1', '2', '3', '4', '5', '6'];
+      }
     };
 
     const selectWorkdays = () => {
-      formState.scheduleAdvWeekdays = ['1', '2', '3', '4', '5'];
+      if (formState.scheduleMode === 'simple') {
+        formState.scheduleDays = ['1', '2', '3', '4', '5'];
+      } else {
+        formState.scheduleAdvWeekdays = ['1', '2', '3', '4', '5'];
+      }
     };
 
     const selectWeekends = () => {
-      formState.scheduleAdvWeekdays = ['0', '6'];
+      if (formState.scheduleMode === 'simple') {
+        formState.scheduleDays = ['0', '6'];
+      } else {
+        formState.scheduleAdvWeekdays = ['0', '6'];
+      }
     };
 
     const clearWeekdays = () => {
-      formState.scheduleAdvWeekdays = [];
+      if (formState.scheduleMode === 'simple') {
+        formState.scheduleDays = [];
+      } else {
+        formState.scheduleAdvWeekdays = [];
+      }
     };
 
     // 每月日期选择辅助方法

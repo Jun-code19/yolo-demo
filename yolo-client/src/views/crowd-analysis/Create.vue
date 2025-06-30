@@ -292,6 +292,8 @@ const fetchAvailableModels = async () => {
 const getModelTypeName = (type) => {
   const typeMap = {
     'object_detection': '目标检测',
+    'smart_behavior': '智能行为',
+    'smart_counting': '智能人数统计',
     'segmentation': '图像分割',
     'keypoint': '关键点检测',
     'pose': '姿态估计',

@@ -352,6 +352,9 @@ class DetectionTask:
                                 self.object_tracker.set_area_coordinates(self.area_coordinates, detect_frame.shape)
                                 self.area_coordinates_set = True
                             
+                            # 绘制区域框提示
+                            self.draw_roi(detect_frame)
+
                             if detections:
                                 if self.models_type == 'pose':
                                     # 姿态检测结果
@@ -366,6 +369,7 @@ class DetectionTask:
                                             max_trajectory_length=self.max_trajectory_length,
                                             show_boxes=True,
                                         )
+
                                         # 处理智能分析事件
                                         self._process_smart_analysis_events(img_result, detections, speed)
                                     else:
@@ -1001,11 +1005,7 @@ class DetectionTask:
             return  # 没有客户端连接，跳过
         
         try:     
-            if(self.area_coordinates and self.area_coordinates['analysisType']): 
-                roi_type = self.area_coordinates['behaviorType'] if self.area_coordinates['analysisType'] == 'behavior' else self.area_coordinates['countingType']
-                roi_points = self.area_coordinates['points']
-                if roi_type and roi_points:
-                    self.draw_roi(pose_frame, roi_type, roi_points)   #暂时只是绘制区域显示，没有具体的作用还需要调整           
+            # self.draw_roi(pose_frame)   #暂时只是绘制区域显示，没有具体的作用还需要调整           
             
             # 将帧转换为JPEG，增加质量参数
             _, buffer = cv2.imencode('.jpg', pose_frame, [cv2.IMWRITE_JPEG_QUALITY, 90])  # 提高JPEG质量
@@ -1056,9 +1056,7 @@ class DetectionTask:
         h,w = frame_shape[:2]
         return [(int(p['x']*w), int(p['y']*h)) for p in points]
 
-    def draw_roi(self, frame, roi_type, roi_points, # 绘制线段/区域 ROI（支持line/area类型）
-            line_color=(0,255,0), fill_color=(0,0,0,0), 
-            thickness=2, line_type=cv2.LINE_AA): 
+    def draw_roi(self, frame, line_color=(0,255,0), fill_color=(0,0,0,0), thickness=2, line_type=cv2.LINE_AA): # 绘制线段/区域 ROI（支持line/area类型）
         """
         绘制线段/区域 ROI（支持line/area类型）
         :param frame: 输入图像
@@ -1069,6 +1067,15 @@ class DetectionTask:
         :param thickness: 线宽
         :param line_type: 线型（默认抗锯齿）
         """
+        roi_type = None
+        roi_points = None
+        # 获取区域配置
+        if(self.area_coordinates and self.area_coordinates['analysisType']): 
+            roi_type = self.area_coordinates['behaviorType'] if self.area_coordinates['analysisType'] == 'behavior' else self.area_coordinates['countingType']
+            roi_points = self.area_coordinates['points']
+        else:
+            return
+
         if roi_type not in ['line', 'area', 'occupancy', 'flow']:
             raise ValueError("Invalid ROI type. Must be 'line' or 'area' or 'occupancy' or 'flow'")
         
@@ -1836,7 +1843,7 @@ class DetectionServer:
             
             # 计算执行时间
             execution_time = (datetime.now() - start_time).total_seconds()
-            logger.info(f"全局清理任务执行完成 - 总执行时间: {execution_time:.2f}秒")
+            logger.info(f"全局清理任务执行完成 - 总执行时间: {execution_time:.2f}秒")           
             
         except Exception as e:
             logger.error(f"全局清理任务失败: {e}")
@@ -1904,7 +1911,7 @@ class DetectionServer:
                         total_deleted_files += deleted_files_count
                         processed_configs += 1
                         logger.info(f"配置 {config.config_id} (设备: {config.device_id}) 清理了 {deleted_events_count} 条过期事件 (>{max_storage_days}天), {deleted_files_count} 个文件")
-                
+                        
                 except Exception as e:
                     failed_configs += 1
                     logger.error(f"清理配置 {config.config_id} 的过期事件失败: {e}")
@@ -1915,6 +1922,7 @@ class DetectionServer:
                 db.commit()
             
             # 输出清理统计
+            log_action(db, 'admin', 'cleanup_detection_events', 'system', f"检测事件清理完成 - 处理配置 {processed_configs}/{len(configs)} 个, 失败 {failed_configs} 个")
             logger.info(f"检测事件清理完成 - 处理配置 {processed_configs}/{len(configs)} 个, 失败 {failed_configs} 个")
             logger.info(f"检测事件删除统计: {total_deleted_events} 条记录, {total_deleted_files} 个文件")
             
@@ -1977,7 +1985,7 @@ class DetectionServer:
             deleted_events_count = 0
             
             logger.info(f"开始清理外部数据事件，共有 {len(events_to_delete)} 条过期事件需要处理")
-            
+            log_action(db, 'admin', 'cleanup_external_events', 'system', f"开始清理外部数据事件，共有 {len(events_to_delete)} 条过期事件需要处理")
             # 删除关联的图片文件
             for event in events_to_delete:
                 try:

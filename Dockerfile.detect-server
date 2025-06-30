@@ -18,6 +18,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxrender-dev \
     libpq-dev \
     tzdata \
+    fonts-wqy-zenhei \
     && rm -rf /var/lib/apt/lists/*
     
 # 设置时区为中国标准时间
