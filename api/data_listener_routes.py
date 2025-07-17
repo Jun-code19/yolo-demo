@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timedelta
 import uuid
 import asyncio
 
@@ -571,6 +571,9 @@ async def get_external_events(
                 "algorithm_data": event.algorithm_data,
                 "status": event.status.value,
                 "processed": event.processed,
+                "viewed_at": event.viewed_at,
+                "viewed_by": event.viewed_by,
+                "notes": event.notes,
                 "timestamp": event.timestamp,
                 "created_at": event.created_at
             }
@@ -624,6 +627,9 @@ async def get_external_event(
                 "metadata": event.event_metadata,
                 "status": event.status.value,
                 "processed": event.processed,
+                "viewed_at": event.viewed_at,
+                "viewed_by": event.viewed_by,
+                "notes": event.notes,
                 "timestamp": event.timestamp,
                 "created_at": event.created_at
             }
@@ -633,6 +639,65 @@ async def get_external_event(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取事件详情失败: {str(e)}")
+
+@router.put("/events/{event_id}")
+async def update_external_event(
+    event_id: str,
+    update_data: Dict[str, Any],
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """更新外部事件状态、备注等信息"""
+    try:
+        event = db.query(ExternalEvent).filter(ExternalEvent.event_id == event_id).first()
+        if not event:
+            raise HTTPException(status_code=404, detail="事件不存在")
+        
+        # 更新状态
+        if 'status' in update_data:
+            try:
+                new_status = getattr(EventStatus, update_data['status'])
+                event.status = new_status
+            except AttributeError:
+                raise HTTPException(status_code=400, detail="无效的状态值")
+        
+        # 更新备注
+        if 'notes' in update_data:
+            event.notes = update_data['notes']
+        
+        # 更新查看信息
+        event.viewed_by = current_user.username
+        event.viewed_at = datetime.now()
+        
+        # 更新processed标志
+        if event.status != EventStatus.new and event.status != EventStatus.viewed:
+            event.processed = True
+        
+        db.commit()
+        db.refresh(event)
+        
+        # 记录操作日志
+        log_action(db, current_user.user_id, 'update_external_event', event_id,
+                  f"更新外部事件状态: {event.status.value}")
+        
+        return {
+            "status": "success",
+            "message": "事件更新成功",
+            "data": {
+                "event_id": event.event_id,
+                "status": event.status.value,
+                "processed": event.processed,
+                "viewed_by": event.viewed_by,
+                "viewed_at": event.viewed_at.isoformat() if event.viewed_at else None,
+                "notes": event.notes
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"更新事件失败: {str(e)}")
 
 @router.delete("/events/{event_id}")
 async def delete_external_event(
@@ -816,6 +881,89 @@ async def get_listener_stats_summary(
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取统计信息失败: {str(e)}")
+
+@router.get("/stats/overview")
+async def get_external_events_overview(db: Session = Depends(get_db)):
+    """
+    获取外部事件统计概览数据
+    """
+    try:
+        from sqlalchemy import func, and_
+        
+        # 获取当前日期（用于今日数据统计）
+        today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        one_hour_ago = datetime.now() - timedelta(hours=1)
+        
+        # 并行获取各种统计数据
+        
+        # 1. 今日总事件数
+        today_events = db.query(ExternalEvent).filter(
+            ExternalEvent.created_at >= today
+        ).count()
+        
+        # 2. 各状态事件数（今日）
+        new_events = db.query(ExternalEvent).filter(
+            and_(
+                ExternalEvent.status == EventStatus.new,
+                ExternalEvent.created_at >= today
+            )
+        ).count()
+        
+        viewed_events = db.query(ExternalEvent).filter(
+            and_(
+                ExternalEvent.status == EventStatus.viewed,
+                ExternalEvent.created_at >= today
+            )
+        ).count()
+        
+        flagged_events = db.query(ExternalEvent).filter(
+            and_(
+                ExternalEvent.status == EventStatus.flagged,
+                ExternalEvent.created_at >= today
+            )
+        ).count()
+        
+        archived_events = db.query(ExternalEvent).filter(
+            and_(
+                ExternalEvent.status == EventStatus.archived,
+                ExternalEvent.created_at >= today
+            )
+        ).count()
+        
+        # 3. 近1小时事件数
+        recent_1hour = db.query(ExternalEvent).filter(
+            ExternalEvent.created_at >= one_hour_ago
+        ).count()
+        
+        # 4. 报警事件数（今日）
+        alarms_today = db.query(ExternalEvent).filter(
+            and_(
+                ExternalEvent.event_type == ExternalEventType.alarm,
+                ExternalEvent.created_at >= today
+            )
+        ).count()
+        
+        # 计算已处理事件数（非新事件）
+        processed_events = viewed_events + flagged_events + archived_events
+        
+        return {
+            "status": "success",
+            "data": {
+                "total_today": today_events,
+                "processed_today": processed_events,
+                "recent_1hour": recent_1hour,
+                "alarms_today": alarms_today,
+                "status_breakdown": {
+                    "new": new_events,
+                    "viewed": viewed_events,
+                    "flagged": flagged_events,
+                    "archived": archived_events
+                }
+            }
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取外部事件统计失败: {str(e)}")
 
 # 批量操作接口
 

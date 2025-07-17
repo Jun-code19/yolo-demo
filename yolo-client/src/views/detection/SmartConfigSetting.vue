@@ -466,7 +466,7 @@ export default defineComponent({
 
           await detectionConfigApi.updateConfig(configId, {
             area_coordinates: {
-              analysisType: 'none',
+              analysisType: null,
               points: [],
               behaviorType: null,
               countingType: null,

@@ -1,59 +1,113 @@
 <template>
   <div class="push-config-container">
-    <el-card>
-      <template #header>
-        <div class="card-header">
-          <h2>数据推送配置</h2>
-          <el-button type="primary" @click="openCreateDialog">
-            <el-icon><Plus /></el-icon> 添加推送配置
-          </el-button>
-        </div>
-      </template>
+    <div class="card-header">
+      <div class="header-content">
+        <h2>数据推送配置</h2>
+        <p>管理数据推送配置，支持HTTP、TCP、MQTT等多种推送方式</p>
+      </div>
+      <div class="header-actions">
+        <el-button @click="loadPushConfigs" :loading="loading">
+          <el-icon>
+            <Refresh />
+          </el-icon>
+          刷新
+        </el-button>
+        <el-button type="primary" @click="openCreateDialog">
+          <el-icon>
+            <Plus />
+          </el-icon> 添加推送配置
+        </el-button>
+      </div>
 
-      <el-row :gutter="20">
+    </div>
+
+    <!-- 统计卡片 -->
+    <div class="stats-cards">
+      <el-row :gutter="16">
         <el-col :span="6">
-          <el-select v-model="filterConfigId" placeholder="按检测配置筛选" clearable style="width: 100%;" @change="loadPushConfigs">
-            <el-option
-              v-for="config in detectionConfigs"
-              :key="config.config_id"
-              :label="config.device_name || config.config_id"
-              :value="config.config_id"
-            />
-          </el-select>
+          <div class="stat-content">
+            <div class="stat-icon">
+              <el-icon color="#409EFF">
+                <Document />
+              </el-icon>
+            </div>
+            <div class="stat-info">
+              <div class="stat-value">{{ overview.total_configs || 0 }}</div>
+              <div class="stat-label">总配置数</div>
+            </div>
+          </div>
         </el-col>
         <el-col :span="6">
-          <el-select v-model="filterMethod" placeholder="按推送方式筛选" clearable style="width: 100%;" @change="filterPushConfigs">
-            <el-option label="HTTP" value="http" />
-            <el-option label="HTTPS" value="https" />
-            <el-option label="TCP" value="tcp" />
-            <el-option label="MQTT" value="mqtt" />
-          </el-select>
+          <div class="stat-content">
+            <div class="stat-icon">
+              <el-icon color="#67C23A">
+                <CircleCheck />
+              </el-icon>
+            </div>
+            <div class="stat-info">
+              <div class="stat-value">{{ overview.enabled_configs || 0 }}</div>
+              <div class="stat-label">启用配置</div>
+            </div>
+          </div>
         </el-col>
         <el-col :span="6">
-          <el-select v-model="filterTag" placeholder="按标签筛选" clearable style="width: 100%;" @change="filterPushConfigs">
-            <el-option
-              v-for="tag in allTags"
-              :key="tag"
-              :label="tag"
-              :value="tag"
-            />
-          </el-select>
+          <div class="stat-content">
+            <div class="stat-icon">
+              <el-icon color="#E6A23C">
+                <CircleCheck />
+              </el-icon>
+            </div>
+            <div class="stat-info">
+              <div class="stat-value">{{ overview.push_stats?.total_success || 0 }}</div>
+              <div class="stat-label">推送成功</div>
+            </div>
+          </div>
         </el-col>
-        <el-col :span="6" style="text-align: right;">
-          <el-button type="success" @click="loadPushConfigs">
-            <el-icon><Refresh /></el-icon> 刷新列表
-          </el-button>
+        <el-col :span="6">
+          <div class="stat-content">
+            <div class="stat-icon">
+              <el-icon color="#F56C6C">
+                <TrendCharts />
+              </el-icon>
+            </div>
+            <div class="stat-info">
+              <div class="stat-value">{{ overview.push_stats?.success_rate || 0 }}%</div>
+              <div class="stat-label">成功率</div>
+            </div>
+          </div>
         </el-col>
       </el-row>
+    </div>
 
-      <el-table :data="filteredPushConfigs" style="width: 100%; margin-top: 20px;" v-loading="loading">
+    <el-card class="filter-card">
+      <div class="filters">
+        <el-select v-model="filterConfigId" placeholder="按检测配置筛选" clearable style="width: 180px;"
+          @change="loadPushConfigs">
+          <el-option v-for="config in detectionConfigs" :key="config.config_id"
+            :label="config.device_name || config.config_id" :value="config.config_id" />
+        </el-select>
+
+        <el-select v-model="filterMethod" placeholder="按推送方式筛选" clearable style="width: 180px;"
+          @change="filterPushConfigs">
+          <el-option label="HTTP" value="http" />
+          <el-option label="HTTPS" value="https" />
+          <el-option label="TCP" value="tcp" />
+          <el-option label="MQTT" value="mqtt" />
+        </el-select>
+
+        <el-select v-model="filterTag" placeholder="按标签筛选" clearable style="width: 180px;" @change="filterPushConfigs">
+          <el-option v-for="tag in allTags" :key="tag" :label="tag" :value="tag" />
+        </el-select>
+      </div>
+    </el-card>
+
+
+    <el-card>
+      <el-table :data="pushConfigs" style="width: 100%; margin-top: 20px;" v-loading="loading">
         <el-table-column prop="push_name" label="推送名称" width="180" />
         <el-table-column prop="push_method" label="推送方式" width="100">
           <template #default="scope">
-            <el-tag
-              :type="getMethodTagType(scope.row.push_method)"
-              effect="plain"
-            >
+            <el-tag :type="getMethodTagType(scope.row.push_method)" effect="plain">
               {{ scope.row.push_method.toUpperCase() }}
             </el-tag>
           </template>
@@ -61,13 +115,7 @@
         <el-table-column label="标签" width="200">
           <template #default="scope">
             <div class="tag-container">
-              <el-tag
-                v-for="tag in scope.row.tags"
-                :key="tag"
-                size="small"
-                type="info"
-                class="tag-item"
-              >
+              <el-tag v-for="tag in scope.row.tags" :key="tag" size="small" type="info" class="tag-item">
                 {{ tag }}
               </el-tag>
               <span v-if="!scope.row.tags || scope.row.tags.length === 0">-</span>
@@ -89,14 +137,11 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="enabled" label="状态" width="100">
+        <el-table-column prop="enabled" label="状态" width="150">
           <template #default="scope">
-            <el-switch
-              v-model="scope.row.enabled"
-              @change="togglePushConfig(scope.row)"
-              active-color="#13ce66"
-              inactive-color="#ff4949"
-            />
+            <el-tag :type="scope.row.enabled ? 'success' : 'info'" effect="light">
+              {{ scope.row.enabled ? '已启用' : '已禁用' }}
+            </el-tag>
           </template>
         </el-table-column>
         <el-table-column label="推送统计" width="150">
@@ -116,90 +161,72 @@
             <div v-else>-</div>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="220" fixed="right">
+        <el-table-column label="操作" width="230" fixed="right">
           <template #default="scope">
             <el-button-group>
-              <el-button size="small" type="primary" @click="openEditDialog(scope.row)">
-                <el-icon><Edit /></el-icon> 编辑
+              <el-button size="small" type="info" @click="testPushConfig(scope.row)">
+                测试
               </el-button>
-              <el-button size="small" type="success" @click="testPushConfig(scope.row)">
-                <el-icon><Connection /></el-icon> 测试
+              <el-button size="small" :type="scope.row.enabled ? 'warning' : 'success'"
+                @click="togglePushConfig(scope.row)">
+                {{ scope.row.enabled ? '停用' : '启用' }}
+              </el-button>
+              <el-button size="small" type="primary" @click="openEditDialog(scope.row)">
+                编辑
               </el-button>
               <el-button size="small" type="danger" @click="confirmDelete(scope.row)">
-                <el-icon><Delete /></el-icon> 删除
+                删除
               </el-button>
             </el-button-group>
           </template>
         </el-table-column>
       </el-table>
+
+      <!-- 分页 -->
+      <div class="pagination" v-if="totalCount > 0">
+        <el-pagination v-model:current-page="currentPage" v-model:page-size="pageSize" :page-sizes="[20, 50, 100, 200]"
+          :total="totalCount" layout="prev, pager, next, jumper, ->, total, sizes" @size-change="handleSizeChange"
+          @current-change="handleCurrentChange" />
+      </div>
     </el-card>
 
     <!-- 创建/编辑推送配置对话框 -->
-    <el-dialog
-      v-model="dialogVisible"
-      :title="isEdit ? '编辑推送配置' : '创建推送配置'"
-      width="60%"
-    >
-      <el-form
-        ref="pushFormRef"
-        :model="pushForm"
-        label-width="120px"
-        :rules="formRules"
-      >
+    <el-dialog v-model="dialogVisible" :title="isEdit ? '编辑推送配置' : '创建推送配置'" width="60%">
+      <el-form ref="pushFormRef" :model="pushForm" label-width="120px" :rules="formRules">
         <el-form-item label="推送名称" prop="push_name">
           <el-input v-model="pushForm.push_name" placeholder="请输入推送配置名称" />
         </el-form-item>
-        
+
         <el-form-item label="标签" prop="tags">
-          <el-select
-            v-model="pushForm.tags"
-            multiple
-            filterable
-            allow-create
-            default-first-option
-            placeholder="请选择或输入标签（可多选）"
-            style="width: 100%;"
-          >
-            <el-option
-              v-for="tag in commonTags"
-              :key="tag"
-              :label="tag"
-              :value="tag"
-            />
+          <el-select v-model="pushForm.tags" multiple filterable allow-create default-first-option
+            placeholder="请选择或输入标签（可多选）" style="width: 100%;">
+            <el-option v-for="tag in commonTags" :key="tag" :label="tag" :value="tag" />
           </el-select>
           <div class="form-help-text">
             标签用于将推送配置应用于不同的数据源，例如：detection、device_123、alarm
           </div>
         </el-form-item>
-        
+
         <el-form-item label="检测配置" prop="config_id">
-          <el-select 
-            v-model="pushForm.config_id" 
-            placeholder="选择关联的检测配置（可选）" 
-            clearable
-            style="width: 100%;"
-          >
-            <el-option
-              v-for="config in detectionConfigs"
-              :key="config.config_id"
-              :label="config.device_name || config.config_id"
-              :value="config.config_id"
-            />
+          <el-select v-model="pushForm.config_id" placeholder="选择关联的检测配置（可选）" clearable style="width: 100%;">
+            <el-option v-for="config in detectionConfigs" :key="config.config_id"
+              :label="config.device_name || config.config_id" :value="config.config_id" />
           </el-select>
           <div class="form-help-text">
             可以不绑定特定检测配置，而是通过标签关联到不同的数据源
           </div>
         </el-form-item>
-        
+
         <el-form-item label="推送方式" prop="push_method">
-          <el-select v-model="pushForm.push_method" placeholder="选择推送方式" style="width: 100%;" @change="handleMethodChange">
+          <el-select v-model="pushForm.push_method" placeholder="选择推送方式" style="width: 100%;"
+            @change="handleMethodChange">
             <el-option label="HTTP" value="http" />
             <el-option label="HTTPS" value="https" />
             <el-option label="TCP" value="tcp" />
             <el-option label="MQTT" value="mqtt" />
           </el-select>
         </el-form-item>
-        
+
         <!-- HTTP/HTTPS 特有字段 -->
         <template v-if="pushForm.push_method === 'http' || pushForm.push_method === 'https'">
           <el-form-item label="推送URL" prop="http_url">
@@ -212,24 +239,26 @@
             </el-select>
           </el-form-item>
         </template>
-        
+
         <!-- TCP 特有字段 -->
         <template v-if="pushForm.push_method === 'tcp'">
           <el-form-item label="TCP主机" prop="tcp_host">
             <el-input v-model="pushForm.tcp_host" placeholder="请输入TCP服务器主机" />
           </el-form-item>
           <el-form-item label="TCP端口" prop="tcp_port">
-            <el-input-number v-model="pushForm.tcp_port" :min="1" :max="65535" placeholder="请输入TCP服务器端口" style="width: 100%;" />
+            <el-input-number v-model="pushForm.tcp_port" :min="1" :max="65535" placeholder="请输入TCP服务器端口"
+              style="width: 100%;" />
           </el-form-item>
         </template>
-        
+
         <!-- MQTT 特有字段 -->
         <template v-if="pushForm.push_method === 'mqtt'">
           <el-form-item label="MQTT代理" prop="mqtt_broker">
             <el-input v-model="pushForm.mqtt_broker" placeholder="请输入MQTT代理服务器地址" />
           </el-form-item>
           <el-form-item label="MQTT端口" prop="mqtt_port">
-            <el-input-number v-model="pushForm.mqtt_port" :min="1" :max="65535" :step="1" placeholder="请输入MQTT端口" style="width: 100%;" />
+            <el-input-number v-model="pushForm.mqtt_port" :min="1" :max="65535" :step="1" placeholder="请输入MQTT端口"
+              style="width: 100%;" />
           </el-form-item>
           <el-form-item label="MQTT主题" prop="mqtt_topic">
             <el-input v-model="pushForm.mqtt_topic" placeholder="请输入MQTT主题" />
@@ -244,13 +273,13 @@
             <el-switch v-model="pushForm.mqtt_use_tls" />
           </el-form-item>
         </template>
-        
+
         <!-- 通用字段 -->
         <el-form-item label="包含图像数据">
           <el-switch v-model="pushForm.include_image" />
         </el-form-item>
       </el-form>
-      
+
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
         <el-button type="primary" @click="savePushConfig" :loading="saving">保存</el-button>
@@ -264,29 +293,34 @@ import { ref, reactive, onMounted, computed } from 'vue';
 import { dataPushApi } from '../../api/data_push';
 import { detectionConfigApi } from '../../api/detection';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { Plus, Edit, Delete, Refresh, Connection } from '@element-plus/icons-vue';
+import { Plus, Refresh, Document, CircleCheck, TrendCharts } from '@element-plus/icons-vue';
 
 export default {
   name: 'PushConfig',
   components: {
     Plus,
-    Edit,
-    Delete,
     Refresh,
-    Connection
+    Document,
+    CircleCheck,
+    TrendCharts
   },
   setup() {
     const pushConfigs = ref([]);
-    const filteredPushConfigs = ref([]);
     const detectionConfigs = ref([]);
     const filterConfigId = ref('');
     const filterMethod = ref('');
     const filterTag = ref('');
     const pushStats = ref({});
+    const overview = ref({});
     const loading = ref(false);
     const saving = ref(false);
     const dialogVisible = ref(false);
     const isEdit = ref(false);
+
+    // 分页相关
+    const currentPage = ref(1);
+    const pageSize = ref(20);
+    const totalCount = ref(0);
     const pushForm = reactive({
       push_id: '',
       push_name: '',
@@ -306,14 +340,14 @@ export default {
       include_image: false
     });
     const pushFormRef = ref(null)
-    
+
     const commonTags = ref([
       'detection',
       'alarm',
       'system',
       'statistics'
     ]);
-    
+
     const allTags = computed(() => {
       const tags = new Set();
       pushConfigs.value.forEach(config => {
@@ -323,7 +357,7 @@ export default {
       });
       return Array.from(tags);
     });
-    
+
     const formRules = {
       push_name: [
         { required: true, message: '请输入推送名称', trigger: 'blur' }
@@ -347,7 +381,7 @@ export default {
         { required: true, message: '请输入MQTT主题', trigger: 'blur' }
       ]
     };
-    
+
     const loadPushConfigs = async () => {
       loading.value = true;
       try {
@@ -355,11 +389,29 @@ export default {
           const configResponse = await detectionConfigApi.getConfigs();
           detectionConfigs.value = configResponse.data.data || [];
         }
-        
-        const response = await dataPushApi.getPushConfigs(filterConfigId.value || null);
-        if (response.data && response.data.configs) {
-          pushConfigs.value = response.data.configs;
-          filteredPushConfigs.value = [...pushConfigs.value];
+
+        // 构建查询参数
+        const skip = (currentPage.value - 1) * pageSize.value;
+        const params = {
+          skip,
+          limit: pageSize.value
+        };
+
+        // 添加筛选条件
+        if (filterConfigId.value) {
+          params.config_id = filterConfigId.value;
+        }
+        if (filterTag.value) {
+          params.tag = filterTag.value;
+        }
+        if (filterMethod.value) {
+          params.method = filterMethod.value;
+        }
+
+        const response = await dataPushApi.getPushConfigs(params);
+        if (response.data && response.data.data) {
+          pushConfigs.value = response.data.data;
+          totalCount.value = response.data.total;
           await loadPushStats();
         }
       } catch (error) {
@@ -369,7 +421,18 @@ export default {
         loading.value = false;
       }
     };
-    
+
+    const loadOverview = async () => {
+      try {
+        const response = await dataPushApi.getPushOverview();
+        if (response.data && response.data.data) {
+          overview.value = response.data.data;
+        }
+      } catch (error) {
+        // console.error('加载概览统计失败:', error);
+      }
+    };
+
     const loadPushStats = async () => {
       try {
         const response = await dataPushApi.getPushStats();
@@ -378,34 +441,18 @@ export default {
         // console.error('加载推送统计信息失败:', error);
       }
     };
-    
+
     const filterPushConfigs = () => {
-      let filtered = [...pushConfigs.value];
-      
-      // 按推送方式筛选
-      if (filterMethod.value) {
-        filtered = filtered.filter(config => 
-          config.push_method === filterMethod.value
-        );
-      }
-      
-      // 按标签筛选
-      if (filterTag.value) {
-        filtered = filtered.filter(config => 
-          config.tags && Array.isArray(config.tags) && 
-          config.tags.includes(filterTag.value)
-        );
-      }
-      
-      filteredPushConfigs.value = filtered;
+      currentPage.value = 1; // 重置到第一页
+      loadPushConfigs(); // 重新加载数据
     };
-    
+
     const openCreateDialog = () => {
       isEdit.value = false;
       resetForm();
       dialogVisible.value = true;
     };
-    
+
     const openEditDialog = (row) => {
       isEdit.value = true;
       resetForm();
@@ -416,7 +463,7 @@ export default {
       });
       dialogVisible.value = true;
     };
-    
+
     const resetForm = () => {
       pushForm.push_id = '';
       pushForm.push_name = '';
@@ -434,54 +481,56 @@ export default {
       pushForm.mqtt_use_tls = false;
       pushForm.include_image = false;
     };
-    
+
     const handleMethodChange = () => {
       if (pushForm.value) {
         pushForm.value.clearValidate();
       }
     };
-    
-    const savePushConfig = async () => {
-        if (!pushFormRef.value) return
 
-        await pushFormRef.value.validate(async (valid) => {
-          if (valid) {
-            saving.value = true;
-            try {
-              if (isEdit.value) {
-                const pushId = pushForm.push_id;
-                const updateData = { ...pushForm };
-                delete updateData.push_id;
-                await dataPushApi.updatePushConfig(pushId, updateData);
-                ElMessage.success('推送配置已更新');
-              } else {
-                await dataPushApi.createPushConfig(pushForm);
-                ElMessage.success('推送配置已创建');
-              }
-              dialogVisible.value = false;
-              await loadPushConfigs();
-            } catch (error) {
-              // console.error('保存推送配置失败:', error);
-              ElMessage.error(`保存推送配置失败: ${error.response?.data?.detail || error.message}`);
-            } finally {
-              saving.value = false;
+    const savePushConfig = async () => {
+      if (!pushFormRef.value) return
+
+      await pushFormRef.value.validate(async (valid) => {
+        if (valid) {
+          saving.value = true;
+          try {
+            if (isEdit.value) {
+              const pushId = pushForm.push_id;
+              const updateData = { ...pushForm };
+              delete updateData.push_id;
+              await dataPushApi.updatePushConfig(pushId, updateData);
+              ElMessage.success('推送配置已更新');
+            } else {
+              await dataPushApi.createPushConfig(pushForm);
+              ElMessage.success('推送配置已创建');
             }
+            dialogVisible.value = false;
+            await loadPushConfigs();
+            await loadOverview();
+          } catch (error) {
+            // console.error('保存推送配置失败:', error);
+            ElMessage.error(`保存推送配置失败: ${error.response?.data?.detail || error.message}`);
+          } finally {
+            saving.value = false;
           }
-        });
+        }
+      });
     };
-    
+
     const togglePushConfig = async (row) => {
       try {
-        await dataPushApi.updatePushConfig(row.push_id, { enabled: row.enabled });
+        await dataPushApi.updatePushConfig(row.push_id, { enabled: !row.enabled });
         ElMessage.success(`已${row.enabled ? '启用' : '禁用'}推送配置`);
         await loadPushConfigs();
+        await loadOverview();
       } catch (error) {
         // console.error('更新推送配置状态失败:', error);
         ElMessage.error('更新推送配置状态失败');
         row.enabled = !row.enabled;
       }
     };
-    
+
     const testPushConfig = async (row) => {
       try {
         loading.value = true;
@@ -499,7 +548,7 @@ export default {
         loading.value = false;
       }
     };
-    
+
     const confirmDelete = (row) => {
       ElMessageBox.confirm(
         '确定要删除此推送配置吗?',
@@ -515,6 +564,7 @@ export default {
             await dataPushApi.deletePushConfig(row.push_id);
             ElMessage.success('推送配置已删除');
             await loadPushConfigs();
+            await loadOverview();
           } catch (error) {
             // console.error('删除推送配置失败:', error);
             ElMessage.error('删除推送配置失败');
@@ -524,7 +574,7 @@ export default {
           // 用户取消操作
         });
     };
-    
+
     const formatUrl = (url) => {
       if (!url) return '-';
       if (url.length > 40) {
@@ -532,13 +582,13 @@ export default {
       }
       return url;
     };
-    
+
     const formatTime = (timeStr) => {
       if (!timeStr) return '-';
       const date = new Date(timeStr);
       return date.toLocaleString();
     };
-    
+
     const getMethodTagType = (method) => {
       switch (method) {
         case 'http': return 'success';
@@ -548,27 +598,40 @@ export default {
         default: return 'info';
       }
     };
-    
+
+    // 分页处理方法
+    const handleSizeChange = (val) => {
+      pageSize.value = val;
+      loadPushConfigs(); // 重新加载数据
+    };
+
+    const handleCurrentChange = (val) => {
+      currentPage.value = val;
+      loadPushConfigs(); // 重新加载数据
+    };
+
     onMounted(() => {
       loadPushConfigs();
+      loadOverview();
       // const statsInterval = setInterval(() => {
       //   loadPushStats();
+      //   loadOverview();
       // }, 30000);
-      
+
       // return () => {
       //   clearInterval(statsInterval);
       // };
     });
-    
+
     return {
       pushFormRef,
       pushConfigs,
-      filteredPushConfigs,
       detectionConfigs,
       filterConfigId,
       filterMethod,
       filterTag,
       pushStats,
+      overview,
       loading,
       saving,
       dialogVisible,
@@ -577,7 +640,11 @@ export default {
       formRules,
       commonTags,
       allTags,
+      currentPage,
+      pageSize,
+      totalCount,
       loadPushConfigs,
+      loadOverview,
       filterPushConfigs,
       openCreateDialog,
       openEditDialog,
@@ -588,7 +655,9 @@ export default {
       confirmDelete,
       formatUrl,
       formatTime,
-      getMethodTagType
+      getMethodTagType,
+      handleSizeChange,
+      handleCurrentChange
     };
   }
 };
@@ -603,6 +672,7 @@ export default {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  margin-bottom: 20px;
 }
 
 .card-header h2 {
@@ -626,4 +696,58 @@ export default {
   margin-top: 4px;
   line-height: 1.4;
 }
-</style> 
+
+.header-content p {
+  margin: 0;
+  color: #666;
+  font-size: 14px;
+}
+
+.filter-card {
+  margin-bottom: 20px;
+}
+
+.filters {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+/* 分页样式 */
+.pagination {
+  margin-top: 20px;
+  text-align: right;
+}
+
+/* 统计卡片样式 */
+.stats-cards {
+  margin-bottom: 20px;
+}
+
+.stat-content {
+  display: flex;
+  align-items: center;
+  padding: 16px;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.stat-icon {
+  font-size: 32px;
+  margin-right: 16px;
+}
+
+.stat-value {
+  font-size: 24px;
+  font-weight: 600;
+  color: #333;
+}
+
+.stat-label {
+  font-size: 12px;
+  color: #666;
+  margin-top: 4px;
+}
+</style>

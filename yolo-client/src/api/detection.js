@@ -164,9 +164,9 @@ export const detectionEventApi = {
       status: status
     });
   },
-  
-  // 获取事件统计信息
-  getEventStats(params = {}) {
-    return apiClient.get('/detection/events/stats', { params });
+
+  // 获取检测事件统计概览
+  getEventsStatsOverview() {
+    return apiClient.get('/detection/stats');
   }
 };

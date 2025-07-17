@@ -2,8 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File,
 from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
-from src.database import get_db, Device, AnalysisResult, Alarm, User, SysLog, DetectionModel, DetectionConfig, DetectionEvent, DetectionSchedule, DetectionStat, DetectionPerformance, SaveMode, EventStatus, DetectionFrequency, DetectionLog, CrowdAnalysisJob,CrowdAnalysisResult, DataPushConfig, EdgeServer,ExternalEvent
-from pydantic import BaseModel,Field
+from src.database import get_db, Device, AnalysisResult, Alarm, User, SysLog, DetectionModel, DetectionConfig, DetectionEvent, DetectionSchedule, DetectionStat, DetectionPerformance, SaveMode, EventStatus, DetectionFrequency, DetectionLog, CrowdAnalysisJob,CrowdAnalysisResult, DataPushConfig, EdgeServer,ExternalEvent,ListenerConfig
+from pydantic import BaseModel, Field, validator
 from fastapi.security import OAuth2PasswordRequestForm
 from api.auth import authenticate_user, create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES, get_current_user, check_admin_permission, get_password_hash, verify_password
 from api.logger import log_action
@@ -366,8 +366,15 @@ class UserCreate(BaseModel):
     user_id: str
     username: str
     password: str
-    role: str
+    role: str = Field(..., description="用户角色，可选值: admin, operator, auditor")
     allowed_devices: List[str] = []
+    
+    @validator('role')
+    def validate_role(cls, v):
+        valid_roles = ['admin', 'operator', 'auditor']
+        if v not in valid_roles:
+            raise ValueError(f'角色必须是以下值之一: {", ".join(valid_roles)}')
+        return v
 
 class UserUpdate(BaseModel):
     username: str
@@ -379,8 +386,69 @@ class PasswordUpdate(BaseModel):
     new_password: str
 
 # 用户管理API
+@router.get("/users/", response_model=dict)
+def get_users(
+    skip: int = 0, 
+    limit: int = 100, 
+    role: Optional[str] = None,
+    username: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(check_admin_permission)
+):
+    """获取用户列表，支持筛选参数"""
+    query = db.query(User)
+    
+    # 应用筛选条件
+    if role:
+        query = query.filter(User.role == role)
+    
+    if username:
+        query = query.filter(User.username.ilike(f"%{username}%"))
+    
+    # 获取总数（应用筛选条件后的）
+    total_count = query.count()
+    
+    # 应用分页
+    result = query.order_by(User.created_at.desc() if hasattr(User, 'created_at') else User.user_id).offset(skip).limit(limit).all()
+    
+    # 转换结果，不返回密码哈希
+    users_data = []
+    for user in result:
+        user_dict = {
+            "user_id": user.user_id,
+            "username": user.username,
+            "role": user.role,
+            "allowed_devices": user.allowed_devices or []
+        }
+        users_data.append(user_dict)
+    
+    # 返回包含总数的响应
+    return {
+        "data": users_data,
+        "total": total_count,
+        "filters": {
+            "role": role,
+            "username": username
+        }
+    }
+
 @router.post("/users/", response_model=dict)
 def create_user(user: UserCreate, db: Session = Depends(get_db), current_user: User = Depends(check_admin_permission)):
+    # 检查用户ID是否已存在
+    existing_user = db.query(User).filter(User.user_id == user.user_id).first()
+    if existing_user:
+        raise HTTPException(status_code=400, detail="用户ID已存在")
+    
+    # 检查用户名是否已存在
+    existing_username = db.query(User).filter(User.username == user.username).first()
+    if existing_username:
+        raise HTTPException(status_code=400, detail="用户名已存在")
+    
+    # 验证角色值
+    valid_roles = ['admin', 'operator', 'auditor']
+    if user.role not in valid_roles:
+        raise HTTPException(status_code=400, detail=f"无效的角色值。允许的角色: {', '.join(valid_roles)}")
+    
     # 哈希处理密码
     hashed_password = get_password_hash(user.password)
     db_user = User(
@@ -453,6 +521,33 @@ def update_user_password(password_data: PasswordUpdate, current_user: User = Dep
         log_action(db, current_user.user_id, 'change_password', target_user.user_id, f"更新用户 {target_user.username} 的密码")
         
         return {"message": "密码更新成功"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.delete("/users/{user_id}")
+def delete_user(user_id: str, db: Session = Depends(get_db), current_user: User = Depends(check_admin_permission)):
+    """删除用户"""
+    # 不能删除自己
+    if current_user.user_id == user_id:
+        raise HTTPException(status_code=400, detail="不能删除自己的账户")
+    
+    # 查找用户
+    user = db.query(User).filter(User.user_id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    
+    username = user.username
+    
+    try:
+        # 删除用户
+        db.delete(user)
+        db.commit()
+        
+        # 记录操作日志
+        log_action(db, current_user.user_id, 'delete_user', user_id, f"删除用户 {username}")
+        
+        return {"message": "用户删除成功"}
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
@@ -577,37 +672,6 @@ def initialize_system(admin_data: UserCreate, db: Session = Depends(get_db)):
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
-
-# 调试API
-@router.get("/debug/users")
-def debug_users(db: Session = Depends(get_db)):
-    """仅用于调试：获取所有用户信息"""
-    users = db.query(User).all()
-    result = []
-    for user in users:
-        user_info = {
-            "user_id": user.user_id,
-            "username": user.username,
-            "role": user.role,
-            "password_hash_prefix": user.password_hash[:10] + "..." if user.password_hash else None
-        }
-        result.append(user_info)
-    return result
-
-@router.get("/debug/user/{username}")
-def debug_user(username: str, db: Session = Depends(get_db)):
-    """仅用于调试：检查特定用户的信息"""
-    user = db.query(User).filter(User.username == username).first()
-    if not user:
-        return {"message": f"用户 {username} 不存在"}
-    
-    return {
-        "user_id": user.user_id,
-        "username": user.username,
-        "role": user.role,
-        "password_hash": user.password_hash,
-        "is_bcrypt": user.password_hash.startswith("$2") if user.password_hash else False
-    }
 
 # 模型相关的Pydantic模型
 class ModelBase(BaseModel):
@@ -1662,19 +1726,19 @@ async def update_detection_event(
     if event_update.notes is not None:
         db_event.notes = event_update.notes
     
-    if event_update.viewed_by is not None:
-        # 检查用户是否存在
-        user = db.query(User).filter(User.user_id == event_update.viewed_by).first()
-        if not user:
-            raise HTTPException(status_code=404, detail="用户不存在")
-        db_event.viewed_by = event_update.viewed_by
-        db_event.viewed_at = datetime.now()
+    # if event_update.viewed_by is not None:
+    #     # 检查用户是否存在
+    #     user = db.query(User).filter(User.user_id == event_update.viewed_by).first()
+    #     if not user:
+    #         raise HTTPException(status_code=404, detail="用户不存在")
+    db_event.viewed_by = current_user.username
+    db_event.viewed_at = datetime.now()
     
     try:
         db.commit()
         db.refresh(db_event)
         
-        log_action(db, current_user.user_id, 'update_detection_event', db_event.event_id, f"Updated detection event {db_event.event_id}")
+        log_action(db, current_user.user_id, 'update_detection_event', db_event.event_id, f"更新检测事件状态，状态为{db_event.status.value}")
         # 确保bounding_box是字典
         bounding_box = db_event.bounding_box
         if isinstance(bounding_box, str):
@@ -1866,40 +1930,82 @@ async def batch_delete_detection_events(
         db.rollback()
         raise HTTPException(status_code=500, detail=f"批量删除检测事件失败: {str(e)}")
 
-# 获取设备的检测统计数据
-@router.get("/detection/stats", response_model=List[dict], tags=["检测统计"])
-async def get_detection_stats(
-    device_id: Optional[str] = None,
-    start_date: Optional[datetime] = None,
-    end_date: Optional[datetime] = None,
-    db: Session = Depends(get_db)):
+# 获取检测事件统计概览
+@router.get("/detection/stats", tags=["检测事件"])
+async def get_detection_events_overview(db: Session = Depends(get_db)):
     """
-    获取设备的检测统计数据
+    获取检测事件统计概览数据
     """
-    query = db.query(DetectionStat)
-    
-    if device_id:
-        query = query.filter(DetectionStat.device_id == device_id)
-    if start_date:
-        query = query.filter(DetectionStat.date >= start_date)
-    if end_date:
-        query = query.filter(DetectionStat.date <= end_date)
-    
-    stats = query.order_by(DetectionStat.date).all()
-    
-    result = []
-    for stat in stats:
-        result.append({
-            "stat_id": stat.stat_id,
-            "device_id": stat.device_id,
-            "date": stat.date,
-            "total_events": stat.total_events,
-            "by_class": stat.by_class,
-            "peak_hour": stat.peak_hour,
-            "peak_hour_count": stat.peak_hour_count
-        })
-    
-    return result
+    try:
+        # 获取当前日期（用于今日数据统计）
+        today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        
+        # 并行获取各种统计数据
+        from sqlalchemy import func, and_
+        
+        # 1. 今日总事件数
+        today_events = db.query(DetectionEvent).filter(
+            DetectionEvent.created_at >= today
+        ).count()
+        
+        # 2. 各状态事件数
+        new_events = db.query(DetectionEvent).filter(
+            and_(
+                DetectionEvent.status == EventStatus.new,
+                DetectionEvent.created_at >= today
+            )
+        ).count()
+        
+        viewed_events = db.query(DetectionEvent).filter(
+            and_(
+                DetectionEvent.status == EventStatus.viewed,
+                DetectionEvent.created_at >= today
+            )
+        ).count()
+        
+        flagged_events = db.query(DetectionEvent).filter(
+            and_(
+                DetectionEvent.status == EventStatus.flagged,
+                DetectionEvent.created_at >= today
+            )
+        ).count()
+        
+        archived_events = db.query(DetectionEvent).filter(
+            and_(
+                DetectionEvent.status == EventStatus.archived,
+                DetectionEvent.created_at >= today
+            )
+        ).count()
+        
+        # 3. 高置信度事件数（置信度大于0.8）
+        high_confidence_events = db.query(DetectionEvent).filter(
+            and_(
+                DetectionEvent.confidence >= 0.8,
+                DetectionEvent.created_at >= today
+            )
+        ).count()
+        
+        # 计算已处理事件数（非新事件）
+        processed_events = viewed_events + flagged_events + archived_events
+        
+        return {
+            "status": "success",
+            "data": {
+                "total_today": today_events,
+                "processed_today": processed_events,
+                "flagged_today": flagged_events,
+                "high_confidence": high_confidence_events,
+                "status_breakdown": {
+                    "new": new_events,
+                    "viewed": viewed_events,
+                    "flagged": flagged_events,
+                    "archived": archived_events
+                }
+            }
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取检测事件统计失败: {str(e)}")
 
 # 检测计划相关API
 @router.get("/detection/schedules", response_model=List[DetectionScheduleResponse], tags=["检测计划"])
@@ -2823,84 +2929,187 @@ def control_service(
         raise HTTPException(status_code=500, detail=f"控制服务失败: {str(e)}")
 
 # 首页仪表盘API
-@router.get("/dashboard/overview")
-def get_dashboard_overview(db: Session = Depends(get_db)):
-    """获取首页仪表盘概览数据"""
+@router.get("/dashboard/comprehensive-overview")
+def get_comprehensive_dashboard_overview(db: Session = Depends(get_db)):
+    """获取完整的首页数据概览，包含所有模块的统计数据"""
     try:
         # 获取当前日期（用于今日数据统计）
         today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
         yesterday = today - timedelta(days=1)
         
-        # 1. 设备统计
+        # 1. 设备管理统计
         total_devices = db.query(Device).count()
         online_devices = db.query(Device).filter(Device.status == True).count()
+        offline_devices = total_devices - online_devices
         
-        # 2. 检测配置统计
-        total_configs = db.query(DetectionConfig).count()
-        active_configs = db.query(DetectionConfig).filter(DetectionConfig.enabled == True).count()
+        # 按设备类型统计
+        device_types = db.query(
+            Device.device_type, 
+            func.count(Device.device_id).label('count')
+        ).group_by(Device.device_type).all()
+        device_type_distribution = {device_type: count for device_type, count in device_types}
         
-        # 3. 检测事件统计
-        # 今日事件数
-        today_events = db.query(DetectionEvent).filter(
-            DetectionEvent.created_at >= today
+        # 2. 模型管理统计
+        total_models = db.query(DetectionModel).count()
+        active_models = db.query(DetectionModel).filter(DetectionModel.is_active == True).count()
+        
+        # 按模型类型统计
+        model_types = db.query(
+            DetectionModel.models_type, 
+            func.count(DetectionModel.models_id).label('count')
+        ).group_by(DetectionModel.models_type).all()
+        model_type_distribution = {model_type: count for model_type, count in model_types}
+        
+        # 3. 数据推送统计
+        total_push_configs = db.query(DataPushConfig).count()
+        active_push_configs = db.query(DataPushConfig).filter(DataPushConfig.enabled == True).count()
+        
+        # 按推送方式统计
+        push_methods = db.query(
+            DataPushConfig.push_method, 
+            func.count(DataPushConfig.push_id).label('count')
+        ).group_by(DataPushConfig.push_method).all()
+        push_method_distribution = {method.value: count for method, count in push_methods}
+        
+        # 4. 数据监听器统计
+        total_listeners = db.query(ListenerConfig).count()
+        active_listeners = db.query(ListenerConfig).filter(ListenerConfig.enabled == True).count()
+        
+        # 按监听器类型统计
+        listener_types = db.query(
+            ListenerConfig.listener_type, 
+            func.count(ListenerConfig.config_id).label('count')
+        ).group_by(ListenerConfig.listener_type).all()
+        listener_type_distribution = {listener_type.value: count for listener_type, count in listener_types}
+        
+        # 5. 边缘AI设备统计
+        total_edge_servers = db.query(EdgeServer).count()
+        online_edge_servers = db.query(EdgeServer).filter(
+            and_(
+                EdgeServer.status == "online",
+                EdgeServer.is_active == True
+            )
         ).count()
         
-        # 昨日事件数（用于计算趋势）
-        yesterday_events = db.query(DetectionEvent).filter(
-            DetectionEvent.created_at >= yesterday,
-            DetectionEvent.created_at < today
-        ).count()
+        # 6. 人群分析任务统计
+        total_crowd_jobs = db.query(CrowdAnalysisJob).count()
+        active_crowd_jobs = db.query(CrowdAnalysisJob).filter(CrowdAnalysisJob.is_active == True).count()
         
-        # 异常事件数（未处理）
-        unhandled_events = db.query(DetectionEvent).filter(
-            DetectionEvent.status == EventStatus.new
-        ).count()
+        # 人群分析结果统计
+        total_crowd_results = db.query(CrowdAnalysisResult).count()
         
-        # 异常类型分布
-        event_types = db.query(
+        # 按任务统计人群分析结果
+        crowd_job_stats = db.query(
+            CrowdAnalysisResult.job_id,
+            CrowdAnalysisJob.job_name,
+            func.count(CrowdAnalysisResult.result_id).label('count'),
+            func.avg(CrowdAnalysisResult.total_person_count).label('avg_count'),
+            func.max(CrowdAnalysisResult.total_person_count).label('max_count')
+        ).join(CrowdAnalysisJob, CrowdAnalysisResult.job_id == CrowdAnalysisJob.job_id).group_by(
+            CrowdAnalysisResult.job_id, CrowdAnalysisJob.job_name
+        ).all()
+        
+        crowd_job_distribution = [{
+            "job_id": job.job_id,
+            "job_name": job.job_name,
+            "count": job.count,
+            "avg_count": float(job.avg_count) if job.avg_count else 0,
+            "max_count": int(job.max_count) if job.max_count else 0
+        } for job in crowd_job_stats]
+        
+        # 7. 检测任务统计
+        total_detection_configs = db.query(DetectionConfig).count()
+        active_detection_configs = db.query(DetectionConfig).filter(DetectionConfig.enabled == True).count()
+        
+        # 8. 检测事件统计（总数而非今日）
+        total_detection_events = db.query(DetectionEvent).count()
+        
+        # 按状态统计检测事件
+        event_status_stats = db.query(
+            DetectionEvent.status, 
+            func.count(DetectionEvent.event_id).label('count')
+        ).group_by(DetectionEvent.status).all()
+        event_status_distribution = {status.value: count for status, count in event_status_stats}
+        
+        # 按事件类型统计检测事件
+        event_type_stats = db.query(
             DetectionEvent.event_type, 
             func.count(DetectionEvent.event_id).label('count')
         ).group_by(DetectionEvent.event_type).all()
+        event_type_distribution = {event_type: count for event_type, count in event_type_stats}
         
-        event_type_distribution = {event_type: count for event_type, count in event_types}
+        # 9. 外部事件统计（总数而非今日）
+        total_external_events = db.query(ExternalEvent).count()
         
-        # 4. 检测性能统计
-        # 获取最近的性能数据
-        latest_performance = db.query(DetectionPerformance).order_by(
-            DetectionPerformance.timestamp.desc()
-        ).first()
+        # 按引擎统计外部事件
+        external_engine_stats = db.query(
+            ExternalEvent.engine_name, 
+            func.count(ExternalEvent.event_id).label('count')
+        ).filter(ExternalEvent.engine_name.isnot(None)).group_by(ExternalEvent.engine_name).all()
+        external_engine_distribution = {engine_name: count for engine_name, count in external_engine_stats}
         
-        avg_detection_time = 0
-        if latest_performance:
-            # 计算总处理时间 = 检测时间 + 预处理时间 + 后处理时间
-            avg_detection_time = (
-                latest_performance.detection_time + 
-                latest_performance.preprocessing_time + 
-                latest_performance.postprocessing_time
-            )
+        # 按状态统计外部事件
+        external_status_stats = db.query(
+            ExternalEvent.status, 
+            func.count(ExternalEvent.event_id).label('count')
+        ).group_by(ExternalEvent.status).all()
+        external_status_distribution = {status.value: count for status, count in external_status_stats}
         
-        # 5. 近7天的检测事件趋势
+        # 10. 用户统计
+        total_users = db.query(User).count()
+        admin_users = db.query(User).filter(User.role == "admin").count()
+        operator_users = db.query(User).filter(User.role == "operator").count()
+        auditor_users = db.query(User).filter(User.role == "auditor").count()
+        
+        # 11. 系统日志统计
+        total_system_logs = db.query(SysLog).count()
+        today_system_logs = db.query(SysLog).filter(SysLog.log_time >= today).count()
+        
+        # 12. 检测日志统计
+        total_detection_logs = db.query(DetectionLog).count()
+        today_detection_logs = db.query(DetectionLog).filter(DetectionLog.created_at >= today).count()
+        
+        # 13. 近7天的数据趋势
         seven_days_ago = today - timedelta(days=7)
-        daily_events = []
+        daily_trends = []
         
         for i in range(7):
             day_start = seven_days_ago + timedelta(days=i)
             day_end = day_start + timedelta(days=1)
             
-            count = db.query(DetectionEvent).filter(
+            # 检测事件数
+            detection_count = db.query(DetectionEvent).filter(
                 DetectionEvent.created_at >= day_start,
                 DetectionEvent.created_at < day_end
             ).count()
             
-            daily_events.append({
+            # 外部事件数
+            external_count = db.query(ExternalEvent).filter(
+                ExternalEvent.timestamp >= day_start,
+                ExternalEvent.timestamp < day_end
+            ).count()
+            
+            # 系统日志数
+            system_log_count = db.query(SysLog).filter(
+                SysLog.log_time >= day_start,
+                SysLog.log_time < day_end
+            ).count()
+            
+            daily_trends.append({
                 "date": day_start.strftime("%Y-%m-%d"),
-                "count": count
+                "detection_events": detection_count,
+                "external_events": external_count,
+                "system_logs": system_log_count
             })
         
-        # 6. 最近检测事件
-        recent_events = db.query(DetectionEvent).order_by(
+        # 14. 最近活动（合并检测事件和外部事件）
+        recent_detection_events = db.query(DetectionEvent).order_by(
             DetectionEvent.created_at.desc()
-        ).limit(5).all()
+        ).limit(10).all()
+        
+        recent_external_events = db.query(ExternalEvent).order_by(
+            ExternalEvent.timestamp.desc()
+        ).limit(10).all()
         
         def getModelTypeName(type):
             typeMap = {
@@ -2914,14 +3123,25 @@ def get_dashboard_overview(db: Session = Depends(get_db)):
                 'other': '其他类型'
             }
             return typeMap[type] or type
-
+        
+        def formatTimeAgo(timestamp):
+            time_diff = datetime.now() - timestamp
+            if time_diff.days > 0:
+                return f"{time_diff.days} 天前"
+            elif time_diff.seconds >= 3600:
+                return f"{time_diff.seconds // 3600} 小时前"
+            elif time_diff.seconds >= 60:
+                return f"{time_diff.seconds // 60} 分钟前"
+            else:
+                return f"{time_diff.seconds} 秒前"
+        
         recent_activities = []
-        for event in recent_events:
-            # 获取设备名称
+        
+        # 添加检测事件
+        for event in recent_detection_events:
             device = db.query(Device).filter(Device.device_id == event.device_id).first()
             device_name = device.device_name if device else "未知设备"
             
-            # 确定事件类型
             event_type = "primary"
             if event.status == EventStatus.new:
                 event_type = "danger"
@@ -2930,65 +3150,107 @@ def get_dashboard_overview(db: Session = Depends(get_db)):
             elif event.status == EventStatus.archived:
                 event_type = "success"
             
-            # 计算时间差
-            time_diff = datetime.now() - event.created_at
-            if time_diff.days > 0:
-                time_str = f"{time_diff.days} 天前"
-            elif time_diff.seconds >= 3600:
-                time_str = f"{time_diff.seconds // 3600} 小时前"
-            elif time_diff.seconds >= 60:
-                time_str = f"{time_diff.seconds // 60} 分钟前"
-            else:
-                time_str = f"{time_diff.seconds} 秒前"
-            
             recent_activities.append({
-                "content": f"[{getModelTypeName(event.event_type)}][{device_name}]检测到:{event.meta_data.get('count', 0) if event.meta_data else '未知'}个目标",    
-                "timestamp": time_str,
+                "content": f"[本地检测][{getModelTypeName(event.event_type)}][{device_name}]检测到:{event.meta_data.get('count', 0) if event.meta_data else '未知'}个目标",    
+                "timestamp": formatTimeAgo(event.created_at),
                 "type": event_type,
-                "event_id": event.event_id
+                "event_id": event.event_id,
+                "source": "detection"
             })
         
-        # 计算趋势数据
-        event_trend = 0
-        if yesterday_events > 0:
-            event_trend = ((today_events - yesterday_events) / yesterday_events) * 100
+        # 添加外部事件
+        for event in recent_external_events:
+            recent_activities.append({
+                "content": f"[外部事件][{event.engine_name or '未知引擎'}][{event.location or '未知位置'}]检测到:{event.original_data.detections.get('count', 0) if event.original_data and 'detections' in event.original_data else '未知目标'}",    
+                "timestamp": formatTimeAgo(event.timestamp),
+                "type": "info",
+                "event_id": event.event_id,
+                "source": "external"
+            })
         
-        # 计算准确率（模拟数据，实际应从系统配置或性能统计中获取）
-        accuracy = 98.5  # 默认值
+        # 按时间排序
+        recent_activities.sort(key=lambda x: x["timestamp"], reverse=True)
+        recent_activities = recent_activities[:20]  # 只取前20个
+        
+        # 15. 系统性能统计
+        latest_performance = db.query(DetectionPerformance).order_by(
+            DetectionPerformance.timestamp.desc()
+        ).first()
+        
+        avg_detection_time = 0
+        if latest_performance:
+            avg_detection_time = (
+                latest_performance.detection_time + 
+                latest_performance.preprocessing_time + 
+                latest_performance.postprocessing_time
+            )
+        
+        # 计算准确率（模拟数据）
+        accuracy = 98.5
         
         # 整合返回数据
         response = {
-            "cards": {
-                "today_events": {
-                    "value": today_events,
-                    "trend": event_trend
+            "summary": {
+                "total_devices": total_devices,
+                "online_devices": online_devices,
+                "offline_devices": offline_devices,
+                "total_models": total_models,
+                "active_models": active_models,
+                "total_push_configs": total_push_configs,
+                "active_push_configs": active_push_configs,
+                "total_listeners": total_listeners,
+                "active_listeners": active_listeners,
+                "total_edge_servers": total_edge_servers,
+                "online_edge_servers": online_edge_servers,
+                "total_crowd_jobs": total_crowd_jobs,
+                "active_crowd_jobs": active_crowd_jobs,
+                "total_detection_configs": total_detection_configs,
+                "active_detection_configs": active_detection_configs,
+                "total_users": total_users,
+                "total_system_logs": total_system_logs,
+                "total_detection_logs": total_detection_logs
+            },
+            "events": {
+                "detection_events": {
+                    "total": total_detection_events,
+                    "status_distribution": event_status_distribution,
+                    "type_distribution": event_type_distribution
                 },
-                "unhandled_events": {
-                    "value": unhandled_events
-                },
-                "accuracy": {
-                    "value": accuracy
-                },
-                "avg_detection_time": {
-                    "value": avg_detection_time
+                "external_events": {
+                    "total": total_external_events,
+                    "status_distribution": external_status_distribution,
+                    "engine_distribution": external_engine_distribution
                 }
             },
-            "devices": {
-                "total": total_devices,
-                "online": online_devices
+            "distributions": {
+                "device_types": device_type_distribution,
+                "model_types": model_type_distribution,
+                "push_methods": push_method_distribution,
+                "listener_types": listener_type_distribution
             },
-            "configs": {
-                "total": total_configs,
-                "active": active_configs
+            "crowd_analysis": {
+                "total_results": total_crowd_results,
+                "job_distribution": crowd_job_distribution
             },
-            "trend_data": daily_events,
-            "event_distribution": event_type_distribution,
+            "users": {
+                "total": total_users,
+                "admin": admin_users,
+                "operator": operator_users,
+                "auditor": auditor_users
+            },
+            "performance": {
+                "accuracy": accuracy,
+                "avg_detection_time": avg_detection_time
+            },
+            "trends": {
+                "daily": daily_trends
+            },
             "recent_activities": recent_activities
         }
         
         return response
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"获取仪表盘数据失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取完整仪表盘数据失败: {str(e)}")
     
 class EdgeServerBase(BaseModel):
     """边缘服务器基础模型"""
@@ -3527,4 +3789,3 @@ def get_dashboard_detection_type_data(db: Session = Depends(get_db)):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail="获取数据大屏检测类型数据失败")
-

@@ -96,6 +96,7 @@ class User(Base):
     password_hash = Column(String(64), nullable=False)
     role = Column(String(20))
     allowed_devices = Column(ARRAY(Text))
+    created_at = Column(DateTime, default=datetime.now)
 
 class SysLog(Base):
     __tablename__ = "syslog"
@@ -310,10 +311,10 @@ CrowdAnalysisJob.results = relationship("CrowdAnalysisResult", back_populates="j
 # dev_mode = os.getenv("DEV_MODE", "false").lower() == "true"
 # if dev_mode:
 #     # 开发环境使用localhost
-# DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:admin123@10.83.34.35:5432/eyris_core_db")
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:admin123@10.83.34.35:5432/eyris_core_db")
 # else:
     # 生产环境使用Docker容器名
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:admin123@postgres:5432/yolo")
+# DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:admin123@postgres:5432/yolo")
 
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -441,10 +442,14 @@ class ExternalEvent(Base):
     event_metadata = Column(JSONB)  # 元数据
     status = Column(Enum(EventStatus), default=EventStatus.new)
     processed = Column(Boolean, default=False)
+    viewed_at = Column(DateTime)  # 新增：查看时间
+    viewed_by = Column(String(64), ForeignKey('users.user_id'))  # 新增：查看者
+    notes = Column(Text)  # 新增：备注
     timestamp = Column(DateTime, nullable=False)
     created_at = Column(DateTime, default=datetime.now)
     
     config = relationship("ListenerConfig")
+    # viewer = relationship("User", foreign_keys=[viewed_by])  # 新增：查看者关系
     # device = relationship("Device")
 
 class ListenerStatus(Base):

@@ -87,19 +87,19 @@
     <el-card class="device-list">
       <!-- 设备表格 -->
       <el-table :data="devices" style="width: 100%" v-loading="loading">
-        <el-table-column prop="device_id" label="设备ID" min-width="120" />
-        <el-table-column prop="device_name" label="设备名称" min-width="150" />
-        <el-table-column prop="device_type" label="设备类型" min-width="120">
+        <el-table-column prop="device_id" label="设备ID" sortable min-width="120" />
+        <el-table-column prop="device_name" label="设备名称" sortable min-width="150" />
+        <el-table-column prop="device_type" label="设备类型" sortable min-width="120">
           <template #default="{ row }">
             <el-tag :type="getDeviceTypeTag(row.device_type)">
               {{ getDeviceTypeName(row.device_type) }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="ip_address" label="IP地址" min-width="120" />
-        <el-table-column prop="port" label="端口" width="100" />
-        <el-table-column prop="username" label="用户名" min-width="100" />
-        <el-table-column prop="status" label="状态" width="100">
+        <el-table-column prop="ip_address" label="IP地址" sortable min-width="120" />
+        <el-table-column prop="port" label="端口" width="120" />
+        <!-- <el-table-column prop="username" label="用户名" min-width="100" /> -->
+        <el-table-column prop="status" label="状态" width="120">
           <template #default="{ row }">
             <el-tag :type="row.status ? 'success' : 'danger'">
               {{ row.status ? '在线' : '离线' }}
@@ -111,16 +111,16 @@
             {{ formatDateTime(row.last_heartbeat) }}
           </template>
         </el-table-column>
-        <el-table-column prop="location" label="位置" min-width="100" />
+        <el-table-column prop="location" label="位置" sortable min-width="120" />
         <el-table-column label="操作" width="200" fixed="right">
           <template #default="{ row }">
             <el-button-group>
-              <el-button type="primary" link @click="handleEdit(row)">
-                编辑
-              </el-button>
               <el-button type="primary" link @click="handlePreview(row)">
                 预览
               </el-button>
+              <el-button type="primary" link @click="handleEdit(row)">
+                编辑
+              </el-button>             
               <el-button type="danger" link @click="handleDelete(row)">
                 删除
               </el-button>
@@ -137,7 +137,15 @@
     </el-card>
 
     <!-- 添加/编辑设备对话框 -->
-    <el-dialog v-model="dialogVisible" :title="dialogType === 'add' ? '添加设备' : '编辑设备'" width="500px" destroy-on-close>
+    <el-dialog 
+      v-model="dialogVisible" 
+      :title="dialogType === 'add' ? '添加设备' : '编辑设备'" 
+      width="500px" 
+      destroy-on-close
+      :z-index="99999"
+      append-to-body
+      class="high-priority-dialog"
+    >
       <el-form ref="deviceFormRef" :model="deviceForm" :rules="deviceRules" label-width="100px">
         <el-form-item label="设备ID" prop="device_id">
           <el-input v-model="deviceForm.device_id" placeholder="请输入设备ID" :disabled="dialogType === 'edit'" />
@@ -192,7 +200,16 @@
     </el-dialog>
 
     <!-- 预览对话框 -->
-    <el-dialog v-model="previewVisible" title="设备预览" width="800px" destroy-on-close @close="stopPreview">
+    <el-dialog 
+      v-model="previewVisible" 
+      title="设备预览" 
+      width="800px" 
+      destroy-on-close 
+      @close="stopPreview"
+      :z-index="100000"
+      append-to-body
+      class="preview-dialog high-priority-dialog"
+    >
       <div class="preview-container">
         <div v-if="previewLoading" class="loading-wrapper">
           <el-skeleton animated :rows="8" />
@@ -245,7 +262,15 @@
     </el-dialog>
 
     <!-- 导入对话框 -->
-    <el-dialog v-model="importDialogVisible" title="导入设备" width="500px" destroy-on-close>
+    <el-dialog 
+      v-model="importDialogVisible" 
+      title="导入设备" 
+      width="500px" 
+      destroy-on-close
+      :z-index="100001"
+      append-to-body
+      class="import-dialog high-priority-dialog"
+    >
       <el-upload class="upload-demo" drag action="#" :auto-upload="false" :on-change="handleFileChange" :limit="1"
         accept=".xlsx,.xls,.csv">
         <el-icon class="el-icon--upload"><upload-filled /></el-icon>
@@ -1183,6 +1208,19 @@ const handleResetFilter = () => {
 }
 
 .filter-section .el-form-item {
-  margin-bottom: 10px;
+  margin-bottom: 0;
+}
+
+/* 高优先级对话框样式 - 确保不被菜单和头部遮挡 */
+.high-priority-dialog {
+  z-index: 99999 !important;
+}
+
+.preview-dialog {
+  z-index: 100000 !important;
+}
+
+.import-dialog {
+  z-index: 100001 !important;
 }
 </style> 

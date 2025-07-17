@@ -123,12 +123,13 @@
         </el-table-column>
       </el-table>
 
-      <div class="pagination" v-if="jobList.length > 0">
+      <div class="pagination" v-if="totalCount > 0">
         <el-pagination
-          layout="total, sizes, prev, pager, next"
-          :total="total"
-          :page-size="pageSize"
-          :current-page="currentPage"
+          v-model:current-page="currentPage"
+          v-model:page-size="pageSize"
+          :page-sizes="[20, 50, 100, 200]"
+          :total="totalCount"
+          layout="prev, pager, next, jumper, ->, total, sizes"
           @size-change="handleSizeChange"
           @current-change="handleCurrentChange"
         />
@@ -136,8 +137,16 @@
     </el-card>
 
     <!-- 编辑任务对话框 -->
-    <el-dialog v-model="editDialogVisible" title="编辑任务" width="50%" :before-close="handleCloseEditDialog"
-      :z-index="9999" :modal="true" :append-to-body="true" class="edit-dialog">
+    <el-dialog 
+      v-model="editDialogVisible" 
+      title="编辑任务" 
+      width="50%" 
+      :before-close="handleCloseEditDialog"
+      :z-index="99999" 
+      :modal="true" 
+      :append-to-body="true" 
+      class="edit-dialog high-priority-dialog"
+    >
       <el-alert v-if="editFormError" title="保存失败" :description="editFormError" type="error" show-icon :closable="true"
         @close="editFormError = ''" style="margin-bottom: 15px;" />
 
@@ -291,7 +300,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, nextTick, watch } from 'vue'
+import { ref, reactive, onMounted, nextTick, watch, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { crowdAnalysisApi } from '@/api/crowd_analysis'
@@ -302,9 +311,9 @@ const loading = ref(false)
 const jobList = ref([])
 const deviceMap = ref({})
 const modelMap = ref({})
-const total = ref(0)
-const pageSize = ref(10)
+const pageSize = ref(20)
 const currentPage = ref(1)
+const totalCount = ref(0)
 
 // 编辑表单相关变量
 const editDialogVisible = ref(false)
@@ -364,12 +373,17 @@ onMounted(() => {
   fetchModels()
 })
 
+// 注意：现在使用后端分页，不再需要前端计算分页数据
+
 const fetchJobs = async () => {
   loading.value = true
   try {
-    const res = await crowdAnalysisApi.getAnalysisJobs()
-    jobList.value = res.data
-    total.value = res.data.length
+    const res = await crowdAnalysisApi.getAnalysisJobs({
+      page: currentPage.value,
+      page_size: pageSize.value
+    })
+    jobList.value = res.data.data
+    totalCount.value = res.data.total
   } catch (error) {
     ElMessage.error('获取任务列表失败')
     // console.error(error)
@@ -463,12 +477,13 @@ const deleteJob = (jobId) => {
 
 const handleSizeChange = (size) => {
   pageSize.value = size
-  fetchJobs()
+  currentPage.value = 1 // 重置到第一页
+  fetchJobs() // 重新加载数据
 }
 
 const handleCurrentChange = (page) => {
   currentPage.value = page
-  fetchJobs()
+  fetchJobs() // 重新加载数据
 }
 
 // 编辑任务
@@ -684,8 +699,7 @@ watch(editFrequencyType, (val) => {
 }
 .pagination {
   margin-top: 20px;
-  display: flex;
-  justify-content: flex-end;
+  text-align: right;
 }
 .device-list {
   max-height: 200px;
@@ -724,6 +738,11 @@ watch(editFrequencyType, (val) => {
 
 .edit-dialog {
   z-index: 9999;
+}
+
+/* 高优先级对话框样式 - 确保不被菜单和头部遮挡 */
+.high-priority-dialog {
+  z-index: 99999 !important;
 }
 </style>
 

@@ -52,11 +52,9 @@ apiClient.interceptors.response.use(
 
 // 数据推送相关 API
 export const dataPushApi = {
-    // 获取推送配置列表
-    getPushConfigs(configId = null) {
-      return apiClient.get('/push/list', { 
-        params: configId ? { config_id: configId } : {}
-      });
+    // 获取推送配置列表（分页）
+    getPushConfigs(params = {}) {
+      return apiClient.get('/push/list', { params });
     },
     
     // 创建推送配置
@@ -82,6 +80,11 @@ export const dataPushApi = {
     // 获取推送统计信息
     getPushStats() {
       return apiClient.get('/push/stats');
+    },
+
+    // 获取推送概览统计
+    getPushOverview() {
+      return apiClient.get('/push/overview');
     },
     
     // 重新加载推送配置

@@ -80,6 +80,21 @@ export default {
   },
   
   // 用户管理相关
+  getUsers(params = { skip: 0, limit: 100 }) {
+    const filteredParams = Object.fromEntries(
+      Object.entries(params).filter(([_, value]) => value !== null && value !== undefined && value !== '')
+    );
+    return apiClient.get('/users/', { params: filteredParams });
+  },
+  
+  createUser(userData) {
+    return apiClient.post('/users/', userData);
+  },
+  
+  deleteUser(userId) {
+    return apiClient.delete(`/users/${userId}`);
+  },
+  
   updateUserProfile(userData) {
     return apiClient.put('/users/profile', userData);
   },
@@ -196,9 +211,9 @@ export default {
     return apiClient.put(`/models/${modelId}/toggle?active=${active}`);
   },
   
-  // 获取首页仪表盘数据
-  getDashboardOverview() {
-    return apiClient.get('/dashboard/overview');
+  // 获取完整仪表盘概览数据
+  getComprehensiveDashboardOverview() {
+    return apiClient.get('/dashboard/comprehensive-overview');
   },
 
   // 导出设备数据模板

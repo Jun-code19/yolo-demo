@@ -2,16 +2,20 @@
   <div class="data-listeners">
     <div class="page-header">
       <div class="header-content">
-        <h1>数据监听器管理</h1>
+        <h2>数据监听器管理</h2>
         <p>管理第三方数据源监听器配置</p>
       </div>
       <div class="header-actions">
         <el-button @click="refreshData" :loading="loading">
-          <el-icon><Refresh /></el-icon>
+          <el-icon>
+            <Refresh />
+          </el-icon>
           刷新
         </el-button>
         <el-button type="primary" @click="showCreateDialog">
-          <el-icon><Plus /></el-icon>
+          <el-icon>
+            <Plus />
+          </el-icon>
           新建监听器
         </el-button>
       </div>
@@ -21,56 +25,56 @@
     <div class="stats-cards">
       <el-row :gutter="16">
         <el-col :span="6">
-          <el-card class="stat-card">
-            <div class="stat-content">
-              <div class="stat-icon">
-                <el-icon color="#409EFF"><Monitor /></el-icon>
-              </div>
-              <div class="stat-info">
-                <div class="stat-value">{{ stats.configs?.total || 0 }}</div>
-                <div class="stat-label">总监听器</div>
-              </div>
+          <div class="stat-content">
+            <div class="stat-icon">
+              <el-icon color="#409EFF">
+                <Monitor />
+              </el-icon>
             </div>
-          </el-card>
+            <div class="stat-info">
+              <div class="stat-value">{{ stats.configs?.total || 0 }}</div>
+              <div class="stat-label">总监听器</div>
+            </div>
+          </div>
         </el-col>
         <el-col :span="6">
-          <el-card class="stat-card">
-            <div class="stat-content">
-              <div class="stat-icon">
-                <el-icon color="#67C23A"><VideoPlay /></el-icon>
-              </div>
-              <div class="stat-info">
-                <div class="stat-value">{{ stats.runtime?.running_count || 0 }}</div>
-                <div class="stat-label">运行中</div>
-              </div>
+          <div class="stat-content">
+            <div class="stat-icon">
+              <el-icon color="#67C23A">
+                <VideoPlay />
+              </el-icon>
             </div>
-          </el-card>
+            <div class="stat-info">
+              <div class="stat-value">{{ stats.runtime?.running_count || 0 }}</div>
+              <div class="stat-label">运行中</div>
+            </div>
+          </div>
         </el-col>
         <el-col :span="6">
-          <el-card class="stat-card">
-            <div class="stat-content">
-              <div class="stat-icon">
-                <el-icon color="#E6A23C"><Bell /></el-icon>
-              </div>
-              <div class="stat-info">
-                <div class="stat-value">{{ stats.events?.today || 0 }}</div>
-                <div class="stat-label">今日事件</div>
-              </div>
+          <div class="stat-content">
+            <div class="stat-icon">
+              <el-icon color="#E6A23C">
+                <Bell />
+              </el-icon>
             </div>
-          </el-card>
+            <div class="stat-info">
+              <div class="stat-value">{{ stats.events?.today || 0 }}</div>
+              <div class="stat-label">今日事件</div>
+            </div>
+          </div>
         </el-col>
         <el-col :span="6">
-          <el-card class="stat-card">
-            <div class="stat-content">
-              <div class="stat-icon">
-                <el-icon color="#F56C6C"><DataAnalysis /></el-icon>
-              </div>
-              <div class="stat-info">
-                <div class="stat-value">{{ stats.events?.total || 0 }}</div>
-                <div class="stat-label">总事件数</div>
-              </div>
+          <div class="stat-content">
+            <div class="stat-icon">
+              <el-icon color="#F56C6C">
+                <DataAnalysis />
+              </el-icon>
             </div>
-          </el-card>
+            <div class="stat-info">
+              <div class="stat-value">{{ stats.events?.total || 0 }}</div>
+              <div class="stat-label">总事件数</div>
+            </div>
+          </div>
         </el-col>
       </el-row>
     </div>
@@ -78,57 +82,33 @@
     <!-- 过滤器 -->
     <el-card class="filter-card">
       <div class="filters">
-        <el-select
-          v-model="filters.listener_type"
-          placeholder="监听器类型"
-          clearable
-          style="width: 150px"
-          @change="loadData"
-        >
+        <el-select v-model="filters.listener_type" placeholder="监听器类型" clearable style="width: 150px"
+          @change="loadData">
           <el-option label="TCP" value="tcp" />
           <el-option label="MQTT" value="mqtt" />
           <el-option label="HTTP" value="http" />
         </el-select>
 
-        <el-select
-          v-model="filters.enabled"
-          placeholder="启用状态"
-          clearable
-          style="width: 120px"
-          @change="loadData"
-        >
+        <el-select v-model="filters.enabled" placeholder="启用状态" clearable style="width: 120px" @change="loadData">
           <el-option label="已启用" :value="true" />
           <el-option label="已禁用" :value="false" />
         </el-select>
 
-        <el-input
-          v-model="searchText"
-          placeholder="搜索监听器名称"
-          style="width: 200px"
-          @keyup.enter="loadData"
-        >
+        <el-input v-model="searchText" placeholder="搜索监听器名称" style="width: 200px" @keyup.enter="loadData">
           <template #append>
             <el-button @click="loadData">
-              <el-icon><Search /></el-icon>
+              <el-icon>
+                <Search />
+              </el-icon>
             </el-button>
           </template>
         </el-input>
 
         <div class="batch-actions">
-          <el-button
-            v-if="selectedIds.length > 0"
-            type="success"
-            @click="batchStart"
-            :loading="batchLoading"
-          >
+          <el-button v-if="selectedIds.length > 0" type="success" @click="batchStart" :loading="batchLoading">
             批量启动
           </el-button>
-          <el-button
-            v-if="selectedIds.length > 0"
-            type="warning"
-            @click="batchStop"
-            :loading="batchLoading"
-          >
+          <el-button v-if="selectedIds.length > 0" type="warning" @click="batchStop" :loading="batchLoading">
             批量停止
           </el-button>
         </div>
@@ -137,14 +117,9 @@
 
     <!-- 数据表格 -->
     <el-card class="table-card">
-      <el-table
-        :data="configs"
-        v-loading="loading"
-        @selection-change="handleSelectionChange"
-        style="width: 100%"
-      >
+      <el-table :data="configs" v-loading="loading" @selection-change="handleSelectionChange" style="width: 100%">
         <el-table-column type="selection" width="55" />
-        
+
         <el-table-column prop="name" label="名称" width="120">
           <template #default="{ row }">
             <div class="name-cell">
@@ -165,20 +140,11 @@
         <el-table-column label="状态" width="150">
           <template #default="{ row }">
             <div class="status-cell">
-              <el-tag
-                :type="row.enabled ? 'success' : 'info'"
-                effect="light"
-                size="small"
-              >
+              <el-tag :type="row.enabled ? 'success' : 'info'" effect="light" size="small">
                 {{ row.enabled ? '已启用' : '已禁用' }}
               </el-tag>
-              <el-tag
-                v-if="row.runtime_status?.status"
-                :type="getRuntimeStatusType(row.runtime_status.status)"
-                effect="plain"
-                size="small"
-                style="margin-top: 2px;"
-              >
+              <el-tag v-if="row.runtime_status?.status" :type="getRuntimeStatusType(row.runtime_status.status)"
+                effect="plain" size="small" style="margin-top: 2px;">
                 {{ getRuntimeStatusText(row.runtime_status.status) }}
               </el-tag>
             </div>
@@ -204,7 +170,7 @@
           </template>
         </el-table-column>
 
-        <el-table-column prop="created_at" label="创建时间" width="150">
+        <el-table-column prop="created_at" label="创建时间" width="160">
           <template #default="{ row }">
             {{ formatDateTime(row.created_at) }}
           </template>
@@ -213,38 +179,19 @@
         <el-table-column label="操作" width="200" fixed="right">
           <template #default="{ row }">
             <el-button-group>
-              <el-button
-                v-if="!row.enabled || row.runtime_status?.status !== 'running'"
-                type="success"
-                size="small"
-                @click="startListener(row)"
-                :loading="row.starting"
-              >
+              <el-button v-if="!row.enabled || row.runtime_status?.status !== 'running'" type="success" size="small"
+                @click="startListener(row)" :loading="row.starting">
                 启动
               </el-button>
-              <el-button
-                v-else
-                type="warning"
-                size="small"
-                @click="stopListener(row)"
-                :loading="row.stopping"
-              >
+              <el-button v-else type="warning" size="small" @click="stopListener(row)" :loading="row.stopping">
                 停止
               </el-button>
-              
-              <el-button
-                type="primary"
-                size="small"
-                @click="editConfig(row)"
-              >
+
+              <el-button type="primary" size="small" @click="editConfig(row)">
                 编辑
               </el-button>
-              
-              <el-button
-                type="danger"
-                size="small"
-                @click="deleteConfig(row)"
-              >
+
+              <el-button type="danger" size="small" @click="deleteConfig(row)">
                 删除
               </el-button>
             </el-button-group>
@@ -254,25 +201,15 @@
 
       <!-- 分页 -->
       <div class="pagination">
-        <el-pagination
-          v-model:current-page="pagination.page"
-          v-model:page-size="pagination.size"
-          :page-sizes="[10, 20, 50, 100]"
-          :total="pagination.total"
-          layout="total, sizes, prev, pager, next, jumper"
-          @size-change="loadData"
-          @current-change="loadData"
-        />
+        <el-pagination v-model:current-page="pagination.page" v-model:page-size="pagination.size"
+          :page-sizes="[10, 20, 50, 100]" :total="pagination.total" layout="prev, pager, next, jumper, ->, total, sizes"
+          @size-change="loadData" @current-change="loadData" />
       </div>
     </el-card>
 
     <!-- 配置对话框 -->
-    <ListenerConfigDialog
-      v-model="dialogVisible"
-      :config="editingConfig"
-      :templates="templates"
-      @saved="handleConfigSaved"
-    />
+    <ListenerConfigDialog v-model="dialogVisible" :config="editingConfig" :templates="templates"
+      @saved="handleConfigSaved" />
   </div>
 </template>
 
@@ -324,20 +261,20 @@ const selectedConfigs = computed(() => {
 const loadData = async () => {
   try {
     loading.value = true
-    
+
     const params = {
       page: pagination.page,
       size: pagination.size,
       ...filters
     }
-    
+
     if (searchText.value) {
       // 简单的名称搜索过滤
       params.search = searchText.value
     }
 
     const response = await dataListenerApi.getConfigs(params)
-    
+
     if (response.data.status === 'success') {
       configs.value = response.data.data.configs
       pagination.total = response.data.data.pagination.total
@@ -381,9 +318,9 @@ const editConfig = (config) => {
 const startListener = async (config) => {
   try {
     config.starting = true
-    
+
     const response = await dataListenerApi.startListener(config.config_id)
-    
+
     if (response.data.status === 'success') {
       ElMessage.success('监听器启动成功')
       await refreshData()
@@ -401,9 +338,9 @@ const startListener = async (config) => {
 const stopListener = async (config) => {
   try {
     config.stopping = true
-    
+
     const response = await dataListenerApi.stopListener(config.config_id)
-    
+
     if (response.data.status === 'success') {
       ElMessage.success('监听器停止成功')
       await refreshData()
@@ -431,7 +368,7 @@ const deleteConfig = async (config) => {
     )
 
     const response = await dataListenerApi.deleteConfig(config.config_id)
-    
+
     if (response.data.status === 'success') {
       ElMessage.success('删除成功')
       await refreshData()
@@ -449,9 +386,9 @@ const deleteConfig = async (config) => {
 const batchStart = async () => {
   try {
     batchLoading.value = true
-    
+
     const response = await dataListenerApi.batchStart(selectedIds.value)
-    
+
     if (response.data.status === 'success') {
       const results = response.data.data.results
       const successCount = results.filter(r => r.status === 'success').length
@@ -469,9 +406,9 @@ const batchStart = async () => {
 const batchStop = async () => {
   try {
     batchLoading.value = true
-    
+
     const response = await dataListenerApi.batchStop(selectedIds.value)
-    
+
     if (response.data.status === 'success') {
       const results = response.data.data.results
       const successCount = results.filter(r => r.status === 'success').length
@@ -554,12 +491,6 @@ onMounted(async () => {
   margin-bottom: 20px;
 }
 
-.header-content h1 {
-  margin: 0 0 8px 0;
-  font-size: 24px;
-  font-weight: 600;
-}
-
 .header-content p {
   margin: 0;
   color: #666;
@@ -570,24 +501,18 @@ onMounted(async () => {
   margin-bottom: 20px;
 }
 
-.stat-card {
-  border: none;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-}
-
 .stat-content {
   display: flex;
   align-items: center;
-  padding: 10px 0;
+  padding: 16px;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
 .stat-icon {
   font-size: 32px;
   margin-right: 16px;
-}
-
-.stat-info {
-  flex: 1;
 }
 
 .stat-value {
@@ -619,9 +544,9 @@ onMounted(async () => {
   gap: 8px;
 }
 
-.table-card {
+/* .table-card {
   min-height: 400px;
-}
+}*/
 
 .name-cell {
   display: flex;
@@ -652,11 +577,10 @@ onMounted(async () => {
 
 .pagination {
   margin-top: 20px;
-  display: flex;
-  justify-content: center;
+  text-align: right;
 }
 
 .el-button-group .el-button {
   margin-left: 0;
 }
-</style> 
+</style>

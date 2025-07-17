@@ -41,9 +41,9 @@ apiClient.interceptors.response.use(
 
 // 人群分析相关 API
 export const crowdAnalysisApi = {
-  // 获取所有分析任务
-  getAnalysisJobs() {
-    return apiClient.get('/jobs');
+  // 获取分析任务列表（分页）
+  getAnalysisJobs(params = { page: 1, page_size: 10 }) {
+    return apiClient.get('/jobs', { params });
   },
   
   // 获取特定分析任务详情

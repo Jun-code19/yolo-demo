@@ -1,23 +1,20 @@
 <template>
   <div class="detection-config-page">
-    <el-card class="main-card">
-      <template #header>
-        <div class="card-header">
-          <span>检测配置管理</span>
-          <div class="header-right">
-            <el-button type="primary" @click="showAddModal">
-              <el-icon>
-                <plus />
-              </el-icon>创建配置
-            </el-button>
-          </div>
-        </div>
-      </template>
-
+    <div class="card-header">
+      <h2>检测配置管理</h2>
+      <div class="header-right">
+        <el-button type="primary" @click="showAddModal">
+          <el-icon>
+            <plus />
+          </el-icon>创建配置
+        </el-button>
+      </div>
+    </div>
+    <el-card>
       <!-- 配置列表 -->
       <el-table :data="configList" v-loading="loading" style="width: 100%">
         <!-- 设备名称列 -->
-        <el-table-column label="设备" prop="device_id" min-width="120">
+        <el-table-column label="设备" prop="device_id" sortable min-width="120">
           <template #default="scope">
             {{ getDeviceName(scope.row.device_id) }}
           </template>
@@ -77,6 +74,13 @@
           </template>
         </el-table-column>
 
+        <!-- 更新时间列 -->
+        <!-- <el-table-column label="更新时间" prop="updated_at" sortable min-width="150">
+          <template #default="scope">
+            {{ formatDateTime(scope.row.updated_at) }}
+          </template>
+        </el-table-column> -->
+
         <!-- 操作列 -->
         <el-table-column label="操作" min-width="230" fixed="right">
           <template #default="scope">
@@ -104,11 +108,32 @@
           </template>
         </el-table-column>
       </el-table>
+
+      <!-- 分页 -->
+      <div class="pagination" v-if="totalCount > 0">
+        <el-pagination
+          v-model:current-page="currentPage"
+          v-model:page-size="pageSize"
+          :page-sizes="[20, 50, 100, 200]"
+          :total="totalCount"
+          layout="prev, pager, next, jumper, ->, total, sizes"
+          @size-change="handleSizeChange"
+          @current-change="handleCurrentChange"
+        />
+      </div>
     </el-card>
 
     <!-- 添加/编辑配置的模态框 -->
-    <el-dialog v-model="modalVisible" :title="isEdit ? '编辑检测配置' : '创建检测配置'" width="750px" top="5vh" destroy-on-close
-      class="config-dialog">
+    <el-dialog 
+      v-model="modalVisible" 
+      :title="isEdit ? '编辑检测配置' : '创建检测配置'" 
+      width="750px" 
+      top="5vh" 
+      destroy-on-close
+      :z-index="99999"
+      append-to-body
+      class="config-dialog high-priority-dialog"
+    >
       <div class="config-steps">
         <div class="step" :class="{ active: currentStep >= 1 }">
           <div class="step-number">1</div>
@@ -167,10 +192,10 @@
               <!-- 状态和灵敏度 -->
               <div class="form-row">
                 <!-- 是否启用 -->
-                <el-form-item label="状态" prop="enabled" class="form-item-small">
+                <!-- <el-form-item label="状态" prop="enabled" class="form-item-small">
                   <el-switch v-model="formState.enabled" active-text="启用" inactive-text="禁用" :active-value="true"
                     :inactive-value="false" />
-                </el-form-item>
+                </el-form-item> -->
 
                 <!-- 检测灵敏度 -->
                 <el-form-item label="检测灵敏度" prop="sensitivity" class="form-item-large">
@@ -619,11 +644,12 @@
 </template>
 
 <script>
-import { defineComponent, ref, reactive, onMounted, computed } from 'vue';
+import { defineComponent, ref, reactive, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { Plus, Delete, Edit, VideoPause, VideoPlay, InfoFilled, Calendar, Operation, CircleCloseFilled, Files, VideoCamera, CircleCheckFilled, Clock, Setting, CircleClose } from '@element-plus/icons-vue';
 import deviceApi from '@/api/device'
+import dayjs from 'dayjs';
 import { detectionConfigApi } from '@/api/detection';
 import { startDetection, stopDetection } from '@/api/detection_server';
 
@@ -658,6 +684,11 @@ export default defineComponent({
     const deviceList = ref([]);
     const modelList = ref([]);
     const targetClasses = ref([]); // 用于存储目标类别
+
+    // 分页相关
+    const currentPage = ref(1);
+    const pageSize = ref(20);
+    const totalCount = ref(0);
 
     // 模态框状态
     const modalVisible = ref(false);
@@ -708,6 +739,12 @@ export default defineComponent({
       scheduleMaxExecutions: -1,
       scheduleIdleTimeout: 0
     });
+
+    // 格式化日期时间
+    const formatDateTime = (dateStr) => {
+      if (!dateStr) return '';
+      return dayjs(dateStr).format('YYYY-MM-DD HH:mm:ss');
+    };
 
     // 步骤控制
     const currentStep = ref(1);
@@ -948,7 +985,7 @@ export default defineComponent({
         'none': '暂无',
         'screenshot': '截图(' + maxStorageDays + '天)',
         'video': '视频(无)',
-        'both': '截图(' + maxStorageDays + '天)'+ '|' + '视频(无)'
+        'both': '截图(' + maxStorageDays + '天)' + '|' + '视频(无)'
       };
       return map[saveMode] || saveMode;
     };
@@ -968,8 +1005,13 @@ export default defineComponent({
     const loadConfigList = async () => {
       loading.value = true;
       try {
-        const response = await detectionConfigApi.getConfigs();
+        const skip = (currentPage.value - 1) * pageSize.value
+        const paginationParams = { skip, limit: pageSize.value }
+
+        const response = await detectionConfigApi.getConfigs(paginationParams);
+
         configList.value = response.data.data;
+        totalCount.value = response.data.total;
       } catch (error) {
         ElMessage.error('获取配置列表失败: ' + error.message);
       } finally {
@@ -1173,7 +1215,7 @@ export default defineComponent({
               // 准备提交的数据
               const submitData = {
                 models_id: formState.models_id,
-                enabled: formState.enabled,
+                enabled: false,
                 sensitivity: formState.sensitivity,
                 target_classes: formState.target_classes,
                 frequency: formState.frequency,
@@ -1401,6 +1443,17 @@ export default defineComponent({
       formState.target_classes = [];
     };
 
+    // 分页处理方法
+    const handleSizeChange = (val) => {
+      pageSize.value = val;
+      loadConfigList(); // 重新加载数据
+    };
+
+    const handleCurrentChange = (val) => {
+      currentPage.value = val;
+      loadConfigList(); // 重新加载数据
+    };
+
     return {
       getAreaTypeLabel,
       loading,
@@ -1414,6 +1467,7 @@ export default defineComponent({
       formState,
       rules,
       targetClasses,
+      formatDateTime,
       setInterestArea,
       updateTargetClasses,
       getModelTypeName,
@@ -1445,13 +1499,23 @@ export default defineComponent({
       scheduleActiveTab,
       currentStep,
       nextStep,
-      prevStep
+      prevStep,
+      // 分页相关
+      currentPage,
+      pageSize,
+      totalCount,
+      handleSizeChange,
+      handleCurrentChange
     };
   }
 });
 </script>
 
 <style scoped>
+.detection-config-page {
+  padding: 20px;
+}
+
 .form-item-container {
   display: flex;
   justify-content: flex-start;
@@ -2004,10 +2068,22 @@ export default defineComponent({
   display: flex;
   justify-content: space-between;
   align-items: center;
+  margin-bottom: 20px;
   width: 100%;
 }
 
 .header-right {
   margin-left: auto;
+}
+
+/* 分页样式 */
+.pagination {
+  margin-top: 20px;
+  text-align: right;
+}
+
+/* 高优先级对话框样式 - 确保不被菜单和头部遮挡 */
+.high-priority-dialog {
+  z-index: 99999 !important;
 }
 </style>

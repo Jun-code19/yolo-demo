@@ -85,6 +85,49 @@ async def get_push_stats():
     """获取所有数据推送的统计信息"""
     return data_pusher.get_push_stats()
 
+@router.get("/overview")
+async def get_push_overview(db: Session = Depends(get_db)):
+    """获取推送配置概览统计"""
+    try:
+        # 总配置数
+        total_configs = db.query(DataPushConfig).count()
+        
+        # 启用的配置数
+        enabled_configs = db.query(DataPushConfig).filter(DataPushConfig.enabled == True).count()
+        
+        # 各种推送方式的数量
+        http_count = db.query(DataPushConfig).filter(DataPushConfig.push_method.in_([PushMethod.http, PushMethod.https])).count()
+        tcp_count = db.query(DataPushConfig).filter(DataPushConfig.push_method == PushMethod.tcp).count()
+        mqtt_count = db.query(DataPushConfig).filter(DataPushConfig.push_method == PushMethod.mqtt).count()
+        
+        # 最近推送统计（从内存统计中获取）
+        push_stats = data_pusher.get_push_stats()
+        total_success = sum(stat.get('success', 0) for stat in push_stats.get('data', {}).values())
+        total_failures = sum(stat.get('fail', 0) for stat in push_stats.get('data', {}).values())
+        
+        return {
+            "status": "success",
+            "data": {
+                "total_configs": total_configs,
+                "enabled_configs": enabled_configs,
+                "disabled_configs": total_configs - enabled_configs,
+                "method_stats": {
+                    "http": http_count,
+                    "tcp": tcp_count,
+                    "mqtt": mqtt_count
+                },
+                "push_stats": {
+                    "total_success": total_success,
+                    "total_failures": total_failures,
+                    "success_rate": round((total_success / (total_success + total_failures)) * 100, 2) if (total_success + total_failures) > 0 else 0
+                }
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"获取推送概览统计失败: {e}")
+        raise HTTPException(status_code=500, detail=f"获取推送概览统计失败: {str(e)}")
+
 @router.post("/reload/{push_id}")
 async def reload_push_config(push_id: str, db: Session = Depends(get_db)):
     """重新加载指定的推送配置"""
@@ -163,8 +206,15 @@ async def create_push_config(pushdata: PushCreate, db: Session = Depends(get_db)
         raise HTTPException(status_code=500, detail=f"创建推送配置失败: {str(e)}")
 
 @router.get("/list")
-async def list_push_configs(config_id: str = None, tag: str = None, db: Session = Depends(get_db)): # 获取推送配置列表，支持按配置ID或标签筛选
-    """获取推送配置列表，支持按配置ID或标签筛选"""
+async def list_push_configs(
+    config_id: str = None, 
+    tag: str = None,
+    method: str = None,
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db)
+): # 获取推送配置列表，支持按配置ID、标签、推送方式筛选
+    """获取推送配置列表，支持按配置ID、标签、推送方式筛选（分页）"""
     try:
         query = db.query(DataPushConfig)
         
@@ -176,10 +226,23 @@ async def list_push_configs(config_id: str = None, tag: str = None, db: Session 
         if tag:
             query = query.filter(DataPushConfig.tags.any(tag))
         
-        configs = query.order_by(DataPushConfig.created_at.desc()).all()
+        # 根据推送方式筛选
+        if method:
+            try:
+                push_method = PushMethod(method.lower())
+                query = query.filter(DataPushConfig.push_method == push_method)
+            except ValueError:
+                # 忽略无效的推送方式
+                pass
+        
+        # 获取总数
+        total_count = query.count()
+        
+        # 分页查询
+        configs = query.order_by(DataPushConfig.created_at.desc()).offset(skip).limit(limit).all()
         return {
             "status": "success",
-            "configs": [
+            "data": [
                 {
                     "push_id": config.push_id,
                     "push_name": config.push_name,
@@ -199,7 +262,8 @@ async def list_push_configs(config_id: str = None, tag: str = None, db: Session 
                     "last_push_time": config.last_push_time.isoformat() if config.last_push_time else None
                 }
                 for config in configs
-            ]
+            ],
+            "total": total_count
         }
     except Exception as e:
         logger.error(f"获取推送配置列表失败: {e}")

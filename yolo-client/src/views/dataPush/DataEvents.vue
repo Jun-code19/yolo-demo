@@ -2,24 +2,26 @@
   <div class="data-events">
     <div class="page-header">
       <div class="header-content">
-        <h1>事件监控</h1>
+        <h2>外部事件记录</h2>
         <p>监控和查看外部数据源事件</p>
       </div>
       <div class="header-actions">
         <el-button @click="refreshData" :loading="loading">
-          <el-icon><Refresh /></el-icon>
+          <el-icon>
+            <Refresh />
+          </el-icon>
           刷新
         </el-button>
         <el-button @click="exportEvents">
-          <el-icon><Download /></el-icon>
+          <el-icon>
+            <Download />
+          </el-icon>
           导出
         </el-button>
-        <el-button 
-          type="danger" 
-          :disabled="selectedEvents.length === 0"
-          @click="handleBatchDelete"
-        >
-          <el-icon><Delete /></el-icon>
+        <el-button type="danger" :disabled="selectedEvents.length === 0" @click="handleBatchDelete">
+          <el-icon>
+            <Delete />
+          </el-icon>
           批量删除 ({{ selectedEvents.length }})
         </el-button>
       </div>
@@ -31,7 +33,9 @@
         <el-col :span="6">
           <div class="stat-item">
             <div class="stat-icon">
-              <el-icon color="#409EFF"><Notification /></el-icon>
+              <el-icon color="#409EFF">
+                <Notification />
+              </el-icon>
             </div>
             <div class="stat-info">
               <div class="stat-value">{{ realtimeStats.total_today || 0 }}</div>
@@ -42,7 +46,9 @@
         <el-col :span="6">
           <div class="stat-item">
             <div class="stat-icon">
-              <el-icon color="#67C23A"><CircleCheck /></el-icon>
+              <el-icon color="#67C23A">
+                <CircleCheck />
+              </el-icon>
             </div>
             <div class="stat-info">
               <div class="stat-value">{{ realtimeStats.processed_today || 0 }}</div>
@@ -53,7 +59,9 @@
         <el-col :span="6">
           <div class="stat-item">
             <div class="stat-icon">
-              <el-icon color="#E6A23C"><Clock /></el-icon>
+              <el-icon color="#E6A23C">
+                <Clock />
+              </el-icon>
             </div>
             <div class="stat-info">
               <div class="stat-value">{{ realtimeStats.recent_1hour || 0 }}</div>
@@ -64,7 +72,9 @@
         <el-col :span="6">
           <div class="stat-item">
             <div class="stat-icon">
-              <el-icon color="#F56C6C"><Warning /></el-icon>
+              <el-icon color="#F56C6C">
+                <Warning />
+              </el-icon>
             </div>
             <div class="stat-info">
               <div class="stat-value">{{ realtimeStats.alarms_today || 0 }}</div>
@@ -78,28 +88,12 @@
     <!-- 过滤器 -->
     <el-card class="filter-card">
       <div class="filters">
-        <el-select
-          v-model="filters.config_id"
-          placeholder="监听器"
-          clearable
-          style="width: 150px"
-          @change="loadData"
-        >
-          <el-option
-            v-for="config in listenerConfigs"
-            :key="config.config_id"
-            :label="config.name"
-            :value="config.config_id"
-          />
+        <el-select v-model="filters.config_id" placeholder="监听器" clearable style="width: 150px" @change="loadData">
+          <el-option v-for="config in listenerConfigs" :key="config.config_id" :label="config.name"
+            :value="config.config_id" />
         </el-select>
 
-        <el-select
-          v-model="filters.event_type"
-          placeholder="事件类型"
-          clearable
-          style="width: 150px"
-          @change="loadData"
-        >
+        <el-select v-model="filters.event_type" placeholder="事件类型" clearable style="width: 150px" @change="loadData">
           <el-option value="detection" label="检测事件" />
           <el-option value="alarm" label="报警事件" />
           <el-option value="status" label="状态事件" />
@@ -108,119 +102,72 @@
           <el-option value="other" label="其他事件" />
         </el-select>
 
-        <el-input
-          v-model="filters.device_id"
-          placeholder="设备ID"
-          style="width: 150px"
-          clearable
-          @keyup.enter="loadData"
-        />
+        <el-input v-model="filters.device_id" placeholder="设备ID" style="width: 150px" clearable
+          @keyup.enter="loadData" />
 
         <!-- device_name_mappings中的key为设备ID，value为设备名称，device_name_mappings有值时显示下拉框，无值时可以手动输入需要筛选的值 -->
         <div v-if="Object.keys(device_name_mappings).length > 0">
-          <el-select
-            v-model="filters.device_name"
-            placeholder="设备SN码"
-            style="width: 150px"
-            clearable
-            @change="loadData"
-          >
-            <el-option
-              v-for="device in Object.keys(device_name_mappings)"
-              :key="device"
-              :label="device_name_mappings[device]"
-              :value="device"
-            />
+          <el-select v-model="filters.device_name" placeholder="设备SN码" style="width: 150px" clearable
+            @change="loadData">
+            <el-option v-for="device in Object.keys(device_name_mappings)" :key="device"
+              :label="device_name_mappings[device]" :value="device" />
           </el-select>
         </div>
         <div v-else>
-          <el-input
-          v-model="filters.device_sn"
-          placeholder="设备SN码"
-          style="width: 150px"
-          clearable
-          @keyup.enter="loadData"
-        />
+          <el-input v-model="filters.device_sn" placeholder="设备SN码" style="width: 150px" clearable
+            @keyup.enter="loadData" />
         </div>
 
         <!-- engine_name_mappings中的key为引擎ID，value为引擎名称，engine_name_mappings有值时显示下拉框，无值时可以手动输入需要筛选的值 -->
 
         <div v-if="Object.keys(engine_name_mappings).length > 0">
-          <el-select
-            v-model="filters.engine_id"
-            placeholder="算法引擎ID"
-            style="width: 150px"
-            clearable
-            @change="loadData"
-          >
-            <el-option
-              v-for="engine in Object.keys(engine_name_mappings)"
-              :key="engine"
-              :label="engine_name_mappings[engine]"
-              :value="engine"
-            />
+          <el-select v-model="filters.engine_id" placeholder="算法引擎ID" style="width: 150px" clearable @change="loadData">
+            <el-option v-for="engine in Object.keys(engine_name_mappings)" :key="engine"
+              :label="engine_name_mappings[engine]" :value="engine" />
           </el-select>
         </div>
         <div v-else>
-          <el-input
-            v-model="filters.engine_id"
-            placeholder="算法引擎ID"
-            style="width: 120px"
-            clearable
-            @keyup.enter="loadData"
-          />
+          <el-input v-model="filters.engine_id" placeholder="算法引擎ID" style="width: 120px" clearable
+            @keyup.enter="loadData" />
         </div>
 
-        <el-date-picker
-          v-model="dateRange"
-          type="datetimerange"
-          range-separator="至"
-          start-placeholder="开始时间"
-          end-placeholder="结束时间"
-          @change="handleDateChange"
-          style="width: 300px"
-        />
+        <el-date-picker v-model="dateRange" type="datetimerange" range-separator="至" start-placeholder="开始时间"
+          end-placeholder="结束时间" @change="handleDateChange" style="width: 300px" />
 
         <el-button type="primary" @click="loadData">
-          <el-icon><Search /></el-icon>
+          <el-icon>
+            <Search />
+          </el-icon>
           搜索
         </el-button>
 
         <el-button @click="clearFilters">
-          <el-icon><RefreshLeft /></el-icon>
+          <el-icon>
+            <RefreshLeft />
+          </el-icon>
           重置
         </el-button>
 
         <div class="auto-refresh">
-          <el-switch
-            v-model="autoRefresh"
-            active-text="自动刷新"
-            @change="toggleAutoRefresh"
-          />
+          <el-switch v-model="autoRefresh" active-text="自动刷新" @change="toggleAutoRefresh" />
         </div>
       </div>
     </el-card>
 
     <!-- 事件列表 -->
     <el-card class="table-card">
-      <el-table
-        :data="events"
-        v-loading="loading"
-        style="width: 100%"
-        @row-click="showEventDetail"
-        @selection-change="handleSelectionChange"
-        row-class-name="clickable-row"
-      >
+      <el-table :data="events" v-loading="loading" style="width: 100%" @row-click="showEventDetail"
+        @selection-change="handleSelectionChange" row-class-name="clickable-row">
         <!-- 选择列 -->
-        <el-table-column type="selection" width="55" fixed="left"/>
-         
+        <el-table-column type="selection" width="55" fixed="left" />
+
         <el-table-column prop="device_id" label="设备ID" min-width="140">
           <template #default="{ row }">
             <span v-if="row.device_id">{{ row.device_id }}</span>
             <span v-else class="text-muted">-</span>
           </template>
         </el-table-column>
-<!-- 
+        <!-- 
         <el-table-column prop="channel_id" label="通道" width="80">
           <template #default="{ row }">
             <span v-if="row.channel_id">{{ row.channel_id }}</span>
@@ -252,7 +199,7 @@
             <span v-else class="text-muted">-</span>
           </template>
         </el-table-column>
-        
+
         <el-table-column prop="engine_id" label="算法引擎" width="120">
           <template #default="{ row }">
             <div v-if="row.engine_id || row.engine_name">
@@ -270,11 +217,7 @@
                 <el-tag size="small" type="primary">{{ getDetectionTargets(row).length }}个目标</el-tag>
               </div>
               <div class="targets-detail">
-                <div 
-                  v-for="(target, index) in getDetectionTargets(row).slice(0, 2)" 
-                  :key="index"
-                  class="target-item"
-                >
+                <div v-for="(target, index) in getDetectionTargets(row).slice(0, 2)" :key="index" class="target-item">
                   <span class="target-name">{{ target.class_name || '未知' }}</span>
                   <span class="target-confidence">{{ (target.confidence * 100).toFixed(1) }}%</span>
                 </div>
@@ -291,20 +234,14 @@
         <el-table-column label="图片" width="120">
           <template #default="{ row }">
             <div v-if="getEventImages(row).length > 0" class="image-column">
-              <div 
-                v-for="(image, index) in getEventImages(row).slice(0, 1)" 
-                :key="index"
-                class="thumbnail-container"
-                @click.stop="openImagePreview(getEventImages(row), index)"
-              >
-                <img 
-                  :src="getImageUrl(image.path)" 
-                  :alt="image.title"
-                  class="table-thumbnail"
-                  @error="handleImageError"
-                />
+              <div v-for="(image, index) in getEventImages(row).slice(0, 1)" :key="index" class="thumbnail-container"
+                @click.stop="openImagePreview(getEventImages(row), index)">
+                <img :src="getImageUrl(image.path)" :alt="image.title" class="table-thumbnail"
+                  @error="handleImageError" />
                 <div class="image-overlay">
-                  <el-icon class="preview-icon"><ZoomIn /></el-icon>
+                  <el-icon class="preview-icon">
+                    <ZoomIn />
+                  </el-icon>
                 </div>
               </div>
               <div v-if="getEventImages(row).length > 1" class="more-images">
@@ -333,11 +270,7 @@
 
         <el-table-column prop="status" label="状态" width="80">
           <template #default="{ row }">
-            <el-tag
-              :type="getStatusTagType(row.status)"
-              size="small"
-              effect="light"
-            >
+            <el-tag :type="getStatusTagType(row.status)" size="small" effect="light">
               {{ getStatusText(row.status) }}
             </el-tag>
           </template>
@@ -351,18 +284,10 @@
 
         <el-table-column label="操作" width="150" fixed="right">
           <template #default="{ row }">
-            <el-button
-              type="primary"
-              size="small"
-              @click.stop="showEventDetail(row)"
-            >
+            <el-button type="primary" size="small" @click.stop="showEventDetail(row)">
               详情
             </el-button>
-            <el-button
-              type="danger"
-              size="small"
-              @click.stop="handleSingleDelete(row)"
-            >
+            <el-button type="danger" size="small" @click.stop="handleSingleDelete(row)">
               删除
             </el-button>
           </template>
@@ -371,28 +296,15 @@
 
       <!-- 分页 -->
       <div class="pagination">
-        <el-pagination
-          v-model:current-page="pagination.page"
-          v-model:page-size="pagination.size"
-          :page-sizes="[20, 50, 100, 200]"
-          :total="pagination.total"
-          layout="total, sizes, prev, pager, next, jumper"
-          @size-change="loadData"
-          @current-change="loadData"
-        />
+        <el-pagination v-model:current-page="pagination.page" v-model:page-size="pagination.size"
+          :page-sizes="[20, 50, 100, 200]" :total="pagination.total"
+          layout="prev, pager, next, jumper, ->, total, sizes" @size-change="loadData" @current-change="loadData" />
       </div>
     </el-card>
 
     <!-- 事件详情对话框 -->
-    <el-dialog
-      v-model="detailDialogVisible"
-      title="事件详情"
-      width="1000px"
-      :close-on-click-modal="false"
-      :z-index="99999"
-      append-to-body
-      class="high-priority-dialog"
-    >
+    <el-dialog v-model="detailDialogVisible" title="事件详情" width="1000px" :close-on-click-modal="false" :z-index="99999"
+      append-to-body top="5vh" class="high-priority-dialog">
       <div v-if="selectedEvent" class="event-detail">
         <el-descriptions :column="2" border>
           <el-descriptions-item label="事件ID">
@@ -451,7 +363,66 @@
           <el-descriptions-item label="接收时间">
             {{ formatDateTime(selectedEvent.created_at) }}
           </el-descriptions-item>
+          <el-descriptions-item label="查看者">
+            {{ selectedEvent.viewed_by || '-' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="查看时间">
+            {{ selectedEvent.viewed_at ? formatDateTime(selectedEvent.viewed_at) : '-' }}
+          </el-descriptions-item>
         </el-descriptions>
+
+        <!-- 状态管理区域 -->
+        <div class="detail-section">
+          <h4>状态管理</h4>
+          <el-row :gutter="16">
+            <el-col :span="12">
+              <div class="status-operations">
+                <el-space direction="vertical" style="width: 100%">
+                  <div>
+                    <label>当前状态：</label>
+                    <el-tag :type="getStatusTagType(selectedEvent.status)">
+                      {{ getStatusText(selectedEvent.status) }}
+                    </el-tag>
+                  </div>
+                  <div>
+                    <label>快速操作：</label>
+                    <el-button type="success" size="small" @click="updateEventStatus(selectedEvent, 'viewed')"
+                      :disabled="selectedEvent.status === 'viewed'">
+                      <el-icon>
+                        <View />
+                      </el-icon>
+                      标记已查看
+                    </el-button>
+                    <el-button type="warning" size="small" @click="updateEventStatus(selectedEvent, 'flagged')"
+                      :disabled="selectedEvent.status === 'flagged'">
+                      <el-icon>
+                        <Flag />
+                      </el-icon>
+                      标记重要
+                    </el-button>
+                    <el-button type="info" size="small" @click="updateEventStatus(selectedEvent, 'archived')"
+                      :disabled="selectedEvent.status === 'archived'">
+                      <el-icon>
+                        <FolderOpened />
+                      </el-icon>
+                      归档
+                    </el-button>
+                  </div>
+                </el-space>
+              </div>
+            </el-col>
+            <el-col :span="12">
+              <div class="status-info">
+                <div v-if="selectedEvent.viewed_by">
+                  <label>操作用户：</label>{{ selectedEvent.viewed_by }}
+                </div>
+                <div v-if="selectedEvent.viewed_at">
+                  <label>操作时间：</label>{{ formatDateTime(selectedEvent.viewed_at) }}
+                </div>
+              </div>
+            </el-col>
+          </el-row>
+        </div>
 
         <!-- 检测目标详情 -->
         <div class="detail-section" v-if="getDetectionTargets(selectedEvent).length > 0">
@@ -485,71 +456,56 @@
 
         <div class="detail-section" v-if="selectedEvent.metadata">
           <h4>元数据</h4>
-          <el-input
-            v-model="formattedMetadata"
-            type="textarea"
-            :rows="6"
-            readonly
-          />
+          <el-input v-model="formattedMetadata" type="textarea" :rows="6" readonly />
         </div>
 
         <div class="detail-section" v-if="selectedEvent.normalized_data">
           <h4>标准化数据</h4>
-          <el-input
-            v-model="formattedNormalizedData"
-            type="textarea"
-            :rows="8"
-            readonly
-          />
+          <el-input v-model="formattedNormalizedData" type="textarea" :rows="8" readonly />
         </div>
 
         <div class="detail-section" v-if="selectedEvent.algorithm_data">
           <h4>算法数据</h4>
-          <el-input
-            v-model="formattedAlgorithmData"
-            type="textarea"
-            :rows="8"
-            readonly
-          />
+          <el-input v-model="formattedAlgorithmData" type="textarea" :rows="8" readonly />
         </div>
 
         <div class="detail-section" v-if="selectedEvent.original_data">
           <h4>原始数据</h4>
-          <el-input
-            v-model="formattedOriginalData"
-            type="textarea"
-            :rows="10"
-            readonly
-          />
+          <el-input v-model="formattedOriginalData" type="textarea" :rows="10" readonly />
         </div>
+
+        <!-- 备注 -->
+        <!-- <div class="detail-section">
+          <h4>事件备注</h4>
+          <el-input 
+            v-model="eventNotes" 
+            type="textarea" 
+            :rows="3" 
+            placeholder="添加事件备注..." 
+          />
+          <el-button 
+            type="primary" 
+            style="margin-top: 8px" 
+            @click="saveEventNotes"
+          >
+            保存备注
+          </el-button>
+        </div> -->
       </div>
 
-      <template #footer>
-        <el-button @click="detailDialogVisible = false">关闭</el-button>
-      </template>
+
     </el-dialog>
 
     <!-- 图片预览对话框 -->
-    <el-dialog
-      v-model="imagePreviewVisible"
-      title="图片预览"
-      width="900px"
-      :close-on-click-modal="false"
-      :z-index="100000"
-      append-to-body
-      class="image-preview-dialog high-priority-dialog"
-    >
+    <el-dialog v-model="imagePreviewVisible" title="图片预览" width="900px" :close-on-click-modal="false" :z-index="100000"
+      append-to-body class="image-preview-dialog high-priority-dialog">
       <div v-if="previewImages.length > 0" class="image-preview-content">
         <!-- 图片导航 -->
         <div class="image-nav" v-if="previewImages.length > 1">
           <el-button-group>
-            <el-button 
-              v-for="(img, index) in previewImages" 
-              :key="index"
-              :type="index === currentImageIndex ? 'primary' : 'default'"
-              size="small"
-              @click="currentImageIndex = index"
-            >
+            <el-button v-for="(img, index) in previewImages" :key="index"
+              :type="index === currentImageIndex ? 'primary' : 'default'" size="small"
+              @click="currentImageIndex = index">
               {{ img.title }}
             </el-button>
           </el-button-group>
@@ -560,24 +516,18 @@
           <div class="image-header">
             <h3>{{ previewImages[currentImageIndex]?.title }}</h3>
             <div class="image-actions">
-              <el-button 
-                type="primary" 
-                size="small"
-                @click="openOriginalImage"
-                v-if="hasOriginalImage(previewImages[currentImageIndex])"
-              >
-                <el-icon><FullScreen /></el-icon>
+              <el-button type="primary" size="small" @click="openOriginalImage"
+                v-if="hasOriginalImage(previewImages[currentImageIndex])">
+                <el-icon>
+                  <FullScreen />
+                </el-icon>
                 查看原图
               </el-button>
             </div>
           </div>
           <div class="image-display">
-            <img 
-              :src="getImageUrl(previewImages[currentImageIndex]?.path)" 
-              :alt="previewImages[currentImageIndex]?.title"
-              class="preview-image"
-              @error="handleImageError"
-            />
+            <img :src="getImageUrl(previewImages[currentImageIndex]?.path)"
+              :alt="previewImages[currentImageIndex]?.title" class="preview-image" @error="handleImageError" />
           </div>
           <div class="image-info">
             <span>文件大小: {{ formatFileSize(previewImages[currentImageIndex]?.file_size) }}</span>
@@ -591,22 +541,10 @@
     </el-dialog>
 
     <!-- 原图预览对话框 -->
-    <el-dialog
-      v-model="originalImageVisible"
-      title="原图预览"
-      width="40vw"
-      :close-on-click-modal="false"
-      :z-index="100001"
-      append-to-body
-      class="original-image-dialog high-priority-dialog"
-    >
+    <el-dialog v-model="originalImageVisible" title="原图预览" width="40vw" :close-on-click-modal="false" :z-index="100001"
+      append-to-body class="original-image-dialog high-priority-dialog">
       <div class="original-image-content">
-        <img 
-          :src="originalImageUrl" 
-          alt="原图"
-          class="original-image"
-          @error="handleImageError"
-        />
+        <img :src="originalImageUrl" alt="原图" class="original-image" @error="handleImageError" />
       </div>
     </el-dialog>
   </div>
@@ -617,7 +555,7 @@ import { ref, reactive, onMounted, onUnmounted, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Refresh, Download, Notification, CircleCheck, Clock, Warning,
-  Search, RefreshLeft, Delete, ZoomIn, FullScreen
+  Search, RefreshLeft, Delete, ZoomIn, FullScreen, View, Flag, FolderOpened
 } from '@element-plus/icons-vue'
 import { dataListenerApi } from '../../api/dataListener'
 
@@ -638,6 +576,7 @@ const originalImageVisible = ref(false)
 const originalImageUrl = ref('')
 const device_name_mappings = ref({})
 const engine_name_mappings = ref({})
+const eventNotes = ref('')
 
 // 过滤器
 const filters = reactive({
@@ -691,7 +630,7 @@ const formattedAlgorithmData = computed(() => {
 const loadData = async () => {
   try {
     loading.value = true
-    
+
     const params = {
       page: pagination.page,
       size: pagination.size,
@@ -699,7 +638,7 @@ const loadData = async () => {
     }
 
     const response = await dataListenerApi.getEvents(params)
-    
+
     if (response.data.status === 'success') {
       events.value = response.data.data.events
       pagination.total = response.data.data.pagination.total
@@ -730,30 +669,29 @@ const loadListenerConfigs = async () => {
 
 const loadRealtimeStats = async () => {
   try {
-    // 模拟实时统计数据
-    const now = new Date()
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-    const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000)
+    // 使用后端专门的统计API
+    const response = await dataListenerApi.getEventsStatsOverview()
 
-    const [todayResponse, recentResponse] = await Promise.all([
-      dataListenerApi.getEvents({
-        start_time: todayStart.toISOString(),
-        size: 1
-      }),
-      dataListenerApi.getEvents({
-        start_time: oneHourAgo.toISOString(),
-        size: 1
-      })
-    ])
-
-    realtimeStats.value = {
-      total_today: todayResponse.data.data?.pagination?.total || 0,
-      processed_today: Math.floor((todayResponse.data.data?.pagination?.total || 0) * 0.85),
-      recent_1hour: recentResponse.data.data?.pagination?.total || 0,
-      alarms_today: Math.floor((todayResponse.data.data?.pagination?.total || 0) * 0.1)
+    if (response.data.status === 'success') {
+      const stats = response.data.data
+      realtimeStats.value = {
+        total_today: stats.total_today || 0,
+        processed_today: stats.processed_today || 0,
+        recent_1hour: stats.recent_1hour || 0,
+        alarms_today: stats.alarms_today || 0
+      }
+    } else {
+      throw new Error('API返回状态异常')
     }
   } catch (error) {
-    // console.error('加载统计数据失败:', error)
+    console.error('加载统计数据失败:', error)
+    // 提供默认值
+    realtimeStats.value = {
+      total_today: 0,
+      processed_today: 0,
+      recent_1hour: 0,
+      alarms_today: 0
+    }
   }
 }
 
@@ -796,11 +734,82 @@ const showEventDetail = async (event) => {
     const response = await dataListenerApi.getEvent(event.event_id)
     if (response.data.status === 'success') {
       selectedEvent.value = response.data.data
+      eventNotes.value = selectedEvent.value.notes || ''
       detailDialogVisible.value = true
+
+      // 如果状态是新事件，自动更新为已查看
+      if (selectedEvent.value.status === 'new') {
+        await updateEventStatus(selectedEvent.value, 'viewed', false)
+      }
     }
   } catch (error) {
     // console.error('获取事件详情失败:', error)
     ElMessage.error('获取事件详情失败')
+  }
+}
+
+// 更新事件状态
+const updateEventStatus = async (event, newStatus, showMessage = true) => {
+  try {
+    const response = await dataListenerApi.updateEvent(event.event_id, { status: newStatus })
+
+    if (response.data.status === 'success') {
+      // 更新本地状态
+      if (selectedEvent.value && selectedEvent.value.event_id === event.event_id) {
+        selectedEvent.value.status = newStatus
+        selectedEvent.value.processed = response.data.data.processed
+        selectedEvent.value.viewed_by = response.data.data.viewed_by
+        selectedEvent.value.viewed_at = response.data.data.viewed_at
+      }
+
+      // 更新列表中的状态
+      const index = events.value.findIndex(e => e.event_id === event.event_id)
+      if (index !== -1) {
+        events.value[index].status = newStatus
+        events.value[index].processed = response.data.data.processed
+        events.value[index].viewed_by = response.data.data.viewed_by
+        events.value[index].viewed_at = response.data.data.viewed_at
+      }
+
+      if (showMessage) {
+        ElMessage.success('状态更新成功')
+      }
+
+      // 重新加载统计数据
+      await loadRealtimeStats()
+    }
+  } catch (error) {
+    ElMessage.error('更新状态失败: ' + error.message)
+  }
+}
+
+// 保存事件备注
+const saveEventNotes = async () => {
+  if (!selectedEvent.value) return
+
+  try {
+    const response = await dataListenerApi.updateEvent(selectedEvent.value.event_id, {
+      notes: eventNotes.value
+    })
+
+    if (response.data.status === 'success') {
+      // 更新本地状态
+      selectedEvent.value.notes = eventNotes.value
+      selectedEvent.value.viewed_by = response.data.data.viewed_by
+      selectedEvent.value.viewed_at = response.data.data.viewed_at
+
+      // 更新列表中的状态
+      const index = events.value.findIndex(e => e.event_id === selectedEvent.value.event_id)
+      if (index !== -1) {
+        events.value[index].notes = eventNotes.value
+        events.value[index].viewed_by = response.data.data.viewed_by
+        events.value[index].viewed_at = response.data.data.viewed_at
+      }
+
+      ElMessage.success('备注保存成功')
+    }
+  } catch (error) {
+    ElMessage.error('保存备注失败: ' + error.message)
   }
 }
 
@@ -839,7 +848,7 @@ const handleSingleDelete = async (event) => {
         type: 'warning'
       }
     )
-    
+
     await dataListenerApi.deleteEvent(event.event_id)
     ElMessage.success('删除成功')
     await loadData() // 重新加载数据
@@ -857,7 +866,7 @@ const handleBatchDelete = async () => {
     ElMessage.warning('请选择要删除的事件')
     return
   }
-  
+
   try {
     await ElMessageBox.confirm(
       `确定要删除选中的 ${selectedEvents.value.length} 个事件吗？此操作不可恢复。`,
@@ -868,7 +877,7 @@ const handleBatchDelete = async () => {
         type: 'warning'
       }
     )
-    
+
     const eventIds = selectedEvents.value.map(event => event.event_id)
     await dataListenerApi.batchDeleteEvents(eventIds)
     ElMessage.success(`成功删除 ${eventIds.length} 个事件`)
@@ -885,41 +894,41 @@ const handleBatchDelete = async () => {
 // 获取检测目标
 const getDetectionTargets = (event) => {
   if (!event) return []
-  
+
   // 从normalized_data.targets获取
   if (event.normalized_data?.targets?.length > 0) {
     return event.normalized_data.targets
   }
-  
+
   // 从algorithm_data获取
   if (event.algorithm_data?.detections?.length > 0) {
     return event.algorithm_data.detections
   }
-  
+
   // 从原始数据获取
   if (event.original_data?.detections?.length > 0) {
     return event.original_data.detections
   }
-  
+
   if (event.original_data?.nn_output?.detections?.length > 0) {
     return event.original_data.nn_output.detections
   }
-  
+
   return []
 }
 
 // 获取事件图片
 const getEventImages = (event) => {
   if (!event?.normalized_data?.processed_images) return []
-  
+
   const images = []
   const processedImages = event.normalized_data.processed_images
-  
+
   Object.keys(processedImages).forEach(fieldName => {
     const imageData = processedImages[fieldName]
-    
+
     if (imageData.error) return // 跳过处理失败的图片
-    
+
     // 优先显示缩略图
     if (imageData.thumbnail_path) {
       images.push({
@@ -929,7 +938,7 @@ const getEventImages = (event) => {
         original_path: imageData.original_path
       })
     }
-    
+
     // 如果没有缩略图，显示原图
     if (!imageData.thumbnail_path && imageData.original_path) {
       images.push({
@@ -940,7 +949,7 @@ const getEventImages = (event) => {
       })
     }
   })
-  
+
   return images
 }
 
@@ -1027,7 +1036,11 @@ const getStatusTagType = (status) => {
     pending: 'warning',
     processed: 'success',
     failed: 'danger',
-    ignored: 'info'
+    ignored: 'info',
+    new: 'primary',
+    viewed: 'success',
+    flagged: 'warning',
+    archived: 'danger'
   }
   return statusMap[status] || 'info'
 }
@@ -1037,7 +1050,11 @@ const getStatusText = (status) => {
     pending: '待处理',
     processed: '已处理',
     failed: '处理失败',
-    ignored: '已忽略'
+    ignored: '已忽略',
+    new: '新事件',
+    viewed: '已查看',
+    flagged: '已标记',
+    archived: '已归档'
   }
   return statusMap[status] || status
 }
@@ -1073,12 +1090,6 @@ onUnmounted(() => {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 20px;
-}
-
-.header-content h1 {
-  margin: 0 0 8px 0;
-  font-size: 24px;
-  font-weight: 600;
 }
 
 .header-content p {
@@ -1150,14 +1161,13 @@ onUnmounted(() => {
 
 .pagination {
   margin-top: 20px;
-  display: flex;
-  justify-content: center;
+  text-align: right;
 }
 
-.event-detail {
+/* .event-detail {
   max-height: 600px;
   overflow-y: auto;
-}
+} */
 
 .detail-section {
   margin-top: 20px;
@@ -1168,6 +1178,43 @@ onUnmounted(() => {
   font-size: 14px;
   font-weight: 600;
   color: #333;
+}
+
+/* 状态管理样式 */
+.status-operations {
+  padding: 16px;
+  background-color: #f8f9fa;
+  border-radius: 6px;
+  border: 1px solid #e9ecef;
+}
+
+.status-operations label {
+  font-weight: 600 !important;
+  color: #1976d2 !important;
+  margin-right: 12px !important;
+  font-size: 14px !important;
+}
+
+.status-info {
+  padding: 16px;
+  background-color: #f1f3f4;
+  border-radius: 6px;
+  border: 1px solid #dee2e6;
+}
+
+.status-info label {
+  font-weight: 600 !important;
+  color: #7b1fa2 !important;
+  margin-right: 12px !important;
+  font-size: 14px !important;
+}
+
+.status-info div {
+  margin-bottom: 12px;
+}
+
+.status-info div:last-child {
+  margin-bottom: 0;
 }
 
 /* 检测目标样式 */

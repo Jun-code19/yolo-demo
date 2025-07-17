@@ -163,11 +163,6 @@ const openDashboard = () => {
           <template #title>视频设备</template>
         </el-menu-item>
 
-        <el-menu-item index="/edge-servers">
-          <el-icon><Monitor /></el-icon>
-          <template #title>边缘AI设备</template>
-        </el-menu-item>
-        
         <el-menu-item index="/models">
           <el-icon><DataLine /></el-icon>
           <template #title>模型管理</template>
@@ -186,6 +181,11 @@ const openDashboard = () => {
         <el-menu-item index="/data-events">
           <el-icon><DataLine /></el-icon>
           <template #title>数据事件</template>
+        </el-menu-item>
+
+        <el-menu-item index="/edge-servers">
+          <el-icon><Monitor /></el-icon>
+          <template #title>边缘AI设备</template>
         </el-menu-item>
 
         <el-menu-item index="/system">

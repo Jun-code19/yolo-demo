@@ -96,6 +96,7 @@ class DetectionTask:
 
         self.stop_event = threading.Event()
         self.model = None
+        self.device = None
         self.cap = None
         self.thread = None
         self.lock = Lock()  # 初始化锁
@@ -307,7 +308,7 @@ class DetectionTask:
 
             frame_count = 0
             cooldown_period = 5  # 检测事件的冷却时间（秒）
-            skip_frame_count = 5  # 每隔多少帧进行一次检测
+            skip_frame_count = 2  # 每隔多少帧进行一次检测
             
             while not self.stop_event.is_set():
                 try:                                  
@@ -374,8 +375,8 @@ class DetectionTask:
                                         self._process_smart_analysis_events(img_result, detections, speed)
                                     else:
                                         # 普通检测：仅显示检测结果，没有智能分析
-                                        img_result = self.display_detection_results(detect_frame, results[0])
-                                        # 处理检测事件                                        
+                                        img_result = self.display_detection_results(detect_frame, results[0],show_boxes=True)
+                                        # 处理检测事件
                                         self._process_detection_events(cooldown_period, current_time, speed, img_result, detections)                            
 
                             if not self.clients:
@@ -416,8 +417,11 @@ class DetectionTask:
                 logger.info(f"事件循环已关闭: {self.config_id}")  
        
     # 显示检测结果
-    def display_detection_results(self, img, results): # 显示检测结果
+    def display_detection_results(self, img, results,show_boxes=True): # 显示检测结果
         if not hasattr(results, 'boxes') or results.boxes is None:
+            return img
+        
+        if not show_boxes:
             return img
 
         boxes = results.boxes
@@ -430,8 +434,7 @@ class DetectionTask:
                 continue
 
             color = self.get_class_color(cls)
-            # 只在复选框选中时绘制边界框
-            # if self.show_boxes_checkbox.isChecked():
+            
             cv2.rectangle(img, (int(x1), int(y1)), (int(x2), int(y2)), color, 2)
             class_name = self.class_names[cls] if self.class_names else f"Class {cls}"
             label = f"{class_name}: {conf:.2f}"
@@ -615,7 +618,7 @@ class DetectionTask:
                 # annotated_frame = self.draw_detections(frame, detections)    
                 # 保存带检测框的截图（原图）
                 thumbnail_path = save_dir / f"{event_id}.jpg"
-                cv2.imwrite(str(thumbnail_path), frame)
+                cv2.imwrite(str(thumbnail_path), frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
                 event.thumbnail_path = str(thumbnail_path)
 
                 # 保存带检测框的截图 (缩略图)
@@ -771,7 +774,7 @@ class DetectionTask:
             if self.save_mode in [SaveMode.screenshot, SaveMode.both]:   
                 # 保存带检测框的截图（原图）
                 thumbnail_path = save_dir / f"{event_id}.jpg"
-                cv2.imwrite(str(thumbnail_path), frame)
+                cv2.imwrite(str(thumbnail_path), frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
                 event.thumbnail_path = str(thumbnail_path)
           
             # 提交事件
@@ -835,7 +838,7 @@ class DetectionTask:
             if self.save_mode in [SaveMode.screenshot, SaveMode.both]:   
                 # 保存带检测框的截图（原图）
                 thumbnail_path = save_dir / f"{event_id}.jpg"
-                cv2.imwrite(str(thumbnail_path), frame)
+                cv2.imwrite(str(thumbnail_path), frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
                 event.thumbnail_path = str(thumbnail_path)
           
             # 提交事件
@@ -1461,7 +1464,7 @@ class DetectionServer:
             task.device = torch.device(device)
             if device == 'cuda' and hasattr(task.model, 'model'):
                 task.model.model.half()
-            logger.info(f"使用缓存模型设置任务: {config_id}")
+            logger.info(f"使用缓存模型设置任务: {config_id},硬件设备: {device}, 加载模型: {hasattr(task.model, 'model')}")
         
         # 设置事件循环
         task.loop = asyncio.get_event_loop()

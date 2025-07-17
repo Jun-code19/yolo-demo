@@ -208,17 +208,25 @@ async def create_analysis_job(
         db.rollback()
         raise HTTPException(status_code=500, detail=f"创建分析任务失败: {str(e)}")
 
-@router.get("/jobs", response_model=List[AnalysisJobResponse])
+@router.get("/jobs")
 async def get_analysis_jobs(
+    page: int = 1,
+    page_size: int = 10,
     db: Session = Depends(get_db)
 ):
-    """获取所有人群分析任务"""
+    """获取人群分析任务列表（分页）"""
     # 从内存中获取运行中的任务
     memory_jobs = crowd_analyzer.get_analysis_jobs()
     memory_jobs_dict = {job.get("job_id"): job for job in memory_jobs}
     
-    # 从数据库获取所有任务
-    db_jobs = db.query(CrowdAnalysisJob).order_by(CrowdAnalysisJob.created_at.desc()).all()
+    # 查询总数
+    total_count = db.query(CrowdAnalysisJob).count()
+    
+    # 计算分页
+    skip = (page - 1) * page_size
+    
+    # 从数据库获取分页任务
+    db_jobs = db.query(CrowdAnalysisJob).order_by(CrowdAnalysisJob.created_at.desc()).offset(skip).limit(page_size).all()
     
     # 转换为响应格式
     responses = []
@@ -269,7 +277,13 @@ async def get_analysis_jobs(
             }
         responses.append(response)
     
-    return responses
+    return {
+        "data": responses,
+        "total": total_count,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": (total_count + page_size - 1) // page_size
+    }
 
 @router.get("/jobs/{job_id}", response_model=AnalysisJobResponse)
 async def get_analysis_job(
@@ -693,6 +707,10 @@ async def update_analysis_job(
     # 验证cron和interval的一致性
     if job_data.cron_expression is not None and job_data.interval is not None:
         logger.warning(f"更新任务时同时提供了cron表达式和interval，将优先使用cron表达式: {job_data.cron_expression}")
+        job_data.interval = None
+    elif job_data.cron_expression is None :
+        job_data.cron_expression = None
+    elif job_data.interval is None:
         job_data.interval = None
     
     # 更新任务信息

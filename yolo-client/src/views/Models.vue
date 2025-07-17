@@ -1,73 +1,69 @@
 <template>
-  <div class="models-container">
-    <el-card class="model-card">
-      <template #header>
-        <div class="card-header">
-          <h2>视频检测模型管理</h2>
-          <el-button type="primary" @click="showUploadDialog">上传新模型</el-button>
-        </div>
-      </template>
+  <div class="models-container">    
+    <div class="card-header">
+      <h2>检测模型管理</h2>
+      <el-button type="primary" @click="showUploadDialog">上传新模型</el-button>
+    </div>
       
-      <!-- 模型列表 -->
-      <div v-loading="loading">
-        <el-tabs type="border-card">
-          <!-- 按模型类型分组展示 -->
-          <el-tab-pane v-for="(models, type) in groupedModels" :key="type" :label="getModelTypeName(type)">
-            <el-table :data="models" border style="width: 100%">
-              <el-table-column prop="models_name" label="模型名称" width="180" />
-              <el-table-column prop="format" label="格式" width="100">
-                <template #default="scope">
-                  <el-tag>{{ scope.row.format.toUpperCase() }}</el-tag>
-                </template>
-              </el-table-column>
-              <el-table-column prop="file_size" label="文件大小" width="120">
-                <template #default="scope">
-                  {{ formatFileSize(scope.row.file_size) }}
-                </template>
-              </el-table-column>
-              <el-table-column prop="upload_time" label="上传时间" width="180">
-                <template #default="scope">
-                  {{ formatDate(scope.row.upload_time) }}
-                </template>
-              </el-table-column>
-              <el-table-column prop="is_active" label="状态" width="100">
-                <template #default="scope">
-                  <el-tag :type="scope.row.is_active ? 'success' : 'info'">
-                    {{ scope.row.is_active ? '已激活' : '未激活' }}
-                  </el-tag>
-                </template>
-              </el-table-column>
-              <el-table-column label="操作" width="280" fixed="right">
-                <template #default="scope">
-                  <el-button-group>
-                  <el-button type="info" size="small" @click="viewModelDetails(scope.row)">
-                    详情
-                  </el-button>
-                  <el-button type="primary" size="small" @click="editModel(scope.row)">
-                    编辑
-                  </el-button>
-                  <el-button 
-                    :type="scope.row.is_active ? 'warning' : 'success'" 
-                    size="small"
-                    @click="toggleModelActive(scope.row)"
-                  >
-                    {{ scope.row.is_active ? '停用' : '启用' }}
-                  </el-button>
-                  <el-button type="danger" size="small" @click="confirmDelete(scope.row)">
-                    删除
-                  </el-button>
-                  </el-button-group>
-                </template>
-              </el-table-column>
-            </el-table>
-          </el-tab-pane>
-          
-          <!-- 如果没有模型 -->
-          <div v-if="!Object.keys(groupedModels).length" class="no-data">
-            <el-empty description="暂无模型数据，请上传模型文件"></el-empty>
-          </div>
-        </el-tabs>
-      </div>
+    <!-- 模型列表 -->
+    <el-card v-loading="loading">
+      <el-tabs type="border-card">
+        <!-- 按模型类型分组展示 -->
+        <el-tab-pane v-for="(models, type) in groupedModels" :key="type" :label="getModelTypeName(type)">
+          <el-table :data="models" border style="width: 100%">
+            <el-table-column prop="models_name" label="模型名称" sortable width="180" />
+            <el-table-column prop="format" label="格式" width="100">
+              <template #default="scope">
+                <el-tag>{{ scope.row.format.toUpperCase() }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="file_size" label="文件大小" sortable width="120">
+              <template #default="scope">
+                {{ formatFileSize(scope.row.file_size) }}
+              </template>
+            </el-table-column>
+            <el-table-column prop="upload_time" label="上传时间" sortable width="180">
+              <template #default="scope">
+                {{ formatDate(scope.row.upload_time) }}
+              </template>
+            </el-table-column>
+            <el-table-column prop="is_active" label="状态" width="100">
+              <template #default="scope">
+                <el-tag :type="scope.row.is_active ? 'success' : 'info'">
+                  {{ scope.row.is_active ? '已激活' : '未激活' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="280" fixed="right">
+              <template #default="scope">
+                <el-button-group>
+                <el-button type="info" size="small" @click="viewModelDetails(scope.row)">
+                  详情
+                </el-button>
+                <el-button type="primary" size="small" @click="editModel(scope.row)">
+                  编辑
+                </el-button>
+                <el-button 
+                  :type="scope.row.is_active ? 'warning' : 'success'" 
+                  size="small"
+                  @click="toggleModelActive(scope.row)"
+                >
+                  {{ scope.row.is_active ? '停用' : '启用' }}
+                </el-button>
+                <el-button type="danger" size="small" @click="confirmDelete(scope.row)">
+                  删除
+                </el-button>
+                </el-button-group>
+              </template>
+            </el-table-column>
+          </el-table>
+        </el-tab-pane>
+        
+        <!-- 如果没有模型 -->
+        <div v-if="!Object.keys(groupedModels).length" class="no-data">
+          <el-empty description="暂无模型数据，请上传模型文件"></el-empty>
+        </div>
+      </el-tabs>
     </el-card>
     
     <!-- 上传模型对话框 -->
@@ -865,14 +861,11 @@ const formatParameters = (params) => {
   padding: 20px;
 }
 
-.model-card {
-  margin-bottom: 20px;
-}
-
 .card-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  margin-bottom: 20px;
 }
 
 .card-header h2 {

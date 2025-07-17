@@ -78,6 +78,12 @@ export const dataListenerApi = {
   // 统计信息
   getStats: () => apiClient.get('/data-listeners/stats/summary'),
 
+  // 获取外部事件统计概览
+  getEventsStatsOverview: () => apiClient.get('/data-listeners/stats/overview'),
+
+  // 更新外部事件
+  updateEvent: (eventId, updateData) => apiClient.put(`/data-listeners/events/${eventId}`, updateData),
+
   // 批量操作
   batchStart: (configIds) => apiClient.post('/data-listeners/batch/start', configIds),
   batchStop: (configIds) => apiClient.post('/data-listeners/batch/stop', configIds),

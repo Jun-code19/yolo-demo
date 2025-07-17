@@ -830,7 +830,7 @@ onMounted(async () => {
     // })
 
     // 可选：启动自动刷新（默认是关闭的）
-    // dataBindingManager.startAutoRefresh()
+    dataBindingManager.startAutoRefresh()
   } catch (error) {
     // console.error('模块数据加载失败:', error)
   }
@@ -2464,8 +2464,7 @@ onUnmounted(() => {
 }
 
 .btn-icon {
-  font-size: 16px;
-  transition: transform 0.3s ease;
+  font-size: 16px;transition: transform 0.3s ease;
 }
 
 .footer-btn:hover .btn-icon {

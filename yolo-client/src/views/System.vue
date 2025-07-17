@@ -165,6 +165,7 @@
                   </el-option>
                 </el-option-group>
               </el-select>
+              <el-input v-model="logFilters.actionType" placeholder="请输入自定义操作类型" style="width: 180px; margin-right: 10px"></el-input>
             </el-form-item>
             <el-form-item>
               <el-button type="primary" @click="handleSearch">查询</el-button>
@@ -1209,6 +1210,14 @@ onUnmounted(() => {
 .filter-card {
   margin-bottom: 20px;
   border-radius: 8px;
+}
+
+.filter-card .el-form {
+  margin-bottom: 0;
+}
+
+.filter-card .el-form-item {
+  margin-bottom: 0;
 }
 
 .filter-form {
