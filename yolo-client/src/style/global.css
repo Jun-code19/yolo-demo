@@ -2,11 +2,11 @@
 
 /* Element Plus 对话框和下拉框的z-index层级管理 */
 .el-dialog__wrapper {
-  z-index: 9999;
+  z-index: 999999;
 }
 
 .el-overlay {
-  z-index: 9998;
+  z-index: 999998;
 }
 
 /* 确保下拉框和其他弹出层在对话框之上 */
@@ -16,7 +16,7 @@
 .el-tooltip__popper,
 .el-popover,
 .el-dropdown-menu {
-  z-index: 10001 !important;
+  z-index: 999999 !important;
 }
 
 /* 对话框内的弹出层应该有更高的优先级 */
@@ -26,34 +26,44 @@
 .el-dialog .el-tooltip__popper,
 .el-dialog .el-popover,
 .el-dialog .el-dropdown-menu {
-  z-index: 10002 !important;
+  z-index: 999999 !important;
 }
 
 /* 嵌套对话框的特殊处理 */
 .el-dialog.is-top .el-select-dropdown,
 .el-dialog.is-top .el-popper,
 .el-dialog.is-top .el-picker-panel {
-  z-index: 10003 !important;
+  z-index: 999999 !important;
 }
 
 /* 特殊类名的高优先级处理 */
 .edit-dialog-select,
 .high-priority-popper {
-  z-index: 10003 !important;
+  z-index: 999999 !important;
 }
 
 /* 确保loading遮罩层也有合适的层级 */
 .el-loading-mask {
-  z-index: 10000 !important;
+  z-index: 999998 !important;
 }
 
 .el-dialog .el-loading-mask {
-  z-index: 10001 !important;
+  z-index: 999999 !important;
 }
 
 /* 消息提示的层级保证 */
 .el-message,
 .el-notification,
 .el-message-box__wrapper {
-  z-index: 10004 !important;
+  z-index: 999999 !important;
+}
+
+/* 强制覆盖所有Element Plus弹出层 */
+body .el-select-dropdown,
+body .el-popper,
+body .el-picker-panel,
+body .el-tooltip__popper,
+body .el-popover,
+body .el-dropdown-menu {
+  z-index: 999999 !important;
 } 

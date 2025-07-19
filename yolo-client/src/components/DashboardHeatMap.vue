@@ -206,15 +206,12 @@ watch(hoveredArea, () => {
   }
 })
 
-
-
 // 加载配置
 const loadConfig = async () => {
   try {
     // 先尝试从API加载配置
     const response = await fetch('/api/v1/heatmap/dashboard/config')
     const result = await response.json()
-    
     if (result.success && result.data) {
       config.value = {
         mapId: result.data.map_id.toString(),

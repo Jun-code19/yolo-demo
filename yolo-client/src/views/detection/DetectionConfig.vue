@@ -130,9 +130,10 @@
       width="750px" 
       top="5vh" 
       destroy-on-close
-      :z-index="99999"
+      :z-index="999999"
       append-to-body
       class="config-dialog high-priority-dialog"
+      :modal-append-to-body="false"
     >
       <div class="config-steps">
         <div class="step" :class="{ active: currentStep >= 1 }">
@@ -162,7 +163,7 @@
             <div class="form-grid">
               <!-- 设备选择 -->
               <el-form-item label="设备" prop="device_id" class="grid-item full-width">
-                <el-select v-model="formState.device_id" placeholder="请选择设备" :disabled="isEdit" filterable>
+                <el-select v-model="formState.device_id" placeholder="请选择设备" :disabled="isEdit" filterable popper-append-to-body>
                   <el-option v-for="device in deviceList" :key="device.device_id"
                     :label="`${device.device_name} (${device.device_id})`" :value="device.device_id">
                     <div class="device-option">
@@ -178,7 +179,7 @@
 
               <!-- 模型选择 -->
               <el-form-item label="检测模型" prop="models_id" class="grid-item full-width">
-                <el-select v-model="formState.models_id" placeholder="请选择检测模型" @change="updateTargetClasses" filterable>
+                <el-select v-model="formState.models_id" placeholder="请选择检测模型" @change="updateTargetClasses" filterable popper-append-to-body>
                   <el-option v-for="model in modelList" :key="model.models_id"
                     :label="`${model.models_name} (${getModelTypeName(model.models_type)})`" :value="model.models_id">
                     <div class="model-option">
@@ -213,7 +214,7 @@
               <!-- 目标类别 -->
               <el-form-item label="目标类别" prop="target_classes" class="grid-item full-width">
                 <el-select v-model="formState.target_classes" multiple placeholder="请选择要检测的目标类别" collapse-tags
-                  collapse-tags-tooltip :max-collapse-tags="4" filterable>
+                  collapse-tags-tooltip :max-collapse-tags="4" filterable popper-append-to-body>
                   <el-option v-for="(classItem, index) in targetClasses" :key="classItem.value" :label="classItem.label"
                     :value="classItem.value">
                     <div class="class-option">
@@ -316,7 +317,7 @@
                 <div class="form-row time-settings">
                   <el-form-item label="执行时间" class="form-item">
                     <el-time-picker v-model="formState.scheduleTime" format="HH:mm" placeholder="选择时间"
-                      class="time-picker"></el-time-picker>
+                      class="time-picker" popper-append-to-body></el-time-picker>
                   </el-form-item>
                   <el-form-item label="执行时长" class="form-item">
                     <div class="input-with-unit">
@@ -377,7 +378,7 @@
                           <div v-for="(time, index) in formState.scheduleTimePoints" :key="index"
                             class="time-point-item">
                             <el-time-picker v-model="formState.scheduleTimePoints[index]" format="HH:mm"
-                              class="time-point-picker"></el-time-picker>
+                              class="time-point-picker" popper-append-to-body></el-time-picker>
                             <el-button type="danger" circle plain @click="removeTimePoint(index)"
                               class="remove-time-btn" size="small">
                               <el-icon>
@@ -396,12 +397,12 @@
                         <div class="time-range-row">
                           <el-form-item label="开始时间" class="form-item">
                             <el-time-picker v-model="formState.scheduleStartTime" format="HH:mm" placeholder="开始时间"
-                              class="time-picker"></el-time-picker>
+                              class="time-picker" popper-append-to-body></el-time-picker>
                           </el-form-item>
                           <div class="time-separator">至</div>
                           <el-form-item label="结束时间" class="form-item">
                             <el-time-picker v-model="formState.scheduleEndTime" format="HH:mm" placeholder="结束时间"
-                              class="time-picker"></el-time-picker>
+                              class="time-picker" popper-append-to-body></el-time-picker>
                           </el-form-item>
                         </div>
                         <el-form-item label="执行间隔">
@@ -454,7 +455,7 @@
                         <!-- 每月日期 -->
                         <div v-else-if="formState.scheduleDateType === 'monthday'" class="monthday-section">
                           <el-select v-model="formState.scheduleMonthdays" multiple placeholder="选择每月几号执行"
-                            style="width: 100%" collapse-tags>
+                            style="width: 100%" collapse-tags popper-append-to-body>
                             <el-option v-for="i in 31" :key="i" :label="`${i}日`" :value="i"></el-option>
                           </el-select>
                           <div class="quick-buttons">
@@ -467,7 +468,7 @@
                         <!-- 特定日期 -->
                         <div v-else class="specific-date-section">
                           <el-date-picker v-model="formState.scheduleSpecificDates" type="dates" placeholder="选择特定日期"
-                            style="width: 100%">
+                            style="width: 100%" popper-append-to-body>
                           </el-date-picker>
                         </div>
                       </div>
@@ -2084,6 +2085,6 @@ export default defineComponent({
 
 /* 高优先级对话框样式 - 确保不被菜单和头部遮挡 */
 .high-priority-dialog {
-  z-index: 99999 !important;
+  z-index: 999999 !important;
 }
 </style>

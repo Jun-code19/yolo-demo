@@ -11,25 +11,25 @@ export default defineConfig({
     proxy: {
       // 数据服务API
       '/api/v1': {
-        target: 'http://10.83.38.87:8001',
+        target: 'http://10.83.38.167:8001',
         changeOrigin: true,
         secure: false
       },
       // 检测服务API
       '/api/v2': {
-        target: 'http://10.83.38.87:8000',
+        target: 'http://10.83.38.167:8000',
         changeOrigin: true,
         secure: false
       },
       // 检测预览WebSocket
       '/ws/detection/preview': {
-        target: 'ws://10.83.38.87:8000',
+        target: 'ws://10.83.38.167:8000',
         ws: true,
         changeOrigin: true
       },
       // RTSP预览WebSocket
       '/ws/rtsp/preview': {
-        target: 'ws://10.83.38.87:8000',
+        target: 'ws://10.83.38.167:8000',
         ws: true,
         changeOrigin: true
       }

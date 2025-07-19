@@ -10,23 +10,6 @@
       </div>
       <div class="header-right">
         <div class="dashboard-controls">
-          <!-- <button 
-            class="control-btn refresh-btn" 
-            @click="refreshData"
-            title="手动刷新数据"
-            :disabled="isRefreshing"
-          >
-            <span class="btn-icon">🔄</span>
-            {{ isRefreshing ? '刷新中...' : '刷新数据' }}
-          </button>
-          <button 
-            class="control-btn config-btn" 
-            @click="showDataBindingManager = true"
-            title="数据绑定管理"
-          >
-            <span class="btn-icon">⚙️</span>
-            数据管理
-          </button> -->
           <div class="weather-info">
             <span>晴</span>
             <span>22°C</span>
@@ -264,19 +247,6 @@
           <canvas ref="zoomCanvas" class="zoom-canvas" @wheel="handleZoomWheel" @mousedown="handleZoomMouseDown"
             @mousemove="handleZoomMouseMove" @mouseup="handleZoomMouseUp" @mouseleave="handleZoomMouseUp"
             @dblclick="resetZoom"></canvas>
-          <!-- <div class="zoom-controls">
-          <div class="control-group">
-            <button @click="zoomIn" class="zoom-btn zoom-in" title="放大">
-              <span>+</span>
-            </button>
-            <button @click="zoomOut" class="zoom-btn zoom-out" title="缩小">
-              <span>-</span>
-            </button>
-            <button @click="resetZoom" class="zoom-btn zoom-reset" title="重置">
-              <span>⌂</span>
-            </button>
-          </div>
-        </div> -->
           <div class="zoom-tips">
             <div class="tip-item">🖱️ 滚轮缩放</div>
             <div class="tip-item">✋ 拖拽移动</div>
@@ -286,10 +256,6 @@
 
         <template #footer>
           <div class="dialog-footer-custom">
-            <!-- <button @click="showMapZoomDialog = false" class="footer-btn secondary">
-              <span class="btn-icon">✕</span>
-              <span>关闭</span>
-            </button> -->
             <button @click="goToHeatMapManagement" class="footer-btn primary">
               <span class="btn-icon">⚙️</span>
               <span>管理设置</span>
@@ -297,17 +263,6 @@
           </div>
         </template>
       </el-dialog>
-
-      <!-- 数据绑定管理器 -->
-      <div v-if="showDataBindingManager" class="data-binding-overlay">
-        <div class="data-binding-modal">
-          <div class="modal-header">
-            <h2>数据绑定管理</h2>
-            <button @click="showDataBindingManager = false" class="close-btn">&times;</button>
-          </div>
-          <DataBindingManager />
-        </div>
-      </div>
     </div>
 </template>
 
@@ -315,9 +270,6 @@
 import { ref, reactive, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import * as echarts from 'echarts'
-import { dataBindingManager, DASHBOARD_MODULES } from '@/utils/dataBinding.js'
-import dashboardModulesConfig from '@/config/dashboardModules.js'
-import DataBindingManager from '@/components/DataBindingManager.vue'
 import DashboardHeatMap from '@/components/DashboardHeatMap.vue'
 
 const router = useRouter()
@@ -327,8 +279,6 @@ const currentTime = ref('')
 const safetyChartRef = ref(null)
 const complianceChartRef = ref(null)
 const riskChartRef = ref(null)
-const showDataBindingManager = ref(false)
-const isRefreshing = ref(false)
 
 // 地图缩放功能相关
 const showMapZoomDialog = ref(false)
@@ -349,25 +299,16 @@ const zoomState = reactive({
   lastMouseY: 0
 })
 
-// 立即初始化数据绑定管理器（同步操作）
-const initializeDataBinding = () => {
-  // console.log('开始注册模块...')
-  // 注册所有模块
-  Object.keys(dashboardModulesConfig).forEach(moduleId => {
-    const config = dashboardModulesConfig[moduleId]
-    dataBindingManager.registerModule(moduleId, config)
-    // console.log(`已注册模块: ${moduleId}`)
-  })
+// 使用简化的数据管理
+import { useDashboardData } from '@/composables/useDashboardData.js'
 
-  // 配置全局设置
-  dataBindingManager.updateGlobalConfig({
-    autoRefresh: true, // 默认关闭自动刷新
-    refreshInterval: 30000, // 30秒
-    enableCache: true,
-    enableFallback: true
-  })
-  // console.log('模块注册完成')
-}
+const {
+  data,
+  isLoading,
+  hasErrors,
+  refreshData,
+  stopAutoRefresh
+} = useDashboardData()
 
 // 获取图片URL
 const getImageUrl = (imagePath) => {
@@ -383,82 +324,14 @@ const handleImageError = (event) => {
   event.target.style.opacity = '0.5'
 }
 
-// 在setup阶段立即初始化
-initializeDataBinding()
-
-// 模块初始化状态
-const isModulesInitialized = ref(true) // 因为我们已经同步初始化了
-
-// 安全的计算属性：确保模块存在后再获取数据
-const factoryData = computed(() => {
-  if (!isModulesInitialized.value) {
-    return dashboardModulesConfig[DASHBOARD_MODULES.FACTORY_OVERVIEW]?.fallbackData || {}
-  }
-  return dataBindingManager.getModuleData(DASHBOARD_MODULES.FACTORY_OVERVIEW) ||
-    dashboardModulesConfig[DASHBOARD_MODULES.FACTORY_OVERVIEW]?.fallbackData || {}
-})
-
-const alertData = computed(() => {
-  if (!isModulesInitialized.value) {
-    return dashboardModulesConfig[DASHBOARD_MODULES.ALERT_DATA]?.fallbackData || {}
-  }
-  return dataBindingManager.getModuleData(DASHBOARD_MODULES.ALERT_DATA) ||
-    dashboardModulesConfig[DASHBOARD_MODULES.ALERT_DATA]?.fallbackData || {}
-})
-
-const staffDistribution = computed(() => {
-  if (!isModulesInitialized.value) {
-    return dashboardModulesConfig[DASHBOARD_MODULES.STAFF_DISTRIBUTION]?.fallbackData || []
-  }
-  return dataBindingManager.getModuleData(DASHBOARD_MODULES.STAFF_DISTRIBUTION) ||
-    dashboardModulesConfig[DASHBOARD_MODULES.STAFF_DISTRIBUTION]?.fallbackData || []
-})
-
-const monitoringPoints = computed(() => {
-  if (!isModulesInitialized.value) {
-    return dashboardModulesConfig[DASHBOARD_MODULES.MONITORING_POINTS]?.fallbackData || []
-  }
-  return dataBindingManager.getModuleData(DASHBOARD_MODULES.MONITORING_POINTS) ||
-    dashboardModulesConfig[DASHBOARD_MODULES.MONITORING_POINTS]?.fallbackData || []
-})
-
-const alertHistory = computed(() => {
-  if (!isModulesInitialized.value) {
-    return dashboardModulesConfig[DASHBOARD_MODULES.ALERT_HISTORY]?.fallbackData || []
-  }
-  return dataBindingManager.getModuleData(DASHBOARD_MODULES.ALERT_HISTORY) ||
-    dashboardModulesConfig[DASHBOARD_MODULES.ALERT_HISTORY]?.fallbackData || []
-})
-
-const behaviorStats = computed(() => {
-  if (!isModulesInitialized.value) {
-    return dashboardModulesConfig[DASHBOARD_MODULES.BEHAVIOR_STATS]?.fallbackData || []
-  }
-  return dataBindingManager.getModuleData(DASHBOARD_MODULES.BEHAVIOR_STATS) ||
-    dashboardModulesConfig[DASHBOARD_MODULES.BEHAVIOR_STATS]?.fallbackData || []
-})
-
-const liveMonitors = computed(() => {
-  if (!isModulesInitialized.value) {
-    return dashboardModulesConfig[DASHBOARD_MODULES.LIVE_MONITORS]?.fallbackData || []
-  }
-  return dataBindingManager.getModuleData(DASHBOARD_MODULES.LIVE_MONITORS) ||
-    dashboardModulesConfig[DASHBOARD_MODULES.LIVE_MONITORS]?.fallbackData || []
-})
-
-const historicalStats = computed(() => {
-  if (!isModulesInitialized.value) {
-    return dashboardModulesConfig[DASHBOARD_MODULES.HISTORICAL_STATS]?.fallbackData || []
-  }
-  return dataBindingManager.getModuleData(DASHBOARD_MODULES.HISTORICAL_STATS) ||
-    dashboardModulesConfig[DASHBOARD_MODULES.HISTORICAL_STATS]?.fallbackData || []
-})
-
-// 模块状态
-const modulesStatus = computed(() => {
-  if (!isModulesInitialized.value) return {}
-  return dataBindingManager.getModulesStatus()
-})
+// 简化的数据访问
+const factoryData = computed(() => data.factoryData)
+const alertData = computed(() => data.alertData)
+const staffDistribution = computed(() => data.staffDistribution)
+const alertHistory = computed(() => data.alertHistory)
+const behaviorStats = computed(() => data.behaviorStats)
+const liveMonitors = computed(() => data.liveMonitors)
+const historicalStats = computed(() => data.historicalStats)
 
 let timeInterval = null
 let dataUpdateInterval = null
@@ -756,84 +629,18 @@ const updateTime = () => {
   }).replace(/\//g, '-')
 }
 
-// 刷新数据的方法
-const refreshData = async () => {
-  if (isRefreshing.value) return
-
-  // console.log('手动刷新大屏数据...')
-  isRefreshing.value = true
-  try {
-    await dataBindingManager.loadAllModules()
-    // console.log('所有模块数据刷新成功')
-    // console.log('刷新后的模块状态:', dataBindingManager.getModulesStatus())
-    // console.log('刷新后的历史数据:', historicalStats.value)
-    // 
-    // 延迟更新图表，确保数据已经更新
-    setTimeout(() => {
-      updateComplianceChart()
-    }, 100)
-  } catch (error) {
-    // console.error('数据刷新失败:', error)
-  } finally {
-    isRefreshing.value = false
-  }
-}
-
-// 刷新指定模块
-const refreshModule = async (moduleId) => {
-  try {
-    await dataBindingManager.loadModule(moduleId)
-    // console.log(`模块 ${moduleId} 刷新成功`)
-  } catch (error) {
-    // console.error(`模块 ${moduleId} 刷新失败:`, error)
-  }
-}
-
-// 更新模块配置
-const updateModuleConfig = (moduleId, newConfig) => {
-  const module = dataBindingManager.getModule(moduleId)
-  if (module) {
-    module.updateConfig(newConfig)
-    // console.log(`模块 ${moduleId} 配置已更新`)
-  }
-}
-
-// 获取模块状态信息
-const getModuleInfo = (moduleId) => {
-  const module = dataBindingManager.getModule(moduleId)
-  const status = modulesStatus.value[moduleId]
-  const config = dashboardModulesConfig[moduleId]
-
-  return {
-    module,
-    status,
-    config,
-    data: dataBindingManager.getModuleData(moduleId)
-  }
+// 简化的刷新方法
+const handleRefreshData = async () => {
+  await refreshData()
+  // 延迟更新图表，确保数据已经更新
+  setTimeout(() => {
+    updateComplianceChart()
+  }, 100)
 }
 
 onMounted(async () => {
   updateTime()
   timeInterval = setInterval(updateTime, 1000)
-
-  // 模块已经在setup阶段初始化了，这里只需要加载数据
-  // console.log('开始加载模块数据...')
-
-  try {
-    // 加载初始数据
-    await dataBindingManager.loadAllModules()
-    // console.log('所有模块数据加载完成')
-    // console.log('初始化后的模块状态:', dataBindingManager.getModulesStatus())
-    // console.log('初始化后的数据:', {
-    //   factoryData: factoryData.value,
-    //   staffDistribution: staffDistribution.value
-    // })
-
-    // 可选：启动自动刷新（默认是关闭的）
-    dataBindingManager.startAutoRefresh()
-  } catch (error) {
-    // console.error('模块数据加载失败:', error)
-  }
 
   // 延迟初始化图表，确保DOM已渲染
   setTimeout(() => {
@@ -1045,19 +852,16 @@ const goToHeatMapManagement = () => {
 
 // 暴露方法给父组件或调试使用
 defineExpose({
-  refreshData,
-  refreshModule,
-  updateModuleConfig,
-  getModuleInfo,
-  modulesStatus,
-  dataBindingManager
+  refreshData: handleRefreshData,
+  isLoading,
+  hasErrors,
+  data
 })
 
 onUnmounted(() => {
   if (timeInterval) clearInterval(timeInterval)
-  // 停止数据绑定管理器
-  dataBindingManager.stopAutoRefresh()
-  dataBindingManager.destroy()
+  // 停止自动刷新
+  stopAutoRefresh()
 })
 </script>
 

@@ -1,44 +1,38 @@
-FROM python:3.10-slim
+FROM python:3.10.14-slim-bullseye
+
+# 配置阿里云源
+RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list && \
+    sed -i 's/security.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list
+
+# 一次性安装依赖+时区
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential python3-dev libpq-dev \
+    libgl1-mesa-glx libglib2.0-0 libsm6 libxext6 libxrender-dev tzdata \
+    && ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime \
+    && dpkg-reconfigure -f noninteractive tzdata \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-#手动配置阿里云 APT 源（适配 Debian Bullseye）
-RUN echo "deb http://mirrors.aliyun.com/debian/ bullseye main non-free contrib" > /etc/apt/sources.list && \
-    echo "deb http://mirrors.aliyun.com/debian-security/ bullseye-security main non-free contrib" >> /etc/apt/sources.list && \
-    echo "deb http://mirrors.aliyun.com/debian/ bullseye-updates main non-free contrib" >> /etc/apt/sources.list
-
-    # 安装系统依赖
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    python3-dev \
-    libpq-dev \
-    libgl1-mesa-glx \
-    libglib2.0-0 \
-    libsm6 \
-    libxext6 \
-    libxrender-dev \
-    tzdata \
-    && rm -rf /var/lib/apt/lists/*
-
-# 设置时区为中国标准时间
-RUN ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \
-    dpkg-reconfigure -f noninteractive tzdata
-
+# 优先安装依赖
 COPY pip.conf /etc/pip.conf
-
-# 复制并安装依赖
 COPY requirements.base.txt requirements.data-server.txt ./
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
 RUN pip install --no-cache-dir -r requirements.base.txt -r requirements.data-server.txt
 
-# 复制项目文件
+# 最后复制代码
 COPY . .
 
-# 强制使用CPU模式
-ENV CUDA_VISIBLE_DEVICES=-1
-ENV FORCE_CPU=1
+# 安全设置
+RUN useradd -m appuser && chown -R appuser:appuser /app
+USER appuser
+
+# 禁用GPU
+# ENV CUDA_VISIBLE_DEVICES=-1 FORCE_CPU=1
 
 # 暴露端口
 EXPOSE 8001
 
 # 启动服务
-CMD ["python", "base_data_server.py"] 
+CMD ["python", "base_data_server.py"]

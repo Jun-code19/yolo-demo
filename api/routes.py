@@ -3150,8 +3150,17 @@ def get_comprehensive_dashboard_overview(db: Session = Depends(get_db)):
             elif event.status == EventStatus.archived:
                 event_type = "success"
             
+            if event.event_type == 'object_detection':
+                count = event.meta_data.get('count', 0)
+            elif event.event_type == 'smart_behavior':
+                count = 1
+            elif event.event_type == 'smart_counting':
+                count = event.meta_data.get('current_count', 0)
+            else:
+                count = 0
+
             recent_activities.append({
-                "content": f"[本地检测][{getModelTypeName(event.event_type)}][{device_name}]检测到:{event.meta_data.get('count', 0) if event.meta_data else '未知'}个目标",    
+                "content": f"[本地检测][{getModelTypeName(event.event_type)}][{device_name}]检测到:{count}个目标",    
                 "timestamp": formatTimeAgo(event.created_at),
                 "type": event_type,
                 "event_id": event.event_id,
@@ -3160,8 +3169,24 @@ def get_comprehensive_dashboard_overview(db: Session = Depends(get_db)):
         
         # 添加外部事件
         for event in recent_external_events:
+            # 从normalized_data.targets获取
+            if event.normalized_data and event.normalized_data.get('targets'):
+                count = len(event.normalized_data['targets'])
+            # 从 algorithm_data 获取 - 修正字段访问
+            elif event.algorithm_data and event.algorithm_data.get('detections'):
+                count = len(event.algorithm_data['detections'])
+            # 从原始数据获取
+            elif event.original_data and event.original_data.get('detections'):
+                count = len(event.original_data['detections'])
+            # 修正 nn_output 处理 - 它本身是结果数组
+            elif event.original_data and event.original_data.get('nn_output'):
+                # nn_output 本身是检测结果数组
+                count = len(event.original_data['nn_output'])
+            else:
+                count = 0
+
             recent_activities.append({
-                "content": f"[外部事件][{event.engine_name or '未知引擎'}][{event.location or '未知位置'}]检测到:{event.original_data.detections.get('count', 0) if event.original_data and 'detections' in event.original_data else '未知目标'}",    
+                "content": f"[外部事件][{event.engine_name or '未知引擎'}][{event.location or '未知位置'}]检测到:{count}个目标",    
                 "timestamp": formatTimeAgo(event.timestamp),
                 "type": "info",
                 "event_id": event.event_id,
