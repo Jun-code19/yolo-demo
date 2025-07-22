@@ -81,9 +81,11 @@ def register_listener_types():
 # 检测任务类，管理单个摄像机的检测过程
 class DetectionTask:
     
-    def __init__(self, device_id: str, config_id: str, model_path: str, 
+    def __init__(self, device_id: str, device_name: str, device_ip: str, config_id: str, model_path: str, 
                  confidence: float, models_type: str, target_class: List[str], save_mode: SaveMode, area_coordinates:Optional[dict]=None):
         self.device_id = device_id
+        self.device_name = device_name
+        self.device_ip = device_ip
         self.config_id = config_id
         self.model_path = model_path
         self.confidence = confidence
@@ -605,7 +607,7 @@ class DetectionTask:
 
             # 保存事件元数据
             event.meta_data = {
-                "count": len(detections),
+                "current_count": len(detections),
                 "target_class": self.target_class
             }
             
@@ -620,35 +622,6 @@ class DetectionTask:
                 thumbnail_path = save_dir / f"{event_id}.jpg"
                 cv2.imwrite(str(thumbnail_path), frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
                 event.thumbnail_path = str(thumbnail_path)
-
-                # 保存带检测框的截图 (缩略图)
-                # success, buffer = cv2.imencode('.jpg', annotated_frame, [cv2.IMWRITE_JPEG_QUALITY, 10])
-                # height, width = frame.shape[:2]
-                # if success:
-                #     event.thumbnail_data = buffer.tobytes()
-                #     event.is_compressed = True  # 设置压缩标记
-                #     event.meta_data = {
-                #         "resolution": f"{width}x{height}",
-                #         "size": len(buffer.tobytes()),  # 存储图像大小
-                #         # 其他元数据...
-                #     }
-                # else:
-                #     logger.error("JPEG编码失败")
-                            
-            # if self.save_mode in [SaveMode.video, SaveMode.both]:
-                # # 从帧缓冲区创建短视频
-                # snippet_path = save_dir / f"{event_id}.mp4"
-                # height, width = frame.shape[:2]
-                # fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-                # out = cv2.VideoWriter(str(snippet_path), fourcc, 5, (width, height))
-                
-                # # 处理视频中的每一帧并添加检测框
-                # for f in self.frame_buffer:
-                #     # 在每一帧上绘制检测框
-                #     annotated_f = self.draw_detections(f, detections)
-                #     out.write(annotated_f)
-                # out.release()
-                # event.snippet_path = str(snippet_path)
             
             # 提交事件
             db.add(event)
@@ -669,10 +642,15 @@ class DetectionTask:
             return
         
         push_data = {
-            "timestamp": datetime.now().isoformat(),
-            "device_id": self.device_id,
-            "config_id": self.config_id,
-            "detections": detections
+            "cameraInfo": self.device_name + ":" + self.device_ip,
+            "deviceId": self.device_id,
+            "enteredCount":0,
+            "exitedCount":0,
+            "stayingCount": len(detections),
+            "passedCount":0,
+            "recordTime": datetime.now().isoformat(),
+            "event_description": "目标检测",
+            "target_class": self.target_class
         }
         # 增加标签，使推送更灵活
         data_pusher.push_data(
@@ -764,7 +742,8 @@ class DetectionTask:
                 "behavior_type": self.area_coordinates.get('behaviorType'),
                 "behavior_subtype": self.area_coordinates.get('behaviorSubtype'),
                 "event_type": event_info['event_type'],
-                "event_description": self._get_event_description(event_info['event_type'])               
+                "event_description": self._get_event_description(event_info['event_type']),
+                "target_class": self.target_class           
             }
             
             # 根据保存模式保存图像/视频
@@ -826,6 +805,7 @@ class DetectionTask:
                 "counting_subtype": 'area_counting' if self.area_coordinates.get('countingType') == 'occupancy' else 'flow_counting',
                 "event_type": event_info['event_type'],
                 "event_description": self._get_event_description(event_info['event_type']),
+                "target_class": self.target_class,
                 "current_count": event_info['current_count'],
                 "today_in_count": event_info['today_in_count'],
                 "today_out_count": event_info['today_out_count']
@@ -863,15 +843,15 @@ class DetectionTask:
             push_label = self.area_coordinates.get('pushLabel')
        
             push_data = {
-                "timestamp": datetime.now().isoformat(),
-                "device_id": self.device_id,
-                "config_id": self.config_id,
-                "detections": detections,
-                "analysis_type": self.area_coordinates.get('analysisType'),
-                "behavior_type": self.area_coordinates.get('behaviorType'),
-                "behavior_subtype": self.area_coordinates.get('behaviorSubtype'),
-                "event_type": event_info['event_type'],
-                "event_description": self._get_event_description(event_info['event_type'])
+                "cameraInfo": self.device_name + ":" + self.device_ip,
+                "deviceId": self.device_id,
+                "enteredCount":0,
+                "exitedCount":0,
+                "stayingCount": event_info['current_count'],
+                "passedCount":0,
+                "recordTime": datetime.now().isoformat(),
+                "event_description": self._get_event_description(event_info['event_type']),
+                "target_class": self.target_class
             }
             # 增加标签，使推送更灵活
             data_pusher.push_data(
@@ -904,7 +884,6 @@ class DetectionTask:
 
     def push_counting_event(self, event_info, frame, detections, speed): # 推送人数统计事件
         """推送人数统计事件"""
-        """推送行为事件"""
         if not data_pusher.push_configs:
             return
         
@@ -912,18 +891,15 @@ class DetectionTask:
             push_label = self.area_coordinates.get('pushLabel')
        
             push_data = {
-                "timestamp": datetime.now().isoformat(),
-                "device_id": self.device_id,
-                "config_id": self.config_id,
-                "detections": detections,
-                "analysis_type": self.area_coordinates.get('analysisType'),
-                "counting_type": self.area_coordinates.get('countingType'),
-                "counting_subtype": self.area_coordinates.get('countingSubtype'),
-                "event_type": event_info['event_type'],
+                "cameraInfo": self.device_name + ":" + self.device_ip,
+                "deviceId": self.device_id,
+                "enteredCount": event_info['today_in_count'],
+                "exitedCount": event_info['today_out_count'],
+                "stayingCount": event_info['current_count'],
+                "passedCount":0,
+                "recordTime": datetime.now().isoformat(),
                 "event_description": self._get_event_description(event_info['event_type']),
-                "current_count": event_info['current_count'],
-                "today_in_count": event_info['today_in_count'],
-                "today_out_count": event_info['today_out_count']
+                "target_class": self.target_class
             }
             # 增加标签，使推送更灵活
             data_pusher.push_data(
@@ -1445,6 +1421,8 @@ class DetectionServer:
         # 创建检测任务
         task = DetectionTask(
             device_id=config.device_id,
+            device_name=device.device_name,
+            device_ip=device.ip_address,
             config_id=config_id,
             model_path=model_path,  # 使用可能已更新的模型路径
             confidence=config.sensitivity,  

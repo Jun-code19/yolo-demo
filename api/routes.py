@@ -3151,7 +3151,7 @@ def get_comprehensive_dashboard_overview(db: Session = Depends(get_db)):
                 event_type = "success"
             
             if event.event_type == 'object_detection':
-                count = event.meta_data.get('count', 0)
+                count = event.meta_data.get('current_count', 0)
             elif event.event_type == 'smart_behavior':
                 count = 1
             elif event.event_type == 'smart_counting':
