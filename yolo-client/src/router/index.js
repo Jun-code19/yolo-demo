@@ -188,6 +188,24 @@ const routes = [
       title: '人数热力图管理',
       layout: 'fullscreen'
     }
+  },
+  {
+    path: '/smart-schemes',
+    name: 'SmartSchemeManagement',
+    component: () => import('../views/smartScheme/SmartSchemeManagement.vue'),
+    meta: {
+      requiresAuth: true,
+      title: '事件订阅管理'
+    }
+  },
+  {
+    path: '/smart-events',
+    name: 'SmartEvents',
+    component: () => import('../views/smartScheme/SmartEvents.vue'),
+    meta: {
+      requiresAuth: true,
+      title: '订阅事件管理'
+    }
   }
 ]
 

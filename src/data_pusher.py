@@ -46,14 +46,12 @@ class DataPusher:
             self.push_thread = threading.Thread(target=self._process_queue)
             self.push_thread.daemon = True
             self.push_thread.start()
-            logger.info("数据推送线程已启动")
     
     def stop(self):
         """停止推送线程"""
         self.running = False
         if self.push_thread:
             self.push_thread.join(timeout=5)
-            logger.info("数据推送线程已停止")
     
     def load_push_configs(self, db=None):
         """从数据库加载所有启用的推送配置"""
@@ -122,6 +120,7 @@ class DataPusher:
             tags: 标签列表，用于筛选适用的推送配置
             config_id: 可选的配置ID，用于兼容现有代码
         """
+
         # 确保数据可以被JSON序列化
         serializable_data = self._ensure_json_serializable(data)
         
@@ -295,7 +294,6 @@ class DataPusher:
             
             # 检查响应状态
             if response.status_code >= 200 and response.status_code < 300:
-                logger.info(f"HTTP推送成功: {config.push_id}, 状态码: {response.status_code}")
                 return True
             else:
                 logger.warning(f"HTTP推送失败: {config.push_id}, 状态码: {response.status_code}, 响应: {response.text}")

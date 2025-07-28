@@ -135,7 +135,7 @@
     <el-dialog
       v-model="dialogVisible"
       :title="dialogMode === 'add' ? '添加服务器' : '编辑服务器'"
-      width="500px"
+      width="30%"
       @close="resetDialog"
     >
       <el-form

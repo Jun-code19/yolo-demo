@@ -38,7 +38,7 @@ COPY . .
 RUN mkdir -p models storage
 
 # 强制使用CPU模式
-# ENV CUDA_VISIBLE_DEVICES=-1 FORCE_CPU=1
+ENV CUDA_VISIBLE_DEVICES=-1 FORCE_CPU=1
 
 # 暴露端口
 EXPOSE 8000

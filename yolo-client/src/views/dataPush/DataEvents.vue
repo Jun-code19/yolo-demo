@@ -303,7 +303,7 @@
     </el-card>
 
     <!-- 事件详情对话框 -->
-    <el-dialog v-model="detailDialogVisible" title="事件详情" width="1000px" :close-on-click-modal="false" :z-index="99999"
+    <el-dialog v-model="detailDialogVisible" title="事件详情" width="50%" :close-on-click-modal="false" :z-index="999999"
       append-to-body top="5vh" class="high-priority-dialog">
       <div v-if="selectedEvent" class="event-detail">
         <el-descriptions :column="2" border>
@@ -497,7 +497,7 @@
     </el-dialog>
 
     <!-- 图片预览对话框 -->
-    <el-dialog v-model="imagePreviewVisible" title="图片预览" width="900px" :close-on-click-modal="false" :z-index="100000"
+    <el-dialog v-model="imagePreviewVisible" title="图片预览" width="50vw" :close-on-click-modal="false" :z-index="100000"
       append-to-body class="image-preview-dialog high-priority-dialog">
       <div v-if="previewImages.length > 0" class="image-preview-content">
         <!-- 图片导航 -->
@@ -1465,7 +1465,7 @@ onUnmounted(() => {
 
 /* 高优先级对话框样式 - 确保不被菜单和头部遮挡 */
 .high-priority-dialog {
-  z-index: 99999 !important;
+  z-index: 999999 !important;
 }
 
 .image-preview-dialog {

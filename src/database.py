@@ -66,27 +66,27 @@ class Device(Base):
     detection_configs = relationship("DetectionConfig", back_populates="device", cascade="all, delete-orphan")
     detection_events = relationship("DetectionEvent", back_populates="device", cascade="all, delete-orphan")
 
-class AnalysisResult(Base):
-    __tablename__ = "analysis_result"
+# class AnalysisResult(Base):
+#     __tablename__ = "analysis_result"
     
-    result_id = Column(Integer, primary_key=True)
-    # video_id = Column(String(64), ForeignKey('video.video_id'))
-    target_type = Column(Enum(AnalysisTarget), nullable=False)
-    confidence = Column(Float, nullable=False)
-    start_frame = Column(Integer)
-    end_frame = Column(Integer)
-    meta_data = Column(JSONB)
+#     result_id = Column(Integer, primary_key=True)
+#     # video_id = Column(String(64), ForeignKey('video.video_id'))
+#     target_type = Column(Enum(AnalysisTarget), nullable=False)
+#     confidence = Column(Float, nullable=False)
+#     start_frame = Column(Integer)
+#     end_frame = Column(Integer)
+#     meta_data = Column(JSONB)
 
-class Alarm(Base):
-    __tablename__ = "alarm"
+# class Alarm(Base):
+#     __tablename__ = "alarm"
     
-    alarm_id = Column(String(64), primary_key=True)
-    event_type = Column(String(50), nullable=False)
-    trigger_time = Column(DateTime, default=datetime.now)
-    device_id = Column(String(64), ForeignKey('device.device_id'))
-    # video_id = Column(String(64), ForeignKey('video.video_id'))
-    status = Column(Enum(AlarmStatus), default=AlarmStatus.pending)
-    snapshot_path = Column(Text)
+#     alarm_id = Column(String(64), primary_key=True)
+#     event_type = Column(String(50), nullable=False)
+#     trigger_time = Column(DateTime, default=datetime.now)
+#     device_id = Column(String(64), ForeignKey('device.device_id'))
+#     # video_id = Column(String(64), ForeignKey('video.video_id'))
+#     status = Column(Enum(AlarmStatus), default=AlarmStatus.pending)
+#     snapshot_path = Column(Text)
 
 class User(Base):
     __tablename__ = "users"
@@ -147,21 +147,21 @@ class DetectionConfig(Base):
     
     device = relationship("Device", back_populates="detection_configs")
     model = relationship("DetectionModel", back_populates="detection_configs")
-    schedules = relationship("DetectionSchedule", back_populates="config", cascade="all, delete-orphan")
+    # schedules = relationship("DetectionSchedule", back_populates="config", cascade="all, delete-orphan")
     events = relationship("DetectionEvent", back_populates="config", cascade="all, delete-orphan")
 
-class DetectionSchedule(Base):
-    __tablename__ = "detection_schedule"
+# class DetectionSchedule(Base):
+#     __tablename__ = "detection_schedule"
     
-    schedule_id = Column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
-    config_id = Column(String(64), ForeignKey('detection_config.config_id'), nullable=False)
-    start_time = Column(DateTime, nullable=False)
-    end_time = Column(DateTime, nullable=False)
-    weekdays = Column(ARRAY(Integer))
-    is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.now)
+#     schedule_id = Column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
+#     config_id = Column(String(64), ForeignKey('detection_config.config_id'), nullable=False)
+#     start_time = Column(DateTime, nullable=False)
+#     end_time = Column(DateTime, nullable=False)
+#     weekdays = Column(ARRAY(Integer))
+#     is_active = Column(Boolean, default=True)
+#     created_at = Column(DateTime, default=datetime.now)
     
-    config = relationship("DetectionConfig", back_populates="schedules")
+#     config = relationship("DetectionConfig", back_populates="schedules")
 
 class DetectionEvent(Base):
     __tablename__ = "detection_event"
@@ -192,19 +192,19 @@ class DetectionEvent(Base):
     config = relationship("DetectionConfig", back_populates="events")
     viewer = relationship("User", foreign_keys=[viewed_by])
 
-class DetectionStat(Base):
-    __tablename__ = "detection_stat"
+# class DetectionStat(Base):
+#     __tablename__ = "detection_stat"
     
-    stat_id = Column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
-    device_id = Column(String(64), ForeignKey('device.device_id'))
-    date = Column(DateTime, default=datetime.now)
-    total_events = Column(Integer, default=0)
-    by_class = Column(JSONB)
-    peak_hour = Column(Integer)
-    peak_hour_count = Column(Integer)
-    created_at = Column(DateTime, default=datetime.now)
+#     stat_id = Column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
+#     device_id = Column(String(64), ForeignKey('device.device_id'))
+#     date = Column(DateTime, default=datetime.now)
+#     total_events = Column(Integer, default=0)
+#     by_class = Column(JSONB)
+#     peak_hour = Column(Integer)
+#     peak_hour_count = Column(Integer)
+#     created_at = Column(DateTime, default=datetime.now)
     
-    device = relationship("Device")
+#     device = relationship("Device")
 
 class DetectionPerformance(Base):
     __tablename__ = "detection_performance"
@@ -472,6 +472,50 @@ Index('idx_external_events_type', ExternalEvent.event_type)
 Index('idx_external_events_config', ExternalEvent.config_id)
 Index('idx_listener_configs_type', ListenerConfig.listener_type)
 
+# 事件订阅相关表模型
+class SmartScheme(Base):
+    """事件订阅表"""
+    __tablename__ = "smart_schemes"
+    
+    id = Column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
+    camera_id = Column(String(64), ForeignKey('device.device_id'), nullable=False, comment="摄像头ID")
+    camera_port = Column(Integer, default=37777, comment="摄像头监听端口")
+    event_types = Column(ARRAY(String), nullable=False, comment="订阅的事件类型")
+    alarm_interval = Column(Integer, default=60, comment="报警间隔时间(秒)")
+    push_tags = Column(String(500), comment="推送标签")
+    remarks = Column(Text, comment="备注信息")
+    status = Column(String(20), default='stopped', comment="状态: running/stopped/error")
+    created_at = Column(DateTime, default=datetime.now, comment="创建时间")
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, comment="更新时间")
+    started_at = Column(DateTime, comment="启动时间")
+    stopped_at = Column(DateTime, comment="停止时间")
+    
+    # 关系
+    camera = relationship("Device", foreign_keys=[camera_id])
+    events = relationship("SmartEvent", back_populates="scheme", cascade="all, delete-orphan")
+
+class SmartEvent(Base):
+    """智能事件表"""
+    __tablename__ = "smart_events"
+    
+    id = Column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
+    scheme_id = Column(String(64), ForeignKey('smart_schemes.id'), nullable=False, comment="订阅ID")
+    event_type = Column(String(50), nullable=False, comment="事件类型")
+    title = Column(String(255), nullable=False, comment="事件标题")
+    description = Column(Text, comment="事件描述")
+    priority = Column(String(20), default='normal', comment="优先级: low/normal/high/critical")
+    event_data = Column(JSONB, comment="事件数据")
+    status = Column(String(20), default='pending', comment="状态: pending/processed/ignored")
+    timestamp = Column(DateTime, nullable=False, comment="事件发生时间")
+    processed_at = Column(DateTime, comment="处理时间")
+    processing_result = Column(String(50), comment="处理结果")
+    processing_comment = Column(Text, comment="处理备注")
+    processing_by = Column(String(100), comment="处理人")
+    created_at = Column(DateTime, default=datetime.now, comment="创建时间")
+    
+    # 关系
+    scheme = relationship("SmartScheme", back_populates="events")
+
 # 热力图相关表模型
 class HeatmapMap(Base):
     """热力图地图表"""
@@ -575,6 +619,14 @@ Index('idx_heatmap_bindings_data_source', HeatmapBinding.data_source_type, Heatm
 Index('idx_heatmap_dashboard_config_map_id', HeatmapDashboardConfig.map_id)
 Index('idx_heatmap_history_area_time', HeatmapHistory.area_id, HeatmapHistory.record_time)
 Index('idx_heatmap_history_record_time', HeatmapHistory.record_time)
+
+# 事件订阅相关索引
+Index('idx_smart_schemes_camera_id', SmartScheme.camera_id)
+Index('idx_smart_schemes_status', SmartScheme.status)
+Index('idx_smart_events_scheme_id', SmartEvent.scheme_id)
+Index('idx_smart_events_event_type', SmartEvent.event_type)
+Index('idx_smart_events_status', SmartEvent.status)
+Index('idx_smart_events_timestamp', SmartEvent.timestamp)
 
 # 数据库依赖注入
 def get_db():

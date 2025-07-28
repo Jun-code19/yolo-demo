@@ -813,7 +813,6 @@ class DataListenerManager:
         # 更新状态
         self._update_listener_status(config_id)
         
-        logger.info(f"监听器 {config_id} 已停止并移除")
         return True
     
     async def remove_listener(self, config_id: str) -> bool:
@@ -846,8 +845,6 @@ class DataListenerManager:
         """停止所有监听器"""
         for config_id in list(self.listeners.keys()):
             await self.stop_listener(config_id)
-        
-        logger.info("所有监听器已停止")
     
     def get_listener_status(self, config_id: str) -> Dict:
         """获取监听器状态"""

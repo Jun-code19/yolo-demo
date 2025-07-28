@@ -21,7 +21,7 @@ from apscheduler.triggers.cron import CronTrigger # 导入Cron触发器
 # 导入数据库模型
 from src.database import (
     SessionLocal, DetectionConfig, Device, 
-    DetectionModel, DetectionPerformance, Base, engine, CrowdAnalysisJob, CrowdAnalysisResult
+    DetectionModel, Base, engine, CrowdAnalysisJob, CrowdAnalysisResult
 )
 # 导入数据推送模块
 from src.data_pusher import data_pusher
@@ -45,14 +45,12 @@ class CrowdAnalyzer:
         if not self.running:
             self.running = True
             self.scheduler.start()
-            logger.info("人群分析服务已启动")
             
     def stop(self):
         """停止人群分析服务"""
         if self.running:
             self.running = False
             self.scheduler.shutdown()
-            logger.info("人群分析服务已停止")
             
     def add_analysis_job(self, job_id: str, job_name: str, device_ids: List[str], 
                           models_id: str,

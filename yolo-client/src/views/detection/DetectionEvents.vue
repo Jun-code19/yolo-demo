@@ -281,7 +281,7 @@
 
     <!-- 事件详情模态框 -->
     <el-dialog v-model="eventModalVisible" :title="`事件详情 - ${getEventTypeName(selectedEvent?.event_type) || ''}`"
-      width="1000px" destroy-on-close :close-on-click-modal="false" :z-index="99999" append-to-body top="5vh"
+      width="50%" destroy-on-close :close-on-click-modal="false" :z-index="999999" append-to-body top="5vh"
       class="detection-event-dialog high-priority-dialog">
       <template v-if="selectedEvent">
         <div class="event-detail">
@@ -461,7 +461,7 @@
     </el-dialog>
 
     <!-- 图片预览对话框 -->
-    <el-dialog v-model="imagePreviewVisible" title="图片预览" width="1000px" :close-on-click-modal="false" :z-index="100000"
+    <el-dialog v-model="imagePreviewVisible" title="图片预览" width="50%" :close-on-click-modal="false" :z-index="100000"
       append-to-body top="5vh" class="detection-image-preview-dialog image-preview-dialog high-priority-dialog">
       <div v-if="previewImages.length > 0" class="image-preview-content">
         <!-- 图片导航 -->
@@ -1539,7 +1539,7 @@ export default defineComponent({
 
 /* 高优先级对话框样式 - 确保不被菜单和头部遮挡 */
 .high-priority-dialog {
-  z-index: 99999 !important;
+  z-index: 999999 !important;
 }
 
 .image-preview-dialog {

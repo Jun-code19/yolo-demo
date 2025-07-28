@@ -434,7 +434,7 @@
     <el-dialog 
       v-model="imagePreviewVisible" 
       title="图片预览" 
-      width="60%" 
+      width="50%" 
       :z-index="9999"
       :modal="true"
       :append-to-body="true"

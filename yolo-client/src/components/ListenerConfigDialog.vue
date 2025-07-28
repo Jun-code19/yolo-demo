@@ -2,10 +2,12 @@
   <el-dialog
     v-model="visible"
     :title="isEdit ? '编辑监听器配置' : '新建监听器配置'"
-    width="1000px"
+    width="50%" top="5vh"
     :close-on-click-modal="false"
     @close="handleClose"
-    class="listener-config-dialog"
+    class="listener-config-dialog high-priority-dialog"
+    :z-index="999999"
+    append-to-body
   >
     <el-form
       ref="formRef"
@@ -36,6 +38,7 @@
               style="width: 100%"
               @change="handleTypeChange"
               :disabled="isEdit"
+              popper-append-to-body
             >
               <el-option value="tcp" label="TCP Socket">
                 <span>TCP Socket - TCP服务器/客户端连接</span>
@@ -104,7 +107,7 @@
         <el-row :gutter="16">
           <el-col :span="12">
             <el-form-item label="数据格式" prop="connection_config.data_format">
-              <el-select v-model="form.connection_config.data_format" style="width: 100%">
+              <el-select v-model="form.connection_config.data_format" style="width: 100%" popper-append-to-body>
                 <el-option value="json" label="JSON格式" />
                 <el-option value="line" label="行分隔" />
                 <el-option value="binary" label="二进制" />
@@ -113,7 +116,7 @@
           </el-col>
           <el-col :span="12">
             <el-form-item label="编码格式" prop="connection_config.encoding">
-              <el-select v-model="form.connection_config.encoding" style="width: 100%">
+              <el-select v-model="form.connection_config.encoding" style="width: 100%" popper-append-to-body>
                 <el-option value="utf-8" label="UTF-8" />
                 <el-option value="gbk" label="GBK" />
                 <el-option value="ascii" label="ASCII" />
@@ -176,6 +179,7 @@
             placeholder="输入MQTT主题，支持通配符"
             style="width: 100%"
             popper-class="listener-dialog-select"
+            popper-append-to-body
           >
             <el-option value="#" label="# (所有主题)" />
             <el-option value="+/alarm" label="+/alarm (设备报警)" />
@@ -237,7 +241,7 @@
           <el-row :gutter="16">
             <el-col :span="12">
               <el-form-item label="HTTP方法">
-                <el-select v-model="form.connection_config.poll_method" style="width: 100%">
+                <el-select v-model="form.connection_config.poll_method" style="width: 100%" popper-append-to-body>
                   <el-option value="GET" />
                   <el-option value="POST" />
                 </el-select>
@@ -348,6 +352,7 @@
             style="width: 100%"
             popper-class="listener-dialog-select"
             @change="onEdgeDeviceChange"
+            popper-append-to-body
           >
             <el-option
               v-for="device in availableEdgeDevices"
@@ -420,7 +425,7 @@
                           placeholder="目标字段名"
                           style="width: 150px"
                         />
-                        <el-select v-model="fieldMapping.field_type" style="width: 100px">
+                        <el-select v-model="fieldMapping.field_type" style="width: 100px" popper-append-to-body>
                           <el-option value="string" label="文本" />
                           <el-option value="number" label="数字" />
                           <el-option value="boolean" label="布尔" />
@@ -477,7 +482,7 @@
               placeholder="目标字段名"
               style="width: 150px"
             />
-            <el-select v-model="mapping.field_type" style="width: 120px" placeholder="类型">
+            <el-select v-model="mapping.field_type" style="width: 120px" placeholder="类型" popper-append-to-body>
               <el-option value="string" label="文本" />
               <el-option value="number" label="数字" />
               <el-option value="boolean" label="布尔" />
@@ -519,7 +524,7 @@
               placeholder="图片字段名"
               style="width: 140px"
             />
-            <el-select v-model="imageField.encoding" style="width: 120px">
+            <el-select v-model="imageField.encoding" style="width: 120px" popper-append-to-body>
               <el-option value="base64" label="Base64编码" />
               <el-option value="url" label="图片URL" />
               <el-option value="binary" label="二进制数据" />
@@ -596,6 +601,7 @@
             placeholder="设置推送数据的标签"
             style="width: 100%"
             popper-class="listener-dialog-select"
+            popper-append-to-body
           >
             <el-option value="real-time" label="实时数据" >
               <div class="option-content">
@@ -1292,14 +1298,19 @@ const handleClose = () => {
 <style>
 /* 全局样式确保下拉框正常显示 */
 .listener-dialog-select {
-  z-index: 10003 !important;
+  z-index: 999999 !important;
 }
 
 .listener-config-dialog .el-dialog__wrapper {
-  z-index: 10000 !important;
+  z-index: 999999 !important;
 }
 
 .listener-config-dialog .el-overlay {
-  z-index: 9999 !important;
+  z-index: 999998 !important;
+}
+
+/* 高优先级对话框样式 - 确保不被菜单和头部遮挡 */
+.high-priority-dialog {
+  z-index: 999999 !important;
 }
 </style>

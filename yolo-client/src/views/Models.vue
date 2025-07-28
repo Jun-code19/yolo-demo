@@ -67,14 +67,14 @@
     </el-card>
     
     <!-- 上传模型对话框 -->
-    <el-dialog v-model="uploadDialogVisible" title="上传模型" width="500px">
+    <el-dialog v-model="uploadDialogVisible" title="上传模型" width="30%" top="5vh" :z-index="999999" append-to-body class="high-priority-dialog">
       <el-form :model="uploadForm" label-width="80px" :rules="uploadRules" ref="uploadFormRef">
         <el-form-item label="模型名称" prop="modelName">
           <el-input v-model="uploadForm.modelName" placeholder="请输入模型名称"></el-input>
         </el-form-item>
         
         <el-form-item label="模型类型" prop="modelType">
-          <el-select v-model="uploadForm.modelType" placeholder="请选择模型类型" style="width: 100%">
+          <el-select v-model="uploadForm.modelType" placeholder="请选择模型类型" style="width: 100%" popper-append-to-body>
             <el-option label="目标检测" value="object_detection"></el-option>
             <el-option label="图像分割" value="segmentation"></el-option>
             <el-option label="关键点检测" value="keypoint"></el-option>
@@ -161,7 +161,7 @@
     </el-dialog>
     
     <!-- 模型详情对话框 -->
-    <el-dialog v-model="detailsDialogVisible" title="模型详情" width="700px">
+    <el-dialog v-model="detailsDialogVisible" title="模型详情" width="50%" top="5vh" :z-index="999999" append-to-body class="high-priority-dialog">
       <div v-if="selectedModel" class="model-details">
         <el-descriptions :column="2" border>
           <el-descriptions-item label="模型ID">{{ selectedModel.models_id }}</el-descriptions-item>
@@ -210,14 +210,14 @@
     </el-dialog>
 
     <!-- 编辑模型对话框 -->
-    <el-dialog v-model="editDialogVisible" title="编辑模型信息" width="500px">
+    <el-dialog v-model="editDialogVisible" title="编辑模型信息" width="30%" top="5vh" :z-index="999999" append-to-body class="high-priority-dialog">
       <el-form :model="editForm" label-width="80px" :rules="editRules" ref="editFormRef">
         <el-form-item label="模型名称" prop="models_name">
           <el-input v-model="editForm.models_name" placeholder="请输入模型名称"></el-input>
         </el-form-item>
         
         <el-form-item label="模型类型" prop="models_type">
-          <el-select v-model="editForm.models_type" placeholder="请选择模型类型" style="width: 100%">
+          <el-select v-model="editForm.models_type" placeholder="请选择模型类型" style="width: 100%" popper-append-to-body>
             <el-option label="目标检测" value="object_detection"></el-option>
             <el-option label="图像分割" value="segmentation"></el-option>
             <el-option label="关键点检测" value="keypoint"></el-option>
@@ -256,33 +256,33 @@
     </el-dialog>
 
     <!-- 查看所有类别对话框 -->
-<el-dialog v-model="allClassesDialogVisible" title="所有检测类别" width="700px" draggable>
-  <div style="max-height: 500px; overflow-y: auto;">
-    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;">
-      <div v-for="(item, index) in selectedModel.models_classes" :key="index" 
-           :style="{
-             display: 'flex',
-             justifyContent: 'space-between',
-             border: hoveredIndex === index ? '1px solid #409EFF' : '1px solid #dcdfe6',
-             padding: '10px',
-             borderRadius: '4px',
-             transition: 'all 0.3s',
-             cursor: 'pointer'
-           }"
-           @mouseover="hoveredIndex = index" @mouseleave="hoveredIndex = null">
-        <span :style="{ borderRight: '1px solid #dcdfe6', paddingRight: '10px', color: hoveredIndex === index ? '#409EFF' : 'inherit' }">
-          {{ item.id }}
-        </span>
-        <span :style="{ color: hoveredIndex === index ? '#409EFF' : 'inherit' }">{{ item.name }}</span>
+    <el-dialog v-model="allClassesDialogVisible" title="所有检测类别" width="80%" draggable top="5vh" :z-index="999999" append-to-body class="high-priority-dialog">
+      <div style="max-height: 500px; overflow-y: auto;">
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;">
+          <div v-for="(item, index) in selectedModel.models_classes" :key="index" 
+              :style="{
+                display: 'flex',
+                justifyContent: 'space-between',
+                border: hoveredIndex === index ? '1px solid #409EFF' : '1px solid #dcdfe6',
+                padding: '10px',
+                borderRadius: '4px',
+                transition: 'all 0.3s',
+                cursor: 'pointer'
+              }"
+              @mouseover="hoveredIndex = index" @mouseleave="hoveredIndex = null">
+            <span :style="{ borderRight: '1px solid #dcdfe6', paddingRight: '10px', color: hoveredIndex === index ? '#409EFF' : 'inherit' }">
+              {{ item.id }}
+            </span>
+            <span :style="{ color: hoveredIndex === index ? '#409EFF' : 'inherit' }">{{ item.name }}</span>
+          </div>
+        </div>
       </div>
-    </div>
-  </div>
-  <template #footer>
-    <span class="dialog-footer">
-      <el-button @click="allClassesDialogVisible = false">关闭</el-button>
-    </span>
-  </template>
-</el-dialog>
+      <template #footer>
+        <span class="dialog-footer">
+          <el-button @click="allClassesDialogVisible = false">关闭</el-button>
+        </span>
+      </template>
+    </el-dialog>
 
   </div>
 </template>
@@ -923,5 +923,10 @@ const formatParameters = (params) => {
 .progress-details span {
   flex: 1;
   text-align: center;
+}
+
+/* 高优先级对话框样式 - 确保不被菜单和头部遮挡 */
+.high-priority-dialog {
+  z-index: 999999 !important;
 }
 </style> 

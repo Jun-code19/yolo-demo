@@ -140,9 +140,9 @@
     <el-dialog 
       v-model="editDialogVisible" 
       title="编辑任务" 
-      width="50%" 
+      width="50%" top="5vh"
       :before-close="handleCloseEditDialog"
-      :z-index="99999" 
+      :z-index="999999" 
       :modal="true" 
       :append-to-body="true" 
       class="edit-dialog high-priority-dialog"
@@ -742,7 +742,7 @@ watch(editFrequencyType, (val) => {
 
 /* 高优先级对话框样式 - 确保不被菜单和头部遮挡 */
 .high-priority-dialog {
-  z-index: 99999 !important;
+  z-index: 999999 !important;
 }
 </style>
 

@@ -127,7 +127,7 @@
     <el-dialog 
       v-model="modalVisible" 
       :title="isEdit ? '编辑检测配置' : '创建检测配置'" 
-      width="750px" 
+      width="50%"
       top="5vh" 
       destroy-on-close
       :z-index="999999"

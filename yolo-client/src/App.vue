@@ -1,6 +1,6 @@
 <script setup>
 import { ref, reactive, onMounted, computed, onBeforeUnmount } from 'vue'
-import { HomeFilled, DataLine, VideoCamera, Fold, Expand, Picture, VideoPlay, Monitor, UserFilled, Tickets, Connection, QuestionFilled, Tools } from '@element-plus/icons-vue'
+import { HomeFilled, DataLine, VideoCamera, Fold, Expand, Picture, VideoPlay, Monitor, UserFilled, Tickets, Connection, QuestionFilled, Tools, Cpu, Bell } from '@element-plus/icons-vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import deviceApi from '@/api/device'
@@ -182,6 +182,23 @@ const openDashboard = () => {
           <el-icon><DataLine /></el-icon>
           <template #title>数据事件</template>
         </el-menu-item>
+
+        <el-sub-menu index="smart-scheme">
+          <template #title>
+            <el-icon><Cpu /></el-icon>
+            <span>事件订阅</span>
+          </template>
+          
+          <el-menu-item index="/smart-schemes">
+            <el-icon><Tools /></el-icon>
+            <template #title>订阅管理</template>
+          </el-menu-item>
+          
+          <el-menu-item index="/smart-events">
+            <el-icon><Bell /></el-icon>
+            <template #title>事件管理</template>
+          </el-menu-item>
+        </el-sub-menu>
 
         <el-menu-item index="/edge-servers">
           <el-icon><Monitor /></el-icon>

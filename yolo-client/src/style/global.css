@@ -2,11 +2,11 @@
 
 /* Element Plus 对话框和下拉框的z-index层级管理 */
 .el-dialog__wrapper {
-  z-index: 999999;
+  z-index: 999999 !important;
 }
 
 .el-overlay {
-  z-index: 999998;
+  z-index: 999998 !important;
 }
 
 /* 确保下拉框和其他弹出层在对话框之上 */
@@ -15,7 +15,9 @@
 .el-picker-panel,
 .el-tooltip__popper,
 .el-popover,
-.el-dropdown-menu {
+.el-dropdown-menu,
+.el-date-picker,
+.el-time-picker {
   z-index: 999999 !important;
 }
 
@@ -25,7 +27,9 @@
 .el-dialog .el-picker-panel,
 .el-dialog .el-tooltip__popper,
 .el-dialog .el-popover,
-.el-dialog .el-dropdown-menu {
+.el-dialog .el-dropdown-menu,
+.el-dialog .el-date-picker,
+.el-dialog .el-time-picker {
   z-index: 999999 !important;
 }
 
@@ -58,12 +62,39 @@
   z-index: 999999 !important;
 }
 
-/* 强制覆盖所有Element Plus弹出层 */
+/* 强制覆盖所有Element Plus弹出层 - 最高优先级 */
 body .el-select-dropdown,
 body .el-popper,
 body .el-picker-panel,
 body .el-tooltip__popper,
 body .el-popover,
-body .el-dropdown-menu {
+body .el-dropdown-menu,
+body .el-date-picker,
+body .el-time-picker {
+  z-index: 999999 !important;
+}
+
+/* 高优先级对话框样式 - 确保不被菜单和头部遮挡 */
+.high-priority-dialog {
+  z-index: 999999 !important;
+}
+
+.high-priority-dialog .el-dialog__wrapper {
+  z-index: 999999 !important;
+}
+
+.high-priority-dialog .el-overlay {
+  z-index: 999998 !important;
+}
+
+/* 确保高优先级对话框内的所有弹出层都有最高层级 */
+.high-priority-dialog .el-select-dropdown,
+.high-priority-dialog .el-popper,
+.high-priority-dialog .el-picker-panel,
+.high-priority-dialog .el-tooltip__popper,
+.high-priority-dialog .el-popover,
+.high-priority-dialog .el-dropdown-menu,
+.high-priority-dialog .el-date-picker,
+.high-priority-dialog .el-time-picker {
   z-index: 999999 !important;
 } 

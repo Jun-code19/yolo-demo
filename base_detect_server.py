@@ -36,13 +36,15 @@ from src.crowd_analyzer import crowd_analyzer
 # 导入数据库模块
 from src.database import (
     SessionLocal, DetectionConfig, DetectionEvent, Device, 
-    DetectionModel, DetectionPerformance, SaveMode, ExternalEvent,
+    DetectionModel, DetectionPerformance, SaveMode, ExternalEvent,SmartEvent,
     EventStatus, Base, engine, get_db, ListenerType
 )
 # 导入认证模块
 from api.auth import get_current_user, User
 # 导入日志模块
 from api.logger import log_action, log_detection_action
+# 导入事件订阅管理器
+from src.smartSchemer import smart_schemer
 
 # 导入数据监听器模块
 from src.data_listener_manager import data_listener_manager
@@ -69,12 +71,8 @@ def register_listener_types():
         # MQTT监听器需要额外检查依赖
         try:
             data_listener_manager.register_listener_type(ListenerType.mqtt, MQTTListener)
-            logger.info("已注册MQTT监听器")
         except ImportError:
             logger.warning("MQTT监听器不可用，请安装 paho-mqtt 库")
-        
-        logger.info("数据监听器类型注册完成")
-        
     except Exception as e:
         logger.error(f"注册监听器类型失败: {e}")
 
@@ -1292,7 +1290,6 @@ class DetectionServer:
     # 启动所有已启用的检测任务
     async def start_all_enabled(self, db: Session):
         """启动所有已启用的检测任务"""
-        logger.info("正在启动所有已启用的检测任务...")
         enabled_configs = db.query(DetectionConfig).filter(DetectionConfig.enabled.is_(True)).all()
         
         started_count = 0
@@ -1766,8 +1763,6 @@ class DetectionServer:
             next_cleanup = now.replace(hour=2, minute=0, second=0, microsecond=0)
             if now >= next_cleanup:
                 next_cleanup += timedelta(days=1)
-            
-            logger.info(f"全局事件清理任务已启动 - 下次清理时间: {next_cleanup.strftime('%Y-%m-%d %H:%M:%S')}")
     
     async def _global_cleanup_worker(self):#全局清理工作协程，每天凌晨2点执行一次
         """全局清理工作协程，每天凌晨2点执行一次"""
@@ -1792,12 +1787,10 @@ class DetectionServer:
                 await asyncio.sleep(wait_seconds)
                 
                 # 执行清理任务
-                logger.info("开始执行全局清理任务...")
                 await self._cleanup_all_expired_events()
-                logger.info("全局清理任务执行完成")
+                logger.info(f"全局清理任务执行完成,当前时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
                 
             except asyncio.CancelledError:
-                logger.info("全局清理任务已被取消")
                 break
             except Exception as e:
                 logger.error(f"全局清理任务错误: {e}")
@@ -1815,8 +1808,11 @@ class DetectionServer:
             
             # 2. 清理外部数据事件
             await self._cleanup_external_events()
+
+            # 3. 清理智能事件
+            await self._cleanup_smart_events()
             
-            # 3. 清理空的日期目录
+            # 4. 清理空的日期目录
             try:
                 await self._cleanup_empty_directories()
             except Exception as e:
@@ -2039,6 +2035,49 @@ class DetectionServer:
             if 'db' in locals():
                 db.close()
     
+    async def _cleanup_smart_events(self):
+        """清理智能事件"""
+        try:
+            db = SessionLocal()
+            current_time = datetime.now()
+            
+            # 智能事件保留30天
+            expire_time = current_time - timedelta(days=30)
+            
+            # 查询要删除的外部事件（用于删除关联的文件）
+            events_to_delete = db.query(SmartEvent).filter(
+                SmartEvent.created_at < expire_time
+            ).all()
+            
+            if not events_to_delete:
+                logger.info("没有找到过期的智能事件")
+                return
+            
+            deleted_events_count = 0
+            
+            logger.info(f"开始清理智能事件，共有 {len(events_to_delete)} 条过期事件需要处理")
+            log_action(db, 'admin', 'cleanup_smart_events', 'system', f"开始清理智能事件，共有 {len(events_to_delete)} 条过期事件需要处理")
+           
+            # 删除数据库记录
+            deleted_events_count = db.query(SmartEvent).filter(
+                SmartEvent.created_at < expire_time
+            ).delete()
+            
+            # 提交删除操作
+            if deleted_events_count > 0:
+                db.commit()
+                logger.info(f"智能事件清理完成: 删除 {deleted_events_count} 条记录 (>30天)")
+            else:
+                logger.info("没有需要清理的智能事件")
+                
+        except Exception as e:
+            logger.error(f"清理智能事件失败: {e}")
+            if 'db' in locals():
+                db.rollback()
+        finally:
+            if 'db' in locals():
+                db.close()
+            
 # 创建检测服务器实例
 detection_server = DetectionServer()
 
@@ -2085,7 +2124,6 @@ async def lifespan(app: FastAPI):
         db = SessionLocal()
         await data_listener_manager.start_all_enabled(db)
         db.close()
-        logger.info("数据监听服务已启动")
     except Exception as e:
         logger.error(f"启动数据监听服务失败: {e}")
     
@@ -2094,6 +2132,12 @@ async def lifespan(app: FastAPI):
         await detection_server.start_global_cleanup_task()
     except Exception as e:
         logger.error(f"启动全局清理任务失败: {e}")
+
+    # 7. 启动时初始化事件订阅管理器
+    try:
+        await smart_schemer.initialize()
+    except Exception as e:
+        logger.error(f"事件订阅管理器初始化失败: {e}")
     
     yield
     
@@ -2104,14 +2148,12 @@ async def lifespan(app: FastAPI):
     try:
         if detection_server.cleanup_task:
             detection_server.cleanup_task.cancel()
-            logger.info("全局清理任务已停止")
     except Exception as e:
         logger.error(f"停止全局清理任务失败: {e}")
     
     # 2. 停止数据监听服务
     try:
         await data_listener_manager.stop_all()
-        logger.info("数据监听服务已停止")
     except Exception as e:
         logger.error(f"停止数据监听服务失败: {e}")
     
@@ -2133,6 +2175,12 @@ async def lifespan(app: FastAPI):
         data_pusher.shutdown_push_service()
     except Exception as e:
         logger.error(f"停止数据推送服务失败: {e}")
+
+    # 8. 关闭时清理事件订阅管理器
+    try:
+        await smart_schemer.shutdown()
+    except Exception as e:
+        logger.error(f"关闭事件订阅管理器失败: {e}")
     
     logger.info("所有服务已停止")
 
@@ -2403,6 +2451,10 @@ app.include_router(rtsp_router, prefix="/ws")
 # 添加数据监听相关的API接口
 from api.data_listener_routes import router as data_listener_router
 app.include_router(data_listener_router, prefix="/api/v2")
+
+# 添加事件订阅相关的API接口
+from api.smart_scheme_routes import router as smart_scheme_router
+app.include_router(smart_scheme_router, prefix="/api/v2")
 
 # 主函数
 if __name__ == "__main__":

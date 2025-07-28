@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File,
 from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
-from src.database import get_db, Device, AnalysisResult, Alarm, User, SysLog, DetectionModel, DetectionConfig, DetectionEvent, DetectionSchedule, DetectionStat, DetectionPerformance, SaveMode, EventStatus, DetectionFrequency, DetectionLog, CrowdAnalysisJob,CrowdAnalysisResult, DataPushConfig, EdgeServer,ExternalEvent,ListenerConfig
+from src.database import get_db, Device, User, SysLog, DetectionModel, DetectionConfig, DetectionEvent, DetectionPerformance, SaveMode, EventStatus, DetectionFrequency, DetectionLog, CrowdAnalysisJob,CrowdAnalysisResult, DataPushConfig, EdgeServer,ExternalEvent,ListenerConfig
 from pydantic import BaseModel, Field, validator
 from fastapi.security import OAuth2PasswordRequestForm
 from api.auth import authenticate_user, create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES, get_current_user, check_admin_permission, get_password_hash, verify_password
@@ -311,55 +311,55 @@ def delete_device(device_id: str, db: Session = Depends(get_db), current_user: U
         db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
 
-# 分析结果API
-class AnalysisResultCreate(BaseModel):
-    # video_id: str
-    target_type: str
-    confidence: float
-    start_frame: Optional[int]
-    end_frame: Optional[int]
-    meta_data: dict
+# # 分析结果API
+# class AnalysisResultCreate(BaseModel):
+#     # video_id: str
+#     target_type: str
+#     confidence: float
+#     start_frame: Optional[int]
+#     end_frame: Optional[int]
+#     meta_data: dict
 
-@router.post("/analysis-results/")
-def create_analysis_result(result: AnalysisResultCreate, db: Session = Depends(get_db)):
-    db_result = AnalysisResult(**result.dict())
-    try:
-        db.add(db_result)
-        db.commit()
-        db.refresh(db_result)
-        return db_result
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=400, detail=str(e))
+# @router.post("/analysis-results/")
+# def create_analysis_result(result: AnalysisResultCreate, db: Session = Depends(get_db)):
+#     db_result = AnalysisResult(**result.dict())
+#     try:
+#         db.add(db_result)
+#         db.commit()
+#         db.refresh(db_result)
+#         return db_result
+#     except Exception as e:
+#         db.rollback()
+#         raise HTTPException(status_code=400, detail=str(e))
 
-# 报警管理API
-class AlarmCreate(BaseModel):
-    alarm_id: str
-    event_type: str
-    device_id: str
-    # video_id: str
-    snapshot_path: Optional[str]
+# # 报警管理API
+# class AlarmCreate(BaseModel):
+#     alarm_id: str
+#     event_type: str
+#     device_id: str
+#     # video_id: str
+#     snapshot_path: Optional[str]
 
-@router.post("/alarms/")
-def create_alarm(alarm: AlarmCreate, db: Session = Depends(get_db)):
-    db_alarm = Alarm(**alarm.dict())
-    try:
-        db.add(db_alarm)
-        db.commit()
-        db.refresh(db_alarm)
-        return db_alarm
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=400, detail=str(e))
+# @router.post("/alarms/")
+# def create_alarm(alarm: AlarmCreate, db: Session = Depends(get_db)):
+#     db_alarm = Alarm(**alarm.dict())
+#     try:
+#         db.add(db_alarm)
+#         db.commit()
+#         db.refresh(db_alarm)
+#         return db_alarm
+#     except Exception as e:
+#         db.rollback()
+#         raise HTTPException(status_code=400, detail=str(e))
 
-@router.put("/alarms/{alarm_id}/status")
-def update_alarm_status(alarm_id: str, status: str, db: Session = Depends(get_db)):
-    alarm = db.query(Alarm).filter(Alarm.alarm_id == alarm_id).first()
-    if not alarm:
-        raise HTTPException(status_code=404, detail="Alarm not found")
-    alarm.status = status
-    db.commit()
-    return {"message": "Alarm status updated successfully"}
+# @router.put("/alarms/{alarm_id}/status")
+# def update_alarm_status(alarm_id: str, status: str, db: Session = Depends(get_db)):
+#     alarm = db.query(Alarm).filter(Alarm.alarm_id == alarm_id).first()
+#     if not alarm:
+#         raise HTTPException(status_code=404, detail="Alarm not found")
+#     alarm.status = status
+#     db.commit()
+#     return {"message": "Alarm status updated successfully"}
 
 # 用户管理API相关数据模型
 class UserCreate(BaseModel):
@@ -1038,22 +1038,22 @@ class DetectionConfigInfoResponse(DetectionConfigBase):
         from_attributes = True
 
 # 添加检测计划的Pydantic模型
-class DetectionScheduleBase(BaseModel):
-    config_id: str
-    start_time: datetime
-    end_time: datetime
-    weekdays: List[int] = []
-    is_active: bool = True
+# class DetectionScheduleBase(BaseModel):
+#     config_id: str
+#     start_time: datetime
+#     end_time: datetime
+#     weekdays: List[int] = []
+#     is_active: bool = True
 
-class DetectionScheduleCreate(DetectionScheduleBase):
-    pass
+# class DetectionScheduleCreate(DetectionScheduleBase):
+#     pass
 
-class DetectionScheduleResponse(DetectionScheduleBase):
-    schedule_id: str
-    created_at: datetime
+# class DetectionScheduleResponse(DetectionScheduleBase):
+#     schedule_id: str
+#     created_at: datetime
 
-    class Config:
-        from_attributes = True
+#     class Config:
+#         from_attributes = True
 
 class BoundingBoxItem(BaseModel):
     bbox: List[float]
@@ -2007,111 +2007,111 @@ async def get_detection_events_overview(db: Session = Depends(get_db)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取检测事件统计失败: {str(e)}")
 
-# 检测计划相关API
-@router.get("/detection/schedules", response_model=List[DetectionScheduleResponse], tags=["检测计划"])
-async def get_detection_schedules(
-    config_id: Optional[str] = None,
-    active_only: bool = False,
-    db: Session = Depends(get_db)):
-    """
-    获取检测计划列表
-    """
-    query = db.query(DetectionSchedule)
+# # 检测计划相关API
+# @router.get("/detection/schedules", response_model=List[DetectionScheduleResponse], tags=["检测计划"])
+# async def get_detection_schedules(
+#     config_id: Optional[str] = None,
+#     active_only: bool = False,
+#     db: Session = Depends(get_db)):
+#     """
+#     获取检测计划列表
+#     """
+#     query = db.query(DetectionSchedule)
     
-    if config_id:
-        query = query.filter(DetectionSchedule.config_id == config_id)
-    if active_only:
-        query = query.filter(DetectionSchedule.is_active == True)
+#     if config_id:
+#         query = query.filter(DetectionSchedule.config_id == config_id)
+#     if active_only:
+#         query = query.filter(DetectionSchedule.is_active == True)
     
-    schedules = query.all()
-    return schedules
+#     schedules = query.all()
+#     return schedules
 
-@router.post("/detection/schedules", response_model=DetectionScheduleResponse, tags=["检测计划"])
-async def create_detection_schedule(
-    schedule: DetectionScheduleCreate,
-    db: Session = Depends(get_db)):
-    """
-    创建新的检测计划
-    """
-    # 检查配置是否存在
-    config = db.query(DetectionConfig).filter(DetectionConfig.config_id == schedule.config_id).first()
-    if not config:
-        raise HTTPException(status_code=404, detail="检测配置不存在")
+# @router.post("/detection/schedules", response_model=DetectionScheduleResponse, tags=["检测计划"])
+# async def create_detection_schedule(
+#     schedule: DetectionScheduleCreate,
+#     db: Session = Depends(get_db)):
+#     """
+#     创建新的检测计划
+#     """
+#     # 检查配置是否存在
+#     config = db.query(DetectionConfig).filter(DetectionConfig.config_id == schedule.config_id).first()
+#     if not config:
+#         raise HTTPException(status_code=404, detail="检测配置不存在")
     
-    # 验证时间范围
-    if schedule.start_time >= schedule.end_time:
-        raise HTTPException(status_code=400, detail="开始时间必须早于结束时间")
+#     # 验证时间范围
+#     if schedule.start_time >= schedule.end_time:
+#         raise HTTPException(status_code=400, detail="开始时间必须早于结束时间")
     
-    # 验证周几设置
-    for day in schedule.weekdays:
-        if day < 1 or day > 7:
-            raise HTTPException(status_code=400, detail="周几设置必须是1-7的整数")
+#     # 验证周几设置
+#     for day in schedule.weekdays:
+#         if day < 1 or day > 7:
+#             raise HTTPException(status_code=400, detail="周几设置必须是1-7的整数")
     
-    try:
-        schedule_id = str(uuid.uuid4())
-        db_schedule = DetectionSchedule(
-            schedule_id=schedule_id,
-            config_id=schedule.config_id,
-            start_time=schedule.start_time,
-            end_time=schedule.end_time,
-            weekdays=schedule.weekdays,
-            is_active=schedule.is_active,
-            created_at=datetime.now()
-        )
-        db.add(db_schedule)
-        db.commit()
-        db.refresh(db_schedule)
-        return db_schedule
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"创建检测计划失败: {str(e)}")
+#     try:
+#         schedule_id = str(uuid.uuid4())
+#         db_schedule = DetectionSchedule(
+#             schedule_id=schedule_id,
+#             config_id=schedule.config_id,
+#             start_time=schedule.start_time,
+#             end_time=schedule.end_time,
+#             weekdays=schedule.weekdays,
+#             is_active=schedule.is_active,
+#             created_at=datetime.now()
+#         )
+#         db.add(db_schedule)
+#         db.commit()
+#         db.refresh(db_schedule)
+#         return db_schedule
+#     except Exception as e:
+#         db.rollback()
+#         raise HTTPException(status_code=500, detail=f"创建检测计划失败: {str(e)}")
 
-# 辅助函数：更新检测统计数据
-def update_detection_stats(db: Session, device_id: str, event_type: str):
-    # 获取今天的日期（不包含时间）
-    today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+# # 辅助函数：更新检测统计数据
+# def update_detection_stats(db: Session, device_id: str, event_type: str):
+#     # 获取今天的日期（不包含时间）
+#     today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
     
-    # 查找今天的统计记录
-    stat = db.query(DetectionStat).filter(
-        DetectionStat.device_id == device_id,
-        func.date(DetectionStat.date) == func.date(today)
-    ).first()
+#     # 查找今天的统计记录
+#     stat = db.query(DetectionStat).filter(
+#         DetectionStat.device_id == device_id,
+#         func.date(DetectionStat.date) == func.date(today)
+#     ).first()
     
-    # 如果不存在，创建新记录
-    if not stat:
-        stat = DetectionStat(
-            stat_id=str(uuid.uuid4()),
-            device_id=device_id,
-            date=today,
-            total_events=1,
-            by_class={event_type: 1},
-            peak_hour=datetime.now().hour,
-            peak_hour_count=1,
-            created_at=datetime.now()
-        )
-        db.add(stat)
-    else:
-        # 更新统计数据
-        stat.total_events += 1
+#     # 如果不存在，创建新记录
+#     if not stat:
+#         stat = DetectionStat(
+#             stat_id=str(uuid.uuid4()),
+#             device_id=device_id,
+#             date=today,
+#             total_events=1,
+#             by_class={event_type: 1},
+#             peak_hour=datetime.now().hour,
+#             peak_hour_count=1,
+#             created_at=datetime.now()
+#         )
+#         db.add(stat)
+#     else:
+#         # 更新统计数据
+#         stat.total_events += 1
         
-        # 更新分类统计
-        by_class = stat.by_class or {}
-        by_class[event_type] = by_class.get(event_type, 0) + 1
-        stat.by_class = by_class
+#         # 更新分类统计
+#         by_class = stat.by_class or {}
+#         by_class[event_type] = by_class.get(event_type, 0) + 1
+#         stat.by_class = by_class
         
-        # 更新峰值小时
-        current_hour = datetime.now().hour
-        hourly_events = db.query(func.count(DetectionEvent.event_id)).filter(
-            DetectionEvent.device_id == device_id,
-            func.date(DetectionEvent.created_at) == func.date(today),
-            func.extract('hour', DetectionEvent.created_at) == current_hour
-        ).scalar()
+#         # 更新峰值小时
+#         current_hour = datetime.now().hour
+#         hourly_events = db.query(func.count(DetectionEvent.event_id)).filter(
+#             DetectionEvent.device_id == device_id,
+#             func.date(DetectionEvent.created_at) == func.date(today),
+#             func.extract('hour', DetectionEvent.created_at) == current_hour
+#         ).scalar()
         
-        if hourly_events > stat.peak_hour_count:
-            stat.peak_hour = current_hour
-            stat.peak_hour_count = hourly_events
+#         if hourly_events > stat.peak_hour_count:
+#             stat.peak_hour = current_hour
+#             stat.peak_hour_count = hourly_events
     
-    db.commit() 
+#     db.commit() 
 
 @router.get("/files/{file_path:path}")
 async def get_file(file_path: str):

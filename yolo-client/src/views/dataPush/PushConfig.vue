@@ -191,7 +191,7 @@
     </el-card>
 
     <!-- 创建/编辑推送配置对话框 -->
-    <el-dialog v-model="dialogVisible" :title="isEdit ? '编辑推送配置' : '创建推送配置'" width="60%">
+    <el-dialog v-model="dialogVisible" :title="isEdit ? '编辑推送配置' : '创建推送配置'" width="50%" top="5vh" :z-index="999999" append-to-body class="high-priority-dialog">
       <el-form ref="pushFormRef" :model="pushForm" label-width="120px" :rules="formRules">
         <el-form-item label="推送名称" prop="push_name">
           <el-input v-model="pushForm.push_name" placeholder="请输入推送配置名称" />
@@ -199,7 +199,7 @@
 
         <el-form-item label="标签" prop="tags">
           <el-select v-model="pushForm.tags" multiple filterable allow-create default-first-option
-            placeholder="请选择或输入标签（可多选）" style="width: 100%;">
+            placeholder="请选择或输入标签（可多选）" style="width: 100%;" popper-append-to-body>
             <el-option v-for="tag in commonTags" :key="tag" :label="tag" :value="tag" />
           </el-select>
           <div class="form-help-text">
@@ -208,7 +208,7 @@
         </el-form-item>
 
         <el-form-item label="检测配置" prop="config_id">
-          <el-select v-model="pushForm.config_id" placeholder="选择关联的检测配置（可选）" clearable style="width: 100%;">
+          <el-select v-model="pushForm.config_id" placeholder="选择关联的检测配置（可选）" clearable style="width: 100%;" popper-append-to-body>
             <el-option v-for="config in detectionConfigs" :key="config.config_id"
               :label="config.device_name || config.config_id" :value="config.config_id" />
           </el-select>
@@ -219,7 +219,7 @@
 
         <el-form-item label="推送方式" prop="push_method">
           <el-select v-model="pushForm.push_method" placeholder="选择推送方式" style="width: 100%;"
-            @change="handleMethodChange">
+            @change="handleMethodChange" popper-append-to-body>
             <el-option label="HTTP" value="http" />
             <el-option label="HTTPS" value="https" />
             <el-option label="TCP" value="tcp" />
@@ -233,7 +233,7 @@
             <el-input v-model="pushForm.http_url" placeholder="请输入HTTP推送URL" />
           </el-form-item>
           <el-form-item label="请求方法" prop="http_method">
-            <el-select v-model="pushForm.http_method" placeholder="选择HTTP请求方法" style="width: 100%;">
+            <el-select v-model="pushForm.http_method" placeholder="选择HTTP请求方法" style="width: 100%;" popper-append-to-body>
               <el-option label="POST" value="POST" />
               <el-option label="PUT" value="PUT" />
             </el-select>
@@ -749,5 +749,10 @@ export default {
   font-size: 12px;
   color: #666;
   margin-top: 4px;
+}
+
+/* 高优先级对话框样式 - 确保不被菜单和头部遮挡 */
+.high-priority-dialog {
+  z-index: 999999 !important;
 }
 </style>

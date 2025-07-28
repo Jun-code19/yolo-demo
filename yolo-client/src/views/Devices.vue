@@ -140,9 +140,9 @@
     <el-dialog 
       v-model="dialogVisible" 
       :title="dialogType === 'add' ? '添加设备' : '编辑设备'" 
-      width="500px" 
+      width="30%" top="5vh"
       destroy-on-close
-      :z-index="99999"
+      :z-index="999999"
       append-to-body
       class="high-priority-dialog"
     >
@@ -203,7 +203,7 @@
     <el-dialog 
       v-model="previewVisible" 
       title="设备预览" 
-      width="800px" 
+      width="50%" top="5vh"
       destroy-on-close 
       @close="stopPreview"
       :z-index="100000"
@@ -265,7 +265,7 @@
     <el-dialog 
       v-model="importDialogVisible" 
       title="导入设备" 
-      width="500px" 
+      width="30%" top="5vh"
       destroy-on-close
       :z-index="100001"
       append-to-body
@@ -1213,7 +1213,7 @@ const handleResetFilter = () => {
 
 /* 高优先级对话框样式 - 确保不被菜单和头部遮挡 */
 .high-priority-dialog {
-  z-index: 99999 !important;
+  z-index: 999999 !important;
 }
 
 .preview-dialog {

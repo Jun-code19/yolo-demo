@@ -185,7 +185,7 @@
     </el-card>
 
     <!-- 全屏预览对话框 -->
-    <el-dialog v-model="fullImageVisible" title="检测结果详情" width="60%" :before-close="handleCloseFullImage"
+    <el-dialog v-model="fullImageVisible" title="检测结果详情" width="50%" top="5vh" :before-close="handleCloseFullImage"
       :close-on-click-modal="true" :z-index="9999" :modal="true" :append-to-body="true" class="full-image-dialog">
       <div class="full-image-container">
         <div class="image-info">
