@@ -35,7 +35,7 @@ RUN pip install --no-cache-dir -r requirements.base.txt -r requirements.detect-s
 COPY . .
 
 # 创建模型和存储目录
-RUN mkdir -p models storage
+RUN mkdir -p models storage uploads
 
 # 强制使用CPU模式
 ENV CUDA_VISIBLE_DEVICES=-1 FORCE_CPU=1

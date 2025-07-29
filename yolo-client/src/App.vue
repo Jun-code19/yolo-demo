@@ -1,6 +1,6 @@
 <script setup>
 import { ref, reactive, onMounted, computed, onBeforeUnmount } from 'vue'
-import { HomeFilled, DataLine, VideoCamera, Fold, Expand, Picture, VideoPlay, Monitor, UserFilled, Tickets, Connection, QuestionFilled, Tools, Cpu, Bell } from '@element-plus/icons-vue'
+import { HomeFilled, DataLine, VideoCamera, Fold, Expand, Picture, VideoPlay, Monitor, UserFilled, Connection, QuestionFilled, Tools, Cpu, Bell } from '@element-plus/icons-vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import deviceApi from '@/api/device'
@@ -147,7 +147,7 @@ const openDashboard = () => {
           </el-menu-item>
 
           <el-menu-item index="/detection/events">
-            <el-icon><Tickets /></el-icon>
+            <el-icon><Bell /></el-icon>
             <template #title>检测事件</template>
         </el-menu-item>
              
@@ -173,15 +173,21 @@ const openDashboard = () => {
             <template #title>数据推送器</template>
         </el-menu-item>
 
-        <el-menu-item index="/data-listeners">
-          <el-icon><DataLine /></el-icon>
-          <template #title>数据监听器</template>
-        </el-menu-item>
+        <el-sub-menu index="data-listener">
+          <template #title>
+            <el-icon><Cpu /></el-icon>
+            <span>事件监听</span>
+          </template>
+          <el-menu-item index="/data-listeners">
+            <el-icon><Tools /></el-icon>
+            <template #title>监听管理</template>
+          </el-menu-item>
 
-        <el-menu-item index="/data-events">
-          <el-icon><DataLine /></el-icon>
-          <template #title>数据事件</template>
-        </el-menu-item>
+          <el-menu-item index="/data-events">
+            <el-icon><Bell /></el-icon>
+            <template #title>监听事件</template>
+          </el-menu-item>
+        </el-sub-menu>
 
         <el-sub-menu index="smart-scheme">
           <template #title>
@@ -196,7 +202,7 @@ const openDashboard = () => {
           
           <el-menu-item index="/smart-events">
             <el-icon><Bell /></el-icon>
-            <template #title>事件管理</template>
+            <template #title>订阅事件</template>
           </el-menu-item>
         </el-sub-menu>
 

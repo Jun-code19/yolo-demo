@@ -28,7 +28,6 @@ wheels/
 storage/
 docker-image/
 models/
-docs/
 uploads/
 
 # Node
