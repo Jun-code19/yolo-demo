@@ -673,7 +673,6 @@ class SmartSchemer:
     async def shutdown(self):
         """关闭管理器"""
         try:
-            logger.info("正在关闭事件订阅管理器...")
             
             self.running = False
             
@@ -684,8 +683,6 @@ class SmartSchemer:
             # 清理NetSDK
             if NETSDK_AVAILABLE and self.sdk:
                 self.sdk.Cleanup()
-            
-            logger.info("事件订阅管理器已关闭")
             
         except Exception as e:
             logger.error(f"关闭事件订阅管理器失败: {e}")

@@ -957,7 +957,6 @@ class Point(BaseModel):
 class AreaCoordinates(BaseModel):
     alertThreshold: Optional[int] = None # 报警阈值
     analysisType: Optional[str] = None # 分析类型 counting/behavior
-    confidence: Optional[float] = None # 置信度阈值
     countingInterval: Optional[int] = None # 计数间隔
     countingType: Optional[str] = None # 计数类型 occupancy/flow
     behaviorDirection: Optional[str] = None  # 方向 in/out
@@ -967,6 +966,7 @@ class AreaCoordinates(BaseModel):
     maxCapacity: Optional[int] = None # 最大容量 100
     points: Optional[List[Point]] = None  # 使用 Point 模型来表示坐标点
     pushLabel: Optional[str] = None # 推送标签
+    alarm_interval: Optional[int] = None # 报警推送间隔(秒)
     behaviorSubtype: Optional[str] = None  # 可选值：directional（方向检测）、simple（普通检测）
     behaviorType: Optional[str] = None # 检测类型 area/line
 # 添加检测配置的Pydantic模型

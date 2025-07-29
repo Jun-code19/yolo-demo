@@ -307,8 +307,13 @@ class DetectionTask:
             self.thread.start()
 
             frame_count = 0
-            cooldown_period = 5  # 检测事件的冷却时间（秒）
-            skip_frame_count = 2  # 每隔多少帧进行一次检测
+
+            if self.area_coordinates and self.area_coordinates.get('alarm_interval'):
+                cooldown_period = self.area_coordinates.get('alarm_interval')
+            else:
+                cooldown_period = 10  # 检测事件的冷却时间（秒）
+
+            skip_frame_count = 5  # 每隔多少帧进行一次检测
             
             while not self.stop_event.is_set():
                 try:                                  
@@ -324,8 +329,7 @@ class DetectionTask:
                     if frame_count % skip_frame_count == 0:
                          # 执行检测
                         detect_frame = frame_rgb.copy()
-                        img_result = frame_rgb.copy()
-                        current_time = time.time()                        
+                        img_result = frame_rgb.copy()                      
                         # 使用 try-except 捕获模型推理过程中的错误
                         try:
                             results = self.model(detect_frame, conf=self.confidence,iou=0.45,max_det=300,device=self.device)
@@ -372,12 +376,12 @@ class DetectionTask:
                                         )
 
                                         # 处理智能分析事件
-                                        self._process_smart_analysis_events(img_result, detections, speed)
+                                        self._process_smart_analysis_events(img_result, detections, speed, cooldown_period)
                                     else:
                                         # 普通检测：仅显示检测结果，没有智能分析
                                         img_result = self.display_detection_results(detect_frame, results[0],show_boxes=True)
                                         # 处理检测事件
-                                        self._process_detection_events(cooldown_period, current_time, speed, img_result, detections)                            
+                                        self._process_detection_events(img_result, detections, speed, cooldown_period)                            
 
                             if not self.clients:
                                 continue  # 没有客户端连接，跳过下面步骤
@@ -389,14 +393,14 @@ class DetectionTask:
                             # 不终止整个检测循环，仅记录错误
                     
                     # 动态调整检测频率，根据是否有客户端连接来决定
-                    if self.clients:
-                        # 有客户端连接时，更频繁地检测
-                        skip_frame_count = 1
-                        sleep_time = 0.01  # 短暂休眠防止CPU过载
-                    else:
-                        # 无客户端连接时，减少检测频率以节省资源
-                        skip_frame_count = 10
-                        sleep_time = 0.05  # 更长的休眠时间
+                    # if self.clients:
+                    #     # 有客户端连接时，更频繁地检测
+                    #     skip_frame_count = 5
+                    #     sleep_time = 0.01  # 短暂休眠防止CPU过载
+                    # else:
+                    #     # 无客户端连接时，减少检测频率以节省资源
+                    #     skip_frame_count = 5
+                    #     sleep_time = 0.05  # 更长的休眠时间
                     
                     # 防止CPU过载
                     # time.sleep(sleep_time)
@@ -565,15 +569,16 @@ class DetectionTask:
         #         logger.error(f"停止事件循环失败: {e}")
     
     # 保存检测事件到数据库并存储图像/视频
-    def _process_detection_events(self, cooldown_period, current_time, speed, img_result, detections): # 处理检测事件
+    def _process_detection_events(self, img_result, detections, speed, cooldown_period): # 处理检测事件
         """处理检测事件"""
         # 判断是否需要创建检测事件
-        if self.save_mode.value != 'none':
-            if detections and (current_time - self.last_detection_time) > cooldown_period:
-                self.last_detection_time = current_time
+        current_time = time.time() # 当前时间
+        if detections and (current_time - self.last_detection_time) > cooldown_period:
+            self.last_detection_time = current_time
+            self.push_detection_data(detections, img_result, speed)
+            if self.save_mode.value != 'none':
                 self.save_detection_event(img_result, detections)
-                self.push_detection_data(detections, img_result, speed)
-
+            
     def save_detection_event(self, frame, detections): # 保存检测事件到数据库并存储图像/视频
         """保存检测事件到数据库并存储图像/视频"""
         try:
@@ -639,65 +644,74 @@ class DetectionTask:
         if not data_pusher.push_configs:
             return
         
-        push_data = {
-            "cameraInfo": self.device_name + ":" + self.device_ip,
-            "deviceId": self.device_id,
-            "enteredCount":0,
-            "exitedCount":0,
-            "stayingCount": len(detections),
-            "passedCount":0,
-            "recordTime": datetime.now().isoformat(),
-            "event_description": "目标检测",
-            "target_class": self.target_class
-        }
-        # 增加标签，使推送更灵活
-        data_pusher.push_data(
-            data=push_data, 
-            image=frame_rgb, 
-            tags=["detection", f"device_{self.device_id}"],
-            config_id=self.config_id  # 为了兼容性保留
-        )
+        if self.area_coordinates and self.area_coordinates.get('pushLabel'):
+            push_label = self.area_coordinates.get('pushLabel')
         
-        # 记录性能统计信息
-        db = SessionLocal()
-        try:
-            perf = DetectionPerformance(
-                device_id=self.device_id,
-                config_id=self.config_id,
-                detection_time=speed['inference'],
-                preprocessing_time=speed['preprocess'],
-                postprocessing_time=speed['postprocess'],
-                frame_width=frame_rgb.shape[1],
-                frame_height=frame_rgb.shape[0],
-                objects_detected=len(detections)
+            push_data = {
+                "cameraInfo": self.device_name + ":" + self.device_ip,
+                "deviceId": self.device_id,
+                "enteredCount":0,
+                "exitedCount":0,
+                "stayingCount": len(detections),
+                "passedCount":0,
+                "recordTime": datetime.now().isoformat(),
+                "event_description": "目标检测",
+                "target_class": self.target_class
+            }
+            # 增加标签，使推送更灵活
+            data_pusher.push_data(
+                data=push_data, 
+                image=frame_rgb, 
+                tags=[push_label, f"device_{self.device_id}"],
+                config_id=self.config_id  # 为了兼容性保留
             )
-            db.add(perf)
-            db.commit()
-        except Exception as e:
-            logger.error(f"保存性能数据失败: {e}")
-            db.rollback()
-        finally:
-            db.close()
+            
+            # 记录性能统计信息
+            db = SessionLocal()
+            try:
+                perf = DetectionPerformance(
+                    device_id=self.device_id,
+                    config_id=self.config_id,
+                    detection_time=speed['inference'],
+                    preprocessing_time=speed['preprocess'],
+                    postprocessing_time=speed['postprocess'],
+                    frame_width=frame_rgb.shape[1],
+                    frame_height=frame_rgb.shape[0],
+                    objects_detected=len(detections)
+                )
+                db.add(perf)
+                db.commit()
+            except Exception as e:
+                logger.error(f"保存性能数据失败: {e}")
+                db.rollback()
+            finally:
+                db.close()
 
     # 处理智能分析事件
-    def _process_smart_analysis_events(self, img_result, detections, speed): # 处理智能分析事件
+    def _process_smart_analysis_events(self, img_result, detections, speed, cooldown_period): # 处理智能分析事件
         """处理智能分析事件"""
         try:
             # 获取触发的行为事件
             triggered_events = self.object_tracker.triggered_events
-            
+            current_time = time.time() # 当前时间
+
             for event_key, event_info in triggered_events.items():
                 # 创建检测事件记录（用于行为分析）
                 if self.area_coordinates.get('analysisType') == 'behavior':
                     self._create_behavior_event(event_info, img_result, detections)
                     self.push_behavior_event(event_info, img_result, detections, speed)
-                elif self.area_coordinates.get('analysisType') == 'counting':
-                    self._create_counting_event(event_info, img_result, detections)
-                    self.push_counting_event(event_info, img_result, detections, speed)
+                elif self.area_coordinates.get('analysisType') == 'counting':                    
                     if self.area_coordinates.get('countingType') == 'occupancy':
-                        self._check_alert(event_info['current_count'])                
+                        self._check_alert(event_info['current_count'])
+                        if (current_time - self.last_detection_time) > cooldown_period:
+                            self.last_detection_time = current_time
+                            self._create_counting_event(event_info, img_result, detections)
+                            self.push_counting_event(event_info, img_result, detections, speed)             
+                    else:
+                        self._create_counting_event(event_info, img_result, detections)
+                        self.push_counting_event(event_info, img_result, detections, speed)
                 # 输出日志
-                logger.info(f"智能分析事件: {event_info['event_type']}, 轨迹ID: {event_info['track_id']}")
+                # logger.info(f"智能分析事件: {event_info['event_type']}, 轨迹ID: {event_info['track_id']}")
             
             # 清空已处理的事件
             self.object_tracker.triggered_events.clear()

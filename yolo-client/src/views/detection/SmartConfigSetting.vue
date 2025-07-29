@@ -327,19 +327,14 @@
                 </el-form-item>
               </el-col>
               <el-col :span="14">
-                <el-form-item label="置信度阈值">
-                  <el-slider v-model="configForm.coordinates.confidence" :min="0.1" :max="0.9" :step="0.05"
-                    :format-tooltip="value => `${Math.round(value * 100)}%`" :marks="{
-                      0.1: '低',
-                        0.5: '中',
-                        0.9: '高'
-                      }" />
+                <el-form-item label="推送间隔(秒)">
+                  <el-input-number v-model="configForm.coordinates.alarm_interval" :min="0" :max="3600" :step="1" style="width: 50%;" />
                 </el-form-item>
               </el-col>
             </el-row>
 
             <div class="form-hint">
-              推送标签将在事件数据中标识该智能方案的来源
+              推送标签将在事件数据中标识该智能方案的来源；推送间隔为事件推送的间隔时间，单位为秒。
             </div>
 
             <el-form-item label="报警设置" v-if="configForm.analysisType === 'counting'">
@@ -410,7 +405,7 @@ export default defineComponent({
         maxCapacity: 100,
         flowDirection: 'bidirectional',
         flowPeriod: 'realtime',
-        confidence: 0.5,
+        alarm_interval: 0,
         pushLabel: '',
         enableAlert: false,
         alertThreshold: 50,
@@ -445,7 +440,7 @@ export default defineComponent({
         maxCapacity: 100,
         flowDirection: 'bidirectional',
         flowPeriod: 'realtime',
-        confidence: 0.5,
+        alarm_interval: 0,
         pushLabel: '',
         enableAlert: false,
         alertThreshold: 50,
@@ -476,8 +471,8 @@ export default defineComponent({
               maxCapacity: 100,
               flowDirection: 'bidirectional',
               flowPeriod: 'realtime',
-              confidence: 0.5,
-              pushLabel: '',
+              alarm_interval: configForm.coordinates.alarm_interval || 0,
+              pushLabel: configForm.coordinates.pushLabel || '',
               enableAlert: false,
               alertThreshold: 50
             }
@@ -594,8 +589,8 @@ export default defineComponent({
       } else if (type === 'none') {
         // 清空所有智能分析相关设置
         configForm.coordinates.points = [];
-        configForm.coordinates.pushLabel = '';
-        configForm.coordinates.confidence = 0.5;
+        // configForm.coordinates.pushLabel = '';
+        // configForm.coordinates.alarm_interval = 0;
         configForm.coordinates.alertThreshold = 50;
       }
     };
@@ -913,7 +908,7 @@ export default defineComponent({
           if (config.area_coordinates && Object.keys(config.area_coordinates).length > 0) {
             const coordinates = config.area_coordinates;
             
-            configForm.analysisType = coordinates.analysisType || null;
+            configForm.analysisType = coordinates.analysisType || 'none';
             
             Object.assign(configForm.coordinates, coordinates);
           } else {
