@@ -134,7 +134,7 @@
       <el-table :data="schemes" v-loading="loading" @selection-change="handleSelectionChange" style="width: 100%">
         <el-table-column type="selection" width="55" />
 
-        <el-table-column prop="camera_name" label="摄像机" width="150">
+        <el-table-column prop="camera_name" label="摄像机" width="150" sortable>
           <template #default="{ row }">
             <div class="camera-name">
               <span class="name">{{ row.camera_name }}</span>
@@ -143,7 +143,7 @@
           </template>
         </el-table-column>
 
-        <el-table-column prop="camera_ip" label="摄像机IP" width="150">
+        <el-table-column prop="camera_ip" label="摄像机IP" width="150" sortable>
           <template #default="{ row }">
             <span class="camera-ip">{{ row.camera_ip || '未知' }}</span>
           </template>
@@ -174,13 +174,13 @@
           </template>
         </el-table-column>
 
-        <el-table-column prop="event_count" label="事件数" width="150">
+        <el-table-column prop="event_count" label="事件数" width="150" sortable>
           <template #default="{ row }">
             <span class="event-count">{{ row.event_count || 0 }}</span>
           </template>
         </el-table-column>
 
-        <el-table-column prop="created_at" label="创建时间" width="200">
+        <el-table-column prop="created_at" label="创建时间" width="200" sortable>
           <template #default="{ row }">
             {{ formatDateTime(row.created_at) }}
           </template>

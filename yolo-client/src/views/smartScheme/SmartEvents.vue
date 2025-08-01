@@ -82,7 +82,7 @@
     <!-- 过滤器 -->
     <el-card class="filter-card">
       <div class="filters">
-        <el-select v-model="filters.scheme_id" placeholder="选择事件订阅" clearable style="width: 200px" @change="loadData">
+        <el-select v-model="filters.scheme_id" placeholder="选择事件订阅" clearable style="width: 200px" @change="loadData" filterable>
           <el-option v-for="scheme in schemes" :key="scheme.id"
             :label="`${scheme.camera_name} (${scheme.event_types.join(', ')})`" :value="scheme.id" />
         </el-select>
@@ -149,7 +149,7 @@
 
         <!-- <el-table-column prop="scheme_name" label="事件订阅" min-width="150" /> -->
 
-        <el-table-column prop="camera_name" label="摄像机" width="120">
+        <el-table-column prop="camera_name" label="摄像机" width="120" sortable>
           <template #default="{ row }">
             <div class="camera-info">
               <span>{{ row.camera_name }}</span>
@@ -157,7 +157,7 @@
           </template>
         </el-table-column>
 
-        <el-table-column prop="camera_ip" label="摄像机IP" width="120"></el-table-column>
+        <el-table-column prop="camera_ip" label="摄像机IP" width="120" sortable></el-table-column>
 
         <el-table-column prop="title" label="事件标题" min-width="150">
           <template #default="{ row }">
@@ -178,7 +178,7 @@
           </template>
         </el-table-column>
 
-        <el-table-column prop="timestamp" label="发生时间" width="180">
+        <el-table-column prop="timestamp" label="发生时间" width="180" sortable>
           <template #default="{ row }">
             {{ formatDateTime(row.timestamp) }}
           </template>
@@ -298,7 +298,7 @@ const loadData = async () => {
   try {
     const [eventsRes, schemesRes] = await Promise.all([
       smartSchemeApi.getSmartEvents(searchParams.value),
-      smartSchemeApi.getSchemes({ limit: 1000 })
+      smartSchemeApi.getSchemes({ page: 1, page_size: 100 })
     ])
 
     events.value = eventsRes.data.items || []

@@ -102,8 +102,8 @@ async def get_push_overview(db: Session = Depends(get_db)):
         
         # 最近推送统计（从内存统计中获取）
         push_stats = data_pusher.get_push_stats()
-        total_success = sum(stat.get('success', 0) for stat in push_stats.get('data', {}).values())
-        total_failures = sum(stat.get('fail', 0) for stat in push_stats.get('data', {}).values())
+        total_success = sum(stat.get('success', 0) for stat in push_stats.values())
+        total_failures = sum(stat.get('fail', 0) for stat in push_stats.values())
         
         return {
             "status": "success",

@@ -11,3 +11,6 @@ uvicorn==0.22.0
 websockets==12.0
 aiohttp==3.8.5
 Pillow==10.0.0 
+
+# 第三方NetSDK包（需要从本地wheel文件安装）
+# NetSDK-2.0.0.1-py3-none-linux_x86_64.whl 

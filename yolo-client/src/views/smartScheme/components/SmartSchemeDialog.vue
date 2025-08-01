@@ -20,7 +20,7 @@
       <el-divider content-position="left">基本信息</el-divider>
       
       <el-form-item label="摄像机" prop="camera_id">
-        <el-select v-model="form.camera_id" placeholder="请选择摄像机" style="width: 100%" popper-append-to-body @change="handleCameraChange">
+        <el-select v-model="form.camera_id" placeholder="请选择摄像机" style="width: 100%" popper-append-to-body>
           <el-option
             v-for="camera in cameras"
             :key="camera.id"
@@ -52,7 +52,7 @@
         </el-checkbox-group>
       </el-form-item>
 
-      <el-form-item label="报警间隔" prop="alarm_interval" v-if="form.event_types.includes('alarm')">
+      <el-form-item label="报警间隔" prop="alarm_interval" v-if="form.event_types.includes('smart')">
         <el-input-number 
           v-model="form.alarm_interval" 
           :min="0" 
@@ -121,7 +121,7 @@ const submitting = ref(false)
 const form = reactive({
   camera_id: null,
   camera_port: 37777,
-  event_types: ['alarm', 'smart'],
+  event_types: ['alarm', 'smart', 'system_log'],
   alarm_interval: 60,
   push_tags: '',
   remarks: ''
@@ -169,7 +169,7 @@ const initForm = () => {
     // 新建模式，重置表单
     Object.keys(form).forEach(key => {
       if (key === 'event_types') {
-        form[key] = ['alarm', 'smart']
+        form[key] = ['alarm', 'smart', 'system_log']
       } else if (key === 'camera_port') {
         form[key] = 37777
       } else if (key === 'alarm_interval') {

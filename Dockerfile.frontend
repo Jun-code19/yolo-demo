@@ -2,17 +2,20 @@ FROM node:18-alpine AS build
 
 WORKDIR /app
 
+# 设置npm配置，使用阿里云镜像源
+RUN npm config set registry https://registry.npmmirror.com
+
 # 复制package.json和package-lock.json
 COPY yolo-client/package*.json ./
 
-# 安装依赖，添加--force确保兼容性
-RUN npm ci --force
+# 安装依赖（移除--force参数）
+RUN npm ci --production=false
 
 # 复制源代码
 COPY yolo-client/ .
 
 # 构建应用
-RUN npm run build || (npm i -g @rollup/rollup-linux-x64-musl && npm run build)
+RUN npm run build
 
 # 第二阶段：使用轻量级的nginx镜像
 FROM nginx:alpine

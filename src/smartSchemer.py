@@ -15,6 +15,8 @@ from enum import Enum
 import uuid
 import os
 
+from src.data_pusher import data_pusher
+
 # NetSDK相关导入
 try:
     from NetSDK.NetSDK import NetClient
@@ -392,9 +394,32 @@ class SmartSchemer:
     
     async def _update_heartbeats(self):
         """更新心跳时间"""
+
+        # 推送设备连接状态
+        cameraStatuses = []
+
         for device_conn in self.device_connections.values():
+
             if device_conn.is_connected:
                 device_conn.last_heartbeat = datetime.now()
+                cameraStatuses.append({
+                    'deviceId': device_conn.device_id,
+                    'online': True,
+                })
+            else:
+                cameraStatuses.append({
+                    'deviceId': device_conn.device_id,
+                    'online': False,
+                })    
+
+        # 增加推送设备连接状态
+        try:
+            data_pusher.push_data(
+                data={'cameraStatuses': cameraStatuses},
+                tags=["device_online_status"]
+            )
+        except Exception as push_error:
+            logger.error(f"数据推送失败: {push_error}")
     
     def _create_smart_event(self, scheme_id: str, event_type: str, title: str, 
                            description: str = None, priority: str = 'normal', 
@@ -458,13 +483,12 @@ class SmartSchemer:
                                 'exitedCount': info.stuExitedSubtotal.nToday,
                                 'stayingCount': info.nInsidePeopleNum,
                                 'passedCount': info.stuPassedSubtotal.nToday,
-                                'recordTime': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                'recordTime': datetime.now().isoformat() + '+08:00', #System.DateTimeOffset格式，明确指定北京时间时区
                                 'event_description': f'区域内人数={info.nInsidePeopleNum}, 今日进入={info.stuEnteredSubtotal.nToday}, 今日离开={info.stuExitedSubtotal.nToday}, 今日通过={info.stuPassedSubtotal.nToday}'
                             }
 
                         # 调用现有的数据推送功能
                         try:
-                            from src.data_pusher import data_pusher
                             data_pusher.push_data(
                                 data=event_data,
                                 tags=device_conn.push_tags
@@ -559,7 +583,7 @@ class SmartSchemer:
                                     'direction': '0:进入' if info.bDirection == 0 else '1:离开' if info.bDirection == 1 else '2:出现' if info.bDirection == 2 else '3:消失',
                                     'actionType': '0:出现' if info.bActionType == 0 else '1:消失' if info.bActionType == 1 else '2:在区域内' if info.bActionType == 2 else '3:穿越区域',
                                     'occurrenceCount': f'累计触发{info.nOccurrenceCount}次',
-                                    'recordTime': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                    'recordTime': datetime.now().isoformat() + '+08:00',
                                     'event_description': f'设备 {device_conn.device_name} + {device_conn.ip_address} 触发区域入侵事件',
                                     'bEventAction': info.bEventAction
                                 }
@@ -571,14 +595,13 @@ class SmartSchemer:
                                     'deviceId': device_conn.device_id,
                                     'direction': '0:进入' if info.bDirection == 0 else '1:离开' if info.bDirection == 1 else '2:出现' if info.bDirection == 2 else '3:消失',
                                     'occurrenceCount': f'累计触发{info.nOccurrenceCount}次',
-                                    'recordTime': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                    'recordTime': datetime.now().isoformat() + '+08:00',
                                     'event_description': f'设备 {device_conn.device_name} + {device_conn.ip_address} 触发绊线入侵事件',
                                     'bEventAction': info.bEventAction
                                 }
                         # 推送事件
                         
                         try:
-                            from src.data_pusher import data_pusher
                             data_pusher.push_data(
                                 data=event_data,
                                 tags=device_conn.push_tags
@@ -621,7 +644,7 @@ class SmartSchemer:
                                 event_data={
                                     'cameraInfo': device_conn.device_name + ":" + device_conn.ip_address,
                                     'deviceId': device_conn.device_id,
-                                    'recordTime': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                    'recordTime': datetime.now().isoformat() + '+08:00',
                                     'event_description': f'设备 {device_conn.device_name} + {device_conn.ip_address} 连接断开'
                                 }
                             )
@@ -661,7 +684,7 @@ class SmartSchemer:
                                 event_data={
                                     'cameraInfo': device_conn.device_name + ":" + device_conn.ip_address,
                                     'deviceId': device_conn.device_id,
-                                    'recordTime': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                    'recordTime': datetime.now().isoformat() + '+08:00',
                                     'event_description': f'设备 {device_conn.device_name} + {device_conn.ip_address} 重新连接成功'
                                 }
                             )

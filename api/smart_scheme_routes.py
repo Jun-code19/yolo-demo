@@ -132,10 +132,10 @@ def get_schemes(
                 }
         
         # 获取总数
-        total = query.order_by(SmartScheme.created_at.desc()).count()
+        total = query.count()
         
         # 分页
-        schemes = query.offset((page - 1) * page_size).limit(page_size).all()
+        schemes = query.order_by(SmartScheme.created_at.desc()).offset((page - 1) * page_size).limit(page_size).all()
         
         # 转换为响应格式
         items = []

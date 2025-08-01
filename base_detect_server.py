@@ -654,7 +654,7 @@ class DetectionTask:
                 "exitedCount":0,
                 "stayingCount": len(detections),
                 "passedCount":0,
-                "recordTime": datetime.now().isoformat(),
+                "recordTime": datetime.now().isoformat() + '+08:00',
                 "event_description": "目标检测",
                 "target_class": self.target_class
             }
@@ -861,7 +861,7 @@ class DetectionTask:
                 "exitedCount":0,
                 "stayingCount": event_info['current_count'],
                 "passedCount":0,
-                "recordTime": datetime.now().isoformat(),
+                "recordTime": datetime.now().isoformat() + '+08:00',
                 "event_description": self._get_event_description(event_info['event_type']),
                 "target_class": self.target_class
             }
@@ -909,7 +909,7 @@ class DetectionTask:
                 "exitedCount": event_info['today_out_count'],
                 "stayingCount": event_info['current_count'],
                 "passedCount":0,
-                "recordTime": datetime.now().isoformat(),
+                "recordTime": datetime.now().isoformat() + '+08:00',
                 "event_description": self._get_event_description(event_info['event_type']),
                 "target_class": self.target_class
             }
