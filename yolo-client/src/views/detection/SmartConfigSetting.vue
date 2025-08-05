@@ -642,8 +642,8 @@ export default defineComponent({
       }, 100);
     };
 
-    const getDeviceImageUrl = (ipAddress) => {
-      const imagePath = `storage/devices/${ipAddress}.jpg`;
+    const getDeviceImageUrl = (ipAddress, channel) => {
+      const imagePath = `storage/devices/${ipAddress}_ch${channel}.jpg`;
       return `/api/v2/data-listeners/images/${encodeURIComponent(imagePath)}`;
     };
 
@@ -658,13 +658,14 @@ export default defineComponent({
       deviceImage.value = null;
 
       const ipAddress = deviceInfo.value.ip_address;
+      const channel = deviceInfo.value.channel;
       if (!ipAddress) {
         imageLoading.value = false;
         imageError.value = '无法获取设备IP地址';
         return;
       }
 
-      const imageUrl = getDeviceImageUrl(ipAddress);
+      const imageUrl = getDeviceImageUrl(ipAddress, channel);
       const img = new Image();
 
       img.onload = () => {

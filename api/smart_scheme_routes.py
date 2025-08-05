@@ -156,7 +156,8 @@ def get_schemes(
                 'created_at': scheme.created_at,
                 'updated_at': scheme.updated_at,
                 'started_at': scheme.started_at,
-                'stopped_at': scheme.stopped_at
+                'stopped_at': scheme.stopped_at,
+                # 'last_heartbeat': scheme.last_heartbeat
             }
             items.append(item)
         

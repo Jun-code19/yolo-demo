@@ -38,30 +38,41 @@ max_size = 320  # 减小处理尺寸以提高性能
 active_connections: Dict[str, WebSocket] = {}
 rtsp_sessions: Dict[str, dict] = {}
 
-def extract_ip_from_rtsp_url(rtsp_url: str) -> str:
-    """从RTSP URL中提取IP地址"""
+def extract_ip_and_channel_from_rtsp_url(rtsp_url: str) -> tuple[str, str]:
+    """从RTSP URL中提取IP地址和通道号"""
     try:
+        ip_address = "unknown_device"
+        channel = "1"  # 默认通道号
+        
         # 使用正则表达式匹配IP地址
         # rtsp://username:password@ip:port/path 格式
         ip_pattern = r'@(\d+\.\d+\.\d+\.\d+):'
         match = re.search(ip_pattern, rtsp_url)
         if match:
-            return match.group(1)
+            ip_address = match.group(1)
+        else:
+            # 备用方法：使用urlparse
+            parsed_url = urlparse(rtsp_url)
+            if parsed_url.hostname:
+                # 检查是否是IP地址格式
+                ip_regex = r'^\d+\.\d+\.\d+\.\d+$'
+                if re.match(ip_regex, parsed_url.hostname):
+                    ip_address = parsed_url.hostname
         
-        # 备用方法：使用urlparse
-        parsed_url = urlparse(rtsp_url)
-        if parsed_url.hostname:
-            # 检查是否是IP地址格式
-            ip_regex = r'^\d+\.\d+\.\d+\.\d+$'
-            if re.match(ip_regex, parsed_url.hostname):
-                return parsed_url.hostname
+        # 提取通道号
+        # 匹配 channel=数字 格式
+        channel_pattern = r'channel=(\d+)'
+        channel_match = re.search(channel_pattern, rtsp_url)
+        if channel_match:
+            channel = channel_match.group(1)
         
-        # 如果无法提取IP，返回一个默认值
-        logger.warning(f"无法从RTSP URL中提取IP地址: {rtsp_url}")
-        return "unknown_device"
+        if ip_address == "unknown_device":
+            logger.warning(f"无法从RTSP URL中提取IP地址: {rtsp_url}")
+        
+        return ip_address, channel
     except Exception as e:
-        logger.error(f"提取IP地址时出错: {e}")
-        return "unknown_device"
+        logger.error(f"提取IP地址和通道号时出错: {e}")
+        return "unknown_device", "1"
 
 def ensure_storage_directory():
     """确保storage/devices目录存在"""
@@ -73,15 +84,15 @@ def ensure_storage_directory():
         logger.error(f"创建storage/devices目录失败: {e}")
         return None
 
-def save_device_snapshot(frame, ip_address: str):
+def save_device_snapshot(frame, ip_address: str, channel: str = "1"):
     """保存设备快照图片"""
     try:
         storage_dir = ensure_storage_directory()
         if storage_dir is None:
             return False
         
-        # 使用IP地址作为文件名
-        filename = f"{ip_address}.jpg"
+        # 使用IP地址和通道号组成文件名
+        filename = f"{ip_address}_ch{channel}.jpg"
         filepath = storage_dir / filename
         
         # 保存图片，使用高质量JPEG压缩
@@ -386,15 +397,15 @@ class RTSPManager:
                             if not snapshot_saved and connection_id in self.stream_urls:
                                 try:
                                     stream_url = self.stream_urls[connection_id]
-                                    ip_address = extract_ip_from_rtsp_url(stream_url)
+                                    ip_address, channel = extract_ip_and_channel_from_rtsp_url(stream_url)
                                     
                                     # 保存原始大小的图片作为快照
-                                    save_success = save_device_snapshot(img, ip_address)
+                                    save_success = save_device_snapshot(img, ip_address, channel)
                                     if save_success:
                                         snapshot_saved = True
-                                        logger.info(f"设备 {ip_address} 的快照已保存")
+                                        # logger.info(f"设备 {ip_address} 通道 {channel} 的快照已保存")
                                     else:
-                                        logger.warning(f"保存设备 {ip_address} 的快照失败")
+                                        logger.warning(f"保存设备 {ip_address} 通道 {channel} 的快照失败")
                                 except Exception as e:
                                     logger.error(f"保存设备快照时出错: {e}")
                             

@@ -50,6 +50,7 @@ class DeviceConnection:
     login_id: int = 0 # 登录ID
     attach_id: int = 0 # 视频统计摘要ID
     is_connected: bool = False # 是否连接
+    re_connected: bool = False # 是否重新连接成功
     schemes: List[str] = None  # 该设备上的订阅ID列表
     alarm_interval: int = 0  # 报警间隔时间
     last_heartbeat: Optional[datetime] = None # 上次心跳时间
@@ -340,7 +341,6 @@ class SmartSchemer:
         """检查连接状态"""
         for device_id, device_conn in list(self.device_connections.items()):
             if not device_conn.is_connected:
-                # logger.warning(f"设备连接断开: {device_conn.device_name}")
                 # 尝试重新连接
                 await self._reconnect_device(device_conn)
     
@@ -348,7 +348,8 @@ class SmartSchemer:
         """重新连接设备"""
         try:         
             # 重新登录
-            if await self._login_device(device_conn):
+            # if await self._login_device(device_conn):
+            if device_conn.re_connected:
                 # logger.info(f"重新启动该设备上的所有订阅: {device_conn.schemes}")
                 
                 # 重新启动该设备上的所有订阅的事件监听
@@ -358,7 +359,10 @@ class SmartSchemer:
                         scheme = db.query(SmartScheme).filter(SmartScheme.id == scheme_id).first()
                         if scheme and scheme.status == 'running':
                             # 只重新启动事件监听，不重新创建订阅关系
-                            await self._restart_event_listeners(device_conn, scheme)
+                            result = await self._restart_event_listeners(device_conn, scheme)
+                            if result:
+                                device_conn.is_connected = True
+
                 finally:
                     db.close()
                 
@@ -414,10 +418,11 @@ class SmartSchemer:
 
         # 增加推送设备连接状态
         try:
-            data_pusher.push_data(
-                data={'cameraStatuses': cameraStatuses},
-                tags=["device_online_status"]
-            )
+            if data_pusher.push_configs:
+                data_pusher.push_data(
+                    data={'cameraStatuses': cameraStatuses},
+                    tags=["device_online_status"]
+                )
         except Exception as push_error:
             logger.error(f"数据推送失败: {push_error}")
     
@@ -489,10 +494,11 @@ class SmartSchemer:
 
                         # 调用现有的数据推送功能
                         try:
-                            data_pusher.push_data(
-                                data=event_data,
-                                tags=device_conn.push_tags
-                            )
+                            if data_pusher.push_configs:
+                                data_pusher.push_data(
+                                    data=event_data,
+                                    tags=device_conn.push_tags
+                                )
                         except Exception as push_error:
                             logger.error(f"数据推送失败: {push_error}")
                         
@@ -602,9 +608,10 @@ class SmartSchemer:
                         # 推送事件
                         
                         try:
-                            data_pusher.push_data(
-                                data=event_data,
-                                tags=device_conn.push_tags
+                            if data_pusher.push_configs:
+                                data_pusher.push_data(
+                                    data=event_data,
+                                    tags=device_conn.push_tags
                             )
                         except Exception as push_error:
                             logger.error(f"数据推送失败: {push_error}")
@@ -630,7 +637,7 @@ class SmartSchemer:
             for device_conn in self.device_connections.values():
                 if device_conn.login_id == lLoginID:
                     device_conn.is_connected = False
-                    
+                    device_conn.re_connected = False
                     if device_conn.event_types is not None and 'system_log' in device_conn.event_types:
                 
                         # 为所有相关订阅创建系统日志事件
@@ -656,9 +663,11 @@ class SmartSchemer:
     def ReConnectCallBack(self, lLoginID, pchDVRIP, nDVRPort, dwUser):
         """重新连接回调函数"""
         try:  
+            print(f"重新连接回调函数: {lLoginID}")
             # 查找对应的设备
             for device_conn in self.device_connections.values():
                 if device_conn.login_id == lLoginID:
+                    device_conn.re_connected = True
                     # device_conn.is_connected = True
                     # device_conn.last_heartbeat = datetime.now()
                     

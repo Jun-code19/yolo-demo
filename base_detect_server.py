@@ -2055,8 +2055,8 @@ class DetectionServer:
             db = SessionLocal()
             current_time = datetime.now()
             
-            # 智能事件保留30天
-            expire_time = current_time - timedelta(days=30)
+            # 智能事件保留7天
+            expire_time = current_time - timedelta(days=7)
             
             # 查询要删除的外部事件（用于删除关联的文件）
             events_to_delete = db.query(SmartEvent).filter(

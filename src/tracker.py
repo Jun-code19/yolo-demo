@@ -230,7 +230,7 @@ class ObjectTracker:
                 'timestamp': self.frame_count
             }
             # 这里可以添加回调函数来处理事件
-            print(f"行为事件触发: {event_type}, 轨迹ID: {track_id}, 位置: {position}")
+            # print(f"行为事件触发: {event_type}, 轨迹ID: {track_id}, 位置: {position}")
     
     def _trigger_counting_event(self, track_id, event_type, position):
         """触发计数事件"""
@@ -246,7 +246,7 @@ class ObjectTracker:
                 'timestamp': self.frame_count
             }
             # 这里可以添加回调函数来处理事件
-            print(f"计数事件: {event_type}, 当前人数: {self.current_count}, 今日进入: {self.today_in_count}, 今日离开: {self.today_out_count}")
+            # print(f"计数事件: {event_type}, 当前人数: {self.current_count}, 今日进入: {self.today_in_count}, 今日离开: {self.today_out_count}")
 
     def _calculate_iou(self, bbox1, bbox2):
         x1, y1, x2, y2 = bbox1
@@ -589,7 +589,7 @@ class ObjectTracker:
                 
                 # 输出事件信息
                 change_text = '增加' if current_count_in_area > old_count else '减少'
-                print(f"区域人数{change_text} {change_amount}人: {old_count} -> {current_count_in_area}, 今日累计进入: {self.today_in_count}, 今日累计离开: {self.today_out_count}")
+                # print(f"区域人数{change_text} {change_amount}人: {old_count} -> {current_count_in_area}, 今日累计进入: {self.today_in_count}, 今日累计离开: {self.today_out_count}")
             
             # 更新今日统计（基于变化量）
             change_amount = current_count_in_area - old_count
