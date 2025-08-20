@@ -241,12 +241,12 @@ class DataPusher:
                             self.push_stats[push_id]["fail"] += 1
                             
                             # 重试逻辑
-                            if task["retry_count"] < task["max_retries"]:
-                                task["retry_count"] += 1
-                                # 稍后重试
-                                time.sleep(config.retry_interval)
-                                self.push_queue.put(task)
-                                logger.info(f"推送失败，计划重试 ({task['retry_count']}/{task['max_retries']}): {push_id}")
+                            # if task["retry_count"] < task["max_retries"]:
+                            #     task["retry_count"] += 1
+                            #     # 稍后重试
+                            #     time.sleep(config.retry_interval)
+                            #     self.push_queue.put(task)
+                            logger.info(f"推送失败:{push_id}, 数据:{task['data']}")
                 
                 except Exception as e:
                     logger.error(f"推送数据时出错: {e}")
@@ -267,7 +267,7 @@ class DataPusher:
         try:
             url = config.http_url
             if not url:
-                logger.error("HTTP URL 未配置")
+                # logger.error("HTTP URL 未配置")
                 return False
             
             # 准备要发送的数据
@@ -296,14 +296,14 @@ class DataPusher:
             if response.status_code >= 200 and response.status_code < 300:
                 return True
             else:
-                logger.warning(f"HTTP推送失败: {config.push_id}, 状态码: {response.status_code}, 响应: {response.text}")
+                # logger.warning(f"HTTP推送失败: {config.push_id}, 状态码: {response.status_code}, 响应: {response.text}")
                 return False
                 
         except requests.exceptions.RequestException as e:
-            logger.error(f"HTTP推送请求异常: {e}")
+            # logger.error(f"HTTP推送请求异常: {e}")
             return False
         except Exception as e:
-            logger.error(f"HTTP推送未知异常: {e}")
+            # logger.error(f"HTTP推送未知异常: {e}")
             return False
     
     def _push_tcp(self, config, data, image=None):
@@ -313,7 +313,7 @@ class DataPusher:
             port = config.tcp_port
             
             if not host or not port:
-                logger.error("TCP主机或端口未配置")
+                # logger.error("TCP主机或端口未配置")
                 return False
             
             # 准备发送的数据
@@ -332,14 +332,14 @@ class DataPusher:
                 sock.connect((host, port))
                 sock.sendall(json_data.encode('utf-8'))
                 
-                logger.info(f"TCP推送成功: {config.push_id}")
+                # logger.info(f"TCP推送成功: {config.push_id}")
                 return True
                 
         except socket.error as e:
-            logger.error(f"TCP推送连接异常: {e}")
+            # logger.error(f"TCP推送连接异常: {e}")
             return False
         except Exception as e:
-            logger.error(f"TCP推送未知异常: {e}")
+            # logger.error(f"TCP推送未知异常: {e}")
             return False
     
     def _push_mqtt(self, config, data, image=None):
@@ -351,7 +351,7 @@ class DataPusher:
             client_id = config.mqtt_client_id or f"detector-{uuid.uuid4()}"
             
             if not broker or not topic:
-                logger.error("MQTT代理或主题未配置")
+                # logger.error("MQTT代理或主题未配置")
                 return False
             
             # 准备发送的数据
@@ -393,14 +393,14 @@ class DataPusher:
             
             # 检查发布结果
             if result.rc == mqtt.MQTT_ERR_SUCCESS:
-                logger.info(f"MQTT推送成功: {config.push_id}")
+                # logger.info(f"MQTT推送成功: {config.push_id}")
                 return True
             else:
-                logger.warning(f"MQTT推送失败: {config.push_id}, 错误码: {result.rc}")
+                # logger.warning(f"MQTT推送失败: {config.push_id}, 错误码: {result.rc}")
                 return False
                 
         except Exception as e:
-            logger.error(f"MQTT推送异常: {e}")
+            # logger.error(f"MQTT推送异常: {e}")
             return False
 
     def _ensure_json_serializable(self, data):

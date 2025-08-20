@@ -41,20 +41,33 @@
           <div class="image-preview-container">
             <div v-if="imageLoading" class="loading-wrapper">
               <el-skeleton animated :rows="8" />
-              <div class="loading-text">正在加载设备画面...</div>
+              <div class="loading-text">正在获取设备画面...</div>
             </div>
             <div v-else-if="imageError" class="error-wrapper">
               <el-icon :size="64">
                 <CircleClose />
               </el-icon>
               <p>{{ imageError }}</p>
-              <el-button @click="loadDeviceImage">重试</el-button>
+              <div class="error-actions">
+                <el-button @click="loadDeviceImage" type="primary">重试</el-button>
+              </div>
+              <div class="error-tips">
+                <p><strong>设备抓图失败的可能原因：</strong></p>
+                <ul>
+                  <li>设备离线或网络不通</li>
+                  <li>设备用户名或密码错误</li>
+                  <li>设备不支持抓图API</li>
+                  <li>后端服务未启动或配置错误</li>
+                  <li>网络防火墙阻止后端访问设备</li>
+                </ul>
+                <p>建议：检查设备连接状态和后端服务状态</p>
+              </div>
             </div>
             <div v-else-if="!deviceImage" class="image-placeholder">
               <el-icon :size="64">
                 <VideoCamera />
               </el-icon>
-              <p>暂无设备画面图片</p>
+              <p>暂无设备画面</p>
             </div>
             <div v-else class="image-wrapper">
               <img ref="deviceImageRef" :src="deviceImage" class="device-image" @load="onImageLoaded" />
@@ -328,7 +341,8 @@
               </el-col>
               <el-col :span="14">
                 <el-form-item label="推送间隔(秒)">
-                  <el-input-number v-model="configForm.coordinates.alarm_interval" :min="0" :max="3600" :step="1" style="width: 50%;" />
+                  <el-input-number v-model="configForm.coordinates.alarm_interval" :min="0" :max="3600" :step="1"
+                    style="width: 50%;" />
                 </el-form-item>
               </el-col>
             </el-row>
@@ -422,6 +436,9 @@ export default defineComponent({
     // 绘制相关状态
     const isDrawing = ref(false);
     const points = ref([]);
+
+    // 设备抓图相关
+    const isSnapshotLoading = ref(false);
 
     // 页面操作方法
     const goBack = () => {
@@ -642,12 +659,7 @@ export default defineComponent({
       }, 100);
     };
 
-    const getDeviceImageUrl = (ipAddress, channel) => {
-      const imagePath = `storage/devices/${ipAddress}_ch${channel}.jpg`;
-      return `/api/v2/data-listeners/images/${encodeURIComponent(imagePath)}`;
-    };
-
-    const loadDeviceImage = () => {
+    const loadDeviceImage = async () => {
       if (!deviceInfo.value) {
         imageError.value = '设备信息不完整';
         return;
@@ -665,20 +677,56 @@ export default defineComponent({
         return;
       }
 
-      const imageUrl = getDeviceImageUrl(ipAddress, channel);
-      const img = new Image();
+      // 使用设备API实时抓图
+      loadDeviceSnapshot(ipAddress, channel);
+    };
 
-      img.onload = () => {
-        deviceImage.value = imageUrl;
+    // 通过设备API实时抓图
+    const loadDeviceSnapshot = async (ipAddress, channel) => {
+      try {
+        isSnapshotLoading.value = true;
+        imageLoading.value = true;
+        imageError.value = null;
+
+        // 通过后端API获取设备抓图，避免CORS问题
+        const response = await fetch('/api/v1/devices/snapshot', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            device_id: deviceInfo.value.device_id,
+            ip_address: ipAddress,
+            device_type: deviceInfo.value.device_type,
+            channel: channel || 1,
+            username: deviceInfo.value.username,
+            password: deviceInfo.value.password
+          })
+        });
+
+        if (response.ok) {
+
+          // 获取图像数据并转换为blob URL
+          const blob = await response.blob();
+          const imageUrl = window.URL.createObjectURL(blob);
+
+          // 更新设备图片
+          deviceImage.value = imageUrl;
+          imageLoading.value = false;
+          imageError.value = null;
+
+          ElMessage.success('设备画面刷新成功');
+        } else {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
+        }
+      } catch (error) {
+        imageError.value = `设备抓图失败: ${error.message}`;
         imageLoading.value = false;
-      };
 
-      img.onerror = () => {
-        imageLoading.value = false;
-        imageError.value = '设备画面图片不存在，请先进行设备预览以生成画面快照';
-      };
-
-      img.src = `${imageUrl}?t=${Date.now()}`;
+      } finally {
+        isSnapshotLoading.value = false;
+      }
     };
 
     const drawPolygon = (points) => {
@@ -908,15 +956,15 @@ export default defineComponent({
           // 设置配置数据
           if (config.area_coordinates && Object.keys(config.area_coordinates).length > 0) {
             const coordinates = config.area_coordinates;
-            
+
             configForm.analysisType = coordinates.analysisType || 'none';
-            
+
             Object.assign(configForm.coordinates, coordinates);
           } else {
             // 如果没有配置数据，默认选择"无智能方案"
             configForm.analysisType = 'none';
           }
-          
+
           // 加载设备图片
           setTimeout(() => {
             loadDeviceImage();
@@ -942,6 +990,7 @@ export default defineComponent({
       deviceImage,
       deviceImageRef,
       drawingCanvas,
+      isSnapshotLoading,
       goBack,
       resetConfig,
       saveConfig,
@@ -1087,6 +1136,37 @@ export default defineComponent({
   align-items: center;
   color: #f56c6c;
   gap: 10px;
+}
+
+.error-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.error-tips {
+  margin-top: 15px;
+  font-size: 13px;
+  color: #909399;
+  line-height: 1.6;
+  padding: 10px;
+  background-color: #fde2e2;
+  border: 1px solid #faeced;
+  border-radius: 4px;
+}
+
+.error-tips p {
+  margin-bottom: 5px;
+}
+
+.error-tips ul {
+  margin-bottom: 10px;
+  padding-left: 20px;
+}
+
+.error-tips li {
+  list-style: disc;
+  margin-bottom: 3px;
 }
 
 .image-placeholder {
@@ -1352,15 +1432,15 @@ export default defineComponent({
   .page-content {
     padding: 16px;
   }
-  
+
   .header-left {
     gap: 12px;
   }
-  
+
   .header-info h2 {
     font-size: 16px;
   }
-  
+
   .analysis-option .el-radio__label,
   .type-card .el-radio__label {
     padding: 10px 35px 10px 10px;

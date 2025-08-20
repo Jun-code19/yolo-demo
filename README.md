@@ -181,3 +181,48 @@ Apply to README.md
 - `GET /api/v2/crowd-analysis/available-devices`: 获取可用于人群分析的设备列表
 - `POST /api/v2/crowd-analysis/jobs/{job_id}/pause`: 暂停分析任务
 - `POST /api/v2/crowd-analysis/jobs/{job_id}/resume`: 恢复分析任务
+
+## 最新功能更新 (2024年)
+
+### 模型缓存机制
+- **LRU策略**: 使用最近最少使用算法管理模型缓存
+- **内存监控**: 实时监控GPU/CPU内存使用情况  
+- **自动清理**: 定期清理长时间未使用的模型
+- **配置灵活**: 支持设置最大缓存数量和内存限制
+
+### 摄像机API抓图优化
+- **多品牌支持**: 支持海康威视、大华、Axis、NVR等主流品牌
+- **智能认证**: 自动处理HTTP Basic和Digest认证
+- **OpenCV图像**: 直接返回OpenCV格式图像，可直接用于检测
+- **RTSP回退**: API抓图失败时自动回退到OpenCV RTSP拉流
+- **错误处理**: 完善的超时和连接错误处理
+
+### 使用方法
+
+#### 模型缓存管理
+```python
+# 获取缓存统计信息
+stats = analyzer.get_cache_stats()
+print(f"当前缓存模型数量: {stats['current_size']}")
+print(f"内存使用: {stats['current_memory_mb']:.2f} MB")
+
+# 手动清理缓存
+analyzer.clear_model_cache()
+
+# 重新加载模型
+analyzer.reload_model("model_path", 0.5)
+```
+
+#### 摄像机连接测试
+```python
+# 测试摄像机连接
+result = analyzer.test_camera_connection("device_id")
+print(f"API抓图: {'成功' if result['api_success'] else '失败'}")
+print(f"RTSP拉流: {'成功' if result['rtsp_success'] else '失败'}")
+```
+
+### 性能优化建议
+1. **模型缓存**: 根据GPU内存大小调整`max_memory_mb`参数
+2. **API抓图**: 优先使用摄像机API抓图，减少网络延迟
+3. **定时清理**: 定期清理长时间未使用的模型，释放内存
+4. **错误处理**: 合理设置超时时间，避免长时间等待

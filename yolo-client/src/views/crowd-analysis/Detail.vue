@@ -133,17 +133,11 @@
       <!-- 历史数据表格视图 -->
       <div class="history-table-view" v-if="hasHistoryData">
         <div class="table-header">
-          <h4>历史记录</h4>
+          <div>
+            <h4>历史记录</h4>
+            <p class="data-hint">表格显示完整数据，图表显示采样数据</p>
+          </div>
           <div class="table-controls">
-            <!-- <el-button 
-              size="small" 
-              type="primary" 
-              icon="RefreshRight" 
-              :loading="historyLoading"
-              @click="refreshHistoryData"
-            >
-              刷新数据
-            </el-button> -->
             <el-radio-group v-model="historyViewMode" size="small" style="margin-left: 10px;">
               <el-radio-button value="chart">图表</el-radio-button>
               <el-radio-button value="table">表格</el-radio-button>
@@ -204,12 +198,12 @@
             <el-table-column label="#" type="index" width="50" />
             <el-table-column label="类别" width="100">
               <template #default="scope">
-                {{ scope.row.class + ' : ' + scope.row.class_name }}
+                {{ scope.row.class_id + ' : ' + scope.row.class_name }}
               </template>
             </el-table-column>
             <el-table-column label="位置" width="180">
               <template #default="scope">
-                {{ formatBoxCoordinates(scope.row.box) }}
+                {{ formatBoxCoordinates(scope.row.bbox) }}
               </template>
             </el-table-column>
             <el-table-column label="置信度" width="100">
@@ -494,8 +488,13 @@ const initChart = () => {
   // 基础配置
   const option = {
     title: {
-      text: '人数变化趋势',
-      left: 'center'
+      text: '人数变化趋势 (每30分钟采样)',
+      left: 'center',
+      subtext: '图表显示采样数据，表格显示完整数据',
+      subtextStyle: {
+        fontSize: 12,
+        color: '#909399'
+      }
     },
     tooltip: {
       trigger: 'axis',
@@ -611,20 +610,25 @@ const fetchHistoryData = async () => {
     historyData.value = res.data.data_points || [];
     hasHistoryData.value = historyData.value.length > 0;
 
-    // 更新图表
+    // 更新图表 - 每半小时抽取一条数据
     if (chart && hasHistoryData.value) {
-      // 准备总人数数据
-      const totalPersonData = historyData.value.map(item => {
-        // 确保时间戳格式正确
+      // 对数据进行排序，确保时间顺序正确
+      const sortedData = [...historyData.value].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+      
+      // 每半小时抽取一条数据（30分钟 = 30 * 60 * 1000毫秒）
+      const sampledData = sampleDataByInterval(sortedData, 60 * 60 * 1000);
+      
+      // 准备总人数数据（使用采样后的数据）
+      const totalPersonData = sampledData.map(item => {
         const timestamp = new Date(item.timestamp).getTime();
         return [timestamp, item.total_person_count];
       });
 
-      // 准备各设备数据
+      // 准备各设备数据（使用采样后的数据）
       const deviceData = {};
       const deviceNames = {};
 
-      historyData.value.forEach(item => {
+      sampledData.forEach(item => {
         if (item.camera_counts && item.camera_counts.length) {
           item.camera_counts.forEach(camera => {
             if (!deviceData[camera.device_id]) {
@@ -632,7 +636,6 @@ const fetchHistoryData = async () => {
               deviceNames[camera.device_id] = camera.device_name || `设备${camera.device_id}`;
             }
 
-            // 确保时间戳格式正确
             const timestamp = new Date(item.timestamp).getTime();
             deviceData[camera.device_id].push([
               timestamp,
@@ -686,6 +689,29 @@ const fetchHistoryData = async () => {
   } finally {
     historyLoading.value = false;
   }
+};
+
+// 按时间间隔采样数据的函数
+const sampleDataByInterval = (data, intervalMs) => {
+  if (data.length <= 1) return data;
+  
+  const sampled = [data[0]]; // 保留第一条数据
+  let lastSampledTime = new Date(data[0].timestamp).getTime();
+  
+  for (let i = 1; i < data.length; i++) {
+    const currentTime = new Date(data[i].timestamp).getTime();
+    if (currentTime - lastSampledTime >= intervalMs) {
+      sampled.push(data[i]);
+      lastSampledTime = currentTime;
+    }
+  }
+  
+  // 确保最后一条数据也被包含
+  if (sampled[sampled.length - 1] !== data[data.length - 1]) {
+    sampled.push(data[data.length - 1]);
+  }
+  
+  return sampled;
 };
 
 const showFullImage = (image) => {
@@ -872,6 +898,13 @@ const refreshHistoryData = async () => {
 .table-controls {
   display: flex;
   align-items: center;
+}
+
+.data-hint {
+  margin: 5px 0 0 0;
+  font-size: 12px;
+  color: #909399;
+  font-weight: normal;
 }
 
 .hint,

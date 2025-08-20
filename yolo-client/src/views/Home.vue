@@ -44,10 +44,10 @@
               <el-icon color="#E6A23C"><Warning /></el-icon>
             </div>
             <div class="stat-info">
-              <div class="stat-value">{{ comprehensiveData.events?.external_events?.total || 0 }}</div>
-              <div class="stat-label">外部事件总数</div>
+              <div class="stat-value">{{ comprehensiveData.events?.scheme_events?.total || 0 }}</div>
+              <div class="stat-label">订阅事件总数</div>
               <div class="stat-detail">
-                <span class="total">累计外部事件</span>
+                <span class="total">累计订阅事件</span>
               </div>
             </div>
           </div>
@@ -129,13 +129,13 @@
           <template #header>
             <div class="card-header">
               <span>系统管理</span>
-              <el-tag type="info">{{ comprehensiveData.users?.total || 0 }} 用户</el-tag>
+              <el-tag type="warning">{{ comprehensiveData.summary?.total_users || 0 }} 用户</el-tag>
             </div>
           </template>
           <div class="module-content">
             <div class="module-item">
               <span class="label">系统用户:</span>
-              <span class="value">{{ comprehensiveData.users?.total || 0 }}</span>
+              <span class="value">{{ comprehensiveData.summary?.total_users || 0 }}</span>
             </div>
             <div class="module-item">
               <span class="label">系统日志:</span>
@@ -167,8 +167,8 @@
                   外部事件
                 </span>
                 <span class="legend-item">
-                  <span class="legend-color logs"></span>
-                  系统日志
+                  <span class="legend-color scheme"></span>
+                  订阅事件
                 </span>
               </div>
             </div>
@@ -405,7 +405,7 @@ const renderTrendChart = () => {
   const dates = trends.map(item => item.date)
   const detectionData = trends.map(item => item.detection_events)
   const externalData = trends.map(item => item.external_events)
-  const logsData = trends.map(item => item.system_logs)
+  const schemeData = trends.map(item => item.scheme_events)
   
   const option = {
     tooltip: {
@@ -415,7 +415,7 @@ const renderTrendChart = () => {
       }
     },
     legend: {
-      data: ['检测事件', '外部事件', '系统日志']
+      data: ['检测事件', '外部事件', '订阅事件']
     },
     grid: {
       left: '3%',
@@ -454,11 +454,11 @@ const renderTrendChart = () => {
         smooth: true
       },
       {
-        name: '系统日志',
+        name: '订阅事件',
         type: 'line',
-        data: logsData,
+        data: schemeData,
         itemStyle: {
-          color: '#E6A23C'
+          color: '#F56C6C'
         },
         smooth: true
       }
@@ -1077,6 +1077,10 @@ watch(() => comprehensiveData.trends, () => {
 
 .legend-color.external {
   background-color: #67C23A;
+}
+
+.legend-color.scheme {
+  background-color: #F56C6C;
 }
 
 .legend-color.logs {

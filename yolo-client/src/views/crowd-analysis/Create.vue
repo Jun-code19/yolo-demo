@@ -104,7 +104,7 @@
       </el-form-item>
 
       <el-form-item label="执行间隔(秒)" v-if="frequencyType === 'interval'">
-        <el-input-number v-model="form.interval" :min="60" :step="60" />
+        <el-input-number v-model="form.interval" :min="5" :step="5" />
       </el-form-item>
 
       <el-form-item label="CRON表达式" v-if="frequencyType === 'cron'" prop="cron_expression">

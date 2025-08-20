@@ -1,5 +1,5 @@
 from fastapi import APIRouter, WebSocket,WebSocketDisconnect # 导入FastAPI相关模块
-from typing import Dict # 导入字典类型
+from typing import Dict, Tuple # 导入字典类型和元组类型
 import cv2 # 导入OpenCV模块
 import base64 # 导入base64编码
 import time # 导入时间模块
@@ -38,7 +38,7 @@ max_size = 320  # 减小处理尺寸以提高性能
 active_connections: Dict[str, WebSocket] = {}
 rtsp_sessions: Dict[str, dict] = {}
 
-def extract_ip_and_channel_from_rtsp_url(rtsp_url: str) -> tuple[str, str]:
+def extract_ip_and_channel_from_rtsp_url(rtsp_url: str) -> Tuple[str, str]:
     """从RTSP URL中提取IP地址和通道号"""
     try:
         ip_address = "unknown_device"
@@ -182,7 +182,6 @@ class RTSPManager:
     
     def _capture_rtsp_frames(self, connection_id: str, stream_url: str, stop_event):
         """在单独的线程中从RTSP流捕获帧"""
-        logger.info(f"开始RTSP捕获线程: {stream_url}")
         frame_count = 0
         frame_buffer = self.frame_buffers.get(connection_id)
         skip_frame_count = 0
@@ -193,10 +192,7 @@ class RTSPManager:
                 cap = cv2.VideoCapture(stream_url)
                 cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # 设置缓冲区大小为1，减少延迟
 
-                if cap.isOpened():
-                    logger.info(f"成功连接到摄像机: {stream_url}")
-                else:
-                    logger.error(f"无法连接到摄像机: {stream_url}")
+                if not cap.isOpened():                   
                     return False
                 
                 fps = cap.get(cv2.CAP_PROP_FPS)
@@ -214,8 +210,6 @@ class RTSPManager:
                         "error": None
                     }
                 
-                logger.info(f"视频流信息: 分辨率={width}x{height}, FPS={fps}")
-                
                 target_fps = min(30, fps if fps else 30)
                 frame_interval = 1.0 / target_fps
                 
@@ -228,7 +222,6 @@ class RTSPManager:
                         break
                     
                     if stop_event.is_set():
-                        logger.info(f"收到停止事件，结束RTSP捕获线程: {connection_id}")
                         break
                     
                     current_time = time.time()
@@ -265,7 +258,7 @@ class RTSPManager:
                     # 避免CPU占用过高
                     time.sleep(0.001)
                 
-                logger.info(f"RTSP捕获完成，共捕获 {frame_count} 帧，跳过 {skip_frame_count} 帧")
+                # logger.info(f"RTSP捕获完成，共捕获 {frame_count} 帧，跳过 {skip_frame_count} 帧")
                 
             except Exception as e:
                 logger.error(f"无法打开RTSP流: {e}")
@@ -278,7 +271,6 @@ class RTSPManager:
                 return
                 
         except Exception as e:
-            logger.error(f"RTSP捕获线程错误: {e}")
             # 设置错误状态
             if connection_id in self.stream_status:
                 self.stream_status[connection_id] = {
@@ -292,12 +284,9 @@ class RTSPManager:
                     cap.release()
             except Exception as e:
                 logger.error(f"关闭RTSP容器时发生错误: {e}")
-            
-            logger.info(f"RTSP捕获线程已结束: {connection_id}")
     
     async def _process_frames_async(self, connection_id: str):
         """异步处理并发送捕获的帧"""
-        logger.info(f"开始帧处理任务: {connection_id}")
         frame_buffer = self.frame_buffers.get(connection_id)
         stop_event = self.stop_events.get(connection_id)
         last_send_time = time.time()
@@ -308,9 +297,6 @@ class RTSPManager:
         stream_notified = False
         retry_count = 0
         max_retry = 50  # 最多等待5秒
-        
-        # 快照保存参数
-        snapshot_saved = False  # 标记是否已保存快照
         
         try:
             # 等待RTSP连接成功或失败
@@ -386,28 +372,12 @@ class RTSPManager:
                                 
                             # 使用更高的JPEG质量
                             _, buffer = cv2.imencode('.jpg', processed_img, 
-                                                   [cv2.IMWRITE_JPEG_QUALITY, 95])
+                                                   [cv2.IMWRITE_JPEG_QUALITY, 90])
                             jpeg_data = base64.b64encode(buffer).decode('utf-8')
                             
                             # 获取当前帧的宽高
                             current_width = processed_img.shape[1]
                             current_height = processed_img.shape[0]
-                            
-                            # 保存设备快照（仅在首次获取帧时保存）
-                            if not snapshot_saved and connection_id in self.stream_urls:
-                                try:
-                                    stream_url = self.stream_urls[connection_id]
-                                    ip_address, channel = extract_ip_and_channel_from_rtsp_url(stream_url)
-                                    
-                                    # 保存原始大小的图片作为快照
-                                    save_success = save_device_snapshot(img, ip_address, channel)
-                                    if save_success:
-                                        snapshot_saved = True
-                                        # logger.info(f"设备 {ip_address} 通道 {channel} 的快照已保存")
-                                    else:
-                                        logger.warning(f"保存设备 {ip_address} 通道 {channel} 的快照失败")
-                                except Exception as e:
-                                    logger.error(f"保存设备快照时出错: {e}")
                             
                             # 发送数据到WebSocket
                             websocket = active_connections.get(connection_id)
@@ -880,7 +850,6 @@ async def websocket_endpoint(websocket: WebSocket):
                 await websocket.send_json({
                     "type": "connect_confirm"
                 })
-                logger.info(f"Client {connection_id} connected")
                 continue
             # 增加处理RTSP预览请求的逻辑
             elif message["type"] == "preview_request":
@@ -894,8 +863,6 @@ async def websocket_endpoint(websocket: WebSocket):
                         "message": "缺少流URL"
                     })
                     continue
-                
-                logger.info(f"收到预览请求: {device_id}, URL: {stream_url}")
                 
                 # 将WebSocket连接添加到活动连接字典
                 active_connections[connection_id] = websocket
@@ -926,7 +893,6 @@ async def websocket_endpoint(websocket: WebSocket):
                     continue
 
                 try:
-                    logger.info(f"Loading model {models_name} for client {connection_id}")
                     models_info = get_model(message.get("models_id"))
                     
                     if not models_info:
@@ -941,11 +907,9 @@ async def websocket_endpoint(websocket: WebSocket):
                         "type": "config_confirm",
                         "model": models_name
                     })
-                    logger.info(f"Model {models_name} configured successfully for client {connection_id}")
                 
                 except Exception as e:
                     error_msg = f"Error configuring model {models_name}: {str(e)}"
-                    logger.error(error_msg)
                     await websocket.send_json({
                         "type": "error",
                         "message": error_msg
@@ -971,9 +935,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     height = message.get("height", 0)
                     original_width = message.get("original_width", width)
                     original_height = message.get("original_height", height)
-                    scale = message.get("scale", 1.0)
-                    
-                    logger.info(f"Processing image {image_name} (ID: {image_id}) for client {connection_id}")
+                    scale = message.get("scale", 1.0)               
                     
                     # 解码图像
                     decode_start_time = time.time()
@@ -986,10 +948,8 @@ async def websocket_endpoint(websocket: WebSocket):
                             raise ValueError("Failed to decode image")
                         
                         decode_time = time.time() - decode_start_time
-                        logger.info(f"Image decoded successfully in {decode_time:.3f}s, shape: {frame.shape}")
                     except Exception as e:
                         error_msg = f"Error decoding image: {str(e)}"
-                        logger.error(error_msg)
                         await websocket.send_json({
                             "type": "error",
                             "message": error_msg
@@ -1010,7 +970,6 @@ async def websocket_endpoint(websocket: WebSocket):
                             new_h, new_w = int(orig_h * resize_scale), int(orig_w * resize_scale)
                             target_frame = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
                             target_scale = resize_scale
-                            logger.info(f"Resized image for detection: {orig_w}x{orig_h} -> {new_w}x{new_h}")
                         
                         # 检测开始时间
                         detect_start_time = time.time()
@@ -1051,7 +1010,6 @@ async def websocket_endpoint(websocket: WebSocket):
                         nms_applied = False
                         try:
                             if len(result["objects"]) > 1:
-                                logger.info(f"Applying NMS on {len(result['objects'])} detections")
                                 
                                 # 提取边界框和分数
                                 boxes = []
@@ -1067,7 +1025,6 @@ async def websocket_endpoint(websocket: WebSocket):
                                     
                                     # 仅保留NMS后的检测结果
                                     filtered_objects = [result["objects"][i] for i in keep_indices]
-                                    logger.info(f"NMS reduced detections from {len(result['objects'])} to {len(filtered_objects)}")
                                     result["objects"] = filtered_objects
                                     nms_applied = True
                         except Exception as e:
@@ -1111,22 +1068,18 @@ async def websocket_endpoint(websocket: WebSocket):
                             "total_time": round(total_time * 1000, 2),  # ms
                             "nms_applied": nms_applied
                         }
-                        
-                        logger.info(f"Image {image_name} processed in {total_time:.3f}s, found {len(result['objects'])} objects")
-                        
+                                             
                         # 发送检测结果
                         await websocket.send_json(result)
                         
                     except Exception as e:
                         error_msg = f"Error processing image: {str(e)}"
-                        logger.error(error_msg)
                         await websocket.send_json({
                             "type": "error",
                             "message": error_msg
                         })
                 except Exception as e:
                     error_msg = f"Error handling image detection request: {str(e)}"
-                    logger.error(error_msg)
                     await websocket.send_json({
                         "type": "error",
                         "message": error_msg
@@ -1143,7 +1096,6 @@ async def websocket_endpoint(websocket: WebSocket):
                     continue
                                         
                 frame_queues[connection_id] = asyncio.Queue(maxsize=max_queue_size)
-                logger.info(f"Video info received from client {connection_id}")
                 
                 # 启动帧处理任务
                 task = asyncio.create_task(process_frame_queue(connection_id))
@@ -1168,7 +1120,6 @@ async def websocket_endpoint(websocket: WebSocket):
                     latency = (current_time - frame_timestamp) * 1000
                     
                     if latency > max_latency:
-                        logger.debug(f"Skipping frame {frame_id} for client {connection_id} due to high latency: {latency:.0f}ms")
                         continue
                     
                     if not frame_data:
@@ -1197,7 +1148,6 @@ async def websocket_endpoint(websocket: WebSocket):
                         await websocket.send_json(results)
                     
                 except Exception as e:
-                    logger.error(f"Error processing frame: {str(e)}")
                     await websocket.send_json({
                         "type": "error",
                         "message": f"Failed to process frame: {str(e)}"
@@ -1215,3 +1165,1122 @@ async def websocket_endpoint(websocket: WebSocket):
         if connection_id in active_connections:
             await rtsp_manager.stop_stream(connection_id)
         await manager.disconnect(connection_id)
+
+# 标准RTSP拉流API
+import socket
+import struct
+import hashlib
+import random
+import string
+from typing import Optional, Dict, Any, Tuple
+
+class RTSPClient:
+    """标准RTSP客户端，实现完整的RTSP协议流程"""
+    
+    def __init__(self, ip_address: str, port: int = 554, username: str = "", password: str = ""):
+        self.ip_address = ip_address
+        self.port = port
+        self.username = username
+        self.password = password
+        self.session_id = None
+        self.cseq = 0
+        self.socket = None
+        self.is_connected = False
+        
+        # 添加nonce缓存机制
+        self.nonce_cache = {}  # 缓存nonce信息: {realm: {nonce, expiry_time, auth_response}}
+        self.nonce_expiry = {}  # 缓存过期时间: {realm:nonce: expiry_time}
+        self.max_nonce_age = 300  # nonce最大有效期，默认5分钟
+        
+    def _is_nonce_valid(self, realm: str, nonce: str) -> bool:
+        """检查nonce是否仍然有效"""
+        cache_key = f"{realm}:{nonce}"
+        if cache_key in self.nonce_expiry:
+            return time.time() < self.nonce_expiry[cache_key]
+        return False
+    
+    def _cache_nonce(self, realm: str, nonce: str, auth_response: str, max_age: int = None):
+        """缓存nonce信息"""
+        if max_age is None:
+            max_age = self.max_nonce_age
+            
+        cache_key = f"{realm}:{nonce}"
+        expiry_time = time.time() + max_age
+        
+        self.nonce_cache[cache_key] = {
+            "nonce": nonce,
+            "expiry_time": expiry_time,
+            "auth_response": auth_response
+        }
+        self.nonce_expiry[cache_key] = expiry_time
+        
+        logger.debug(f"缓存nonce: {realm}, 过期时间: {expiry_time}")
+    
+    def _get_cached_auth_response(self, realm: str, nonce: str) -> str:
+        """获取缓存的认证响应"""
+        cache_key = f"{realm}:{nonce}"
+        if cache_key in self.nonce_cache:
+            cache_data = self.nonce_cache[cache_key]
+            if time.time() < cache_data["expiry_time"]:
+                logger.debug(f"使用缓存的认证响应: {realm}")
+                return cache_data["auth_response"]
+            else:
+                # 清理过期的缓存
+                self._cleanup_expired_nonce(realm, nonce)
+        return None
+    
+    def _cleanup_expired_nonce(self, realm: str = None, nonce: str = None):
+        """清理过期的nonce缓存"""
+        current_time = time.time()
+        
+        if realm and nonce:
+            # 清理特定的nonce
+            cache_key = f"{realm}:{nonce}"
+            if cache_key in self.nonce_cache:
+                del self.nonce_cache[cache_key]
+            if cache_key in self.nonce_expiry:
+                del self.nonce_expiry[cache_key]
+        else:
+            # 清理所有过期的nonce
+            expired_keys = []
+            for key, expiry_time in self.nonce_expiry.items():
+                if current_time >= expiry_time:
+                    expired_keys.append(key)
+            
+            for key in expired_keys:
+                if key in self.nonce_cache:
+                    del self.nonce_cache[key]
+                if key in self.nonce_expiry:
+                    del self.nonce_expiry[key]
+            
+            if expired_keys:
+                logger.debug(f"清理了 {len(expired_keys)} 个过期的nonce缓存")
+    
+    def _check_stale_nonce(self, auth_header: str) -> bool:
+        """检查nonce是否已过期（stale=true）"""
+        if 'stale=true' in auth_header.lower():
+            logger.info("检测到stale=true，nonce已过期，需要重新认证")
+            return True
+        return False
+    
+    def _extract_nonce_info(self, auth_header: str) -> Dict[str, str]:
+        """从WWW-Authenticate头中提取nonce信息"""
+        auth_info = {}
+        regex = r'(\w+)="([^"]*)"'
+        matches = re.findall(regex, auth_header)
+        
+        for key, value in matches:
+            auth_info[key] = value
+        
+        return auth_info
+    
+    def _generate_random_string(self, length: int = 16) -> str:
+        """生成随机字符串"""
+        return ''.join(random.choices(string.ascii_letters + string.digits, k=length))
+    
+    def _calculate_md5(self, data: str) -> str:
+        """计算MD5哈希值"""
+        return hashlib.md5(data.encode()).hexdigest()
+    
+    def _generate_digest_auth(self, auth_header: str, method: str, uri: str) -> str:
+        """生成Digest认证响应，优先使用缓存"""
+        try:
+            # 解析WWW-Authenticate头
+            auth_info = self._extract_nonce_info(auth_header)
+            
+            realm = auth_info.get('realm', '')
+            nonce = auth_info.get('nonce', '')
+            qop = auth_info.get('qop', '')
+            algorithm = auth_info.get('algorithm', 'MD5')
+            
+            # 检查是否有缓存的认证响应
+            cached_response = self._get_cached_auth_response(realm, nonce)
+            if cached_response:
+                logger.debug(f"使用缓存的Digest认证响应: {realm}")
+                return cached_response
+            
+            # 检查nonce是否已过期
+            if self._check_stale_nonce(auth_header):
+                # 清理过期的nonce缓存
+                self._cleanup_expired_nonce(realm, nonce)
+                logger.info("nonce已过期，清理缓存并重新生成认证")
+            
+            # 生成新的认证响应
+            cnonce = self._generate_random_string(16)
+            nc = '00000001'
+            
+            # 计算HA1 = MD5(username:realm:password)
+            ha1 = self._calculate_md5(f"{self.username}:{realm}:{self.password}")
+            
+            # 计算HA2 = MD5(method:uri)
+            ha2 = self._calculate_md5(f"{method}:{uri}")
+            
+            # 计算response
+            if qop:
+                response = self._calculate_md5(f"{ha1}:{nonce}:{nc}:{cnonce}:{qop}:{ha2}")
+            else:
+                response = self._calculate_md5(f"{ha1}:{nonce}:{ha2}")
+            
+            # 构造成认证头
+            auth_response = f'Digest username="{self.username}", realm="{realm}", nonce="{nonce}", uri="{uri}", response="{response}"'
+            
+            if qop:
+                auth_response += f', qop={qop}, nc={nc}, cnonce="{cnonce}"'
+            
+            # 缓存新的认证响应
+            self._cache_nonce(realm, nonce, auth_response)
+            logger.debug(f"生成并缓存新的Digest认证响应: {realm}")
+            
+            return auth_response
+            
+        except Exception as e:
+            logger.error(f"生成Digest认证失败: {e}")
+            return ""
+    
+    def connect(self) -> bool:
+        """建立TCP连接"""
+        try:
+            self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.socket.settimeout(10)
+            self.socket.connect((self.ip_address, self.port))
+            self.is_connected = True
+            logger.info(f"RTSP连接成功: {self.ip_address}:{self.port}")
+            return True
+        except Exception as e:
+            logger.error(f"RTSP连接失败: {e}")
+            return False
+    
+    def disconnect(self):
+        """断开连接"""
+        if self.socket:
+            try:
+                self.socket.close()
+            except:
+                pass
+        self.is_connected = False
+        self.session_id = None
+        
+        # 清理过期的nonce缓存
+        self._cleanup_expired_nonce()
+        logger.debug("已清理过期的nonce缓存")
+    
+    def _send_request(self, method: str, uri: str, headers: Dict[str, str] = None) -> str:
+        """发送RTSP请求"""
+        if not self.is_connected:
+            raise Exception("RTSP连接未建立")
+        
+        self.cseq += 1
+        
+        # 构建请求头
+        request_lines = [
+            f"{method} {uri} RTSP/1.0",
+            f"CSeq: {self.cseq}",
+            f"User-Agent: YOLO-RTSP-Client/1.0"
+        ]
+        
+        # 添加认证头
+        if self.username and self.password:
+            if headers and 'Authorization' in headers:
+                request_lines.append(f"Authorization: {headers['Authorization']}")
+        
+        # 添加会话ID
+        if self.session_id:
+            request_lines.append(f"Session: {self.session_id}")
+        
+        # 添加其他自定义头
+        if headers:
+            for key, value in headers.items():
+                if key.lower() not in ['authorization', 'session']:
+                    request_lines.append(f"{key}: {value}")
+        
+        # 添加空行和请求体结束
+        request_lines.extend(["", ""])
+        
+        request_data = "\r\n".join(request_lines)
+        logger.debug(f"发送RTSP请求:\n{request_data}")
+        
+        try:
+            self.socket.send(request_data.encode())
+            
+            # 接收响应
+            response = b""
+            while True:
+                chunk = self.socket.recv(4096)
+                if not chunk:
+                    break
+                response += chunk
+                if b"\r\n\r\n" in response:
+                    break
+            
+            response_text = response.decode('utf-8', errors='ignore')
+            logger.info(f"收到RTSP响应:\n{response_text}")
+            
+            return response_text
+            
+        except Exception as e:
+            logger.error(f"RTSP请求失败: {e}")
+            raise
+    
+    def describe(self, channel: int = 1, subtype: int = 0) -> Dict[str, Any]:
+        """发送DESCRIBE命令获取媒体描述"""
+        try:
+            # 构建相对路径URI（用于RTSP请求行）
+            request_uri = f"/cam/realmonitor?channel={channel}&subtype={subtype}"
+            # 构建完整URL（用于Digest认证）
+            full_uri = f"rtsp://{self.ip_address}:{self.port}{request_uri}"
+            
+            # 检查是否有缓存的认证信息可以直接使用
+            if self.username and self.password:
+                # 尝试使用缓存的认证信息
+                for cache_key, cache_data in self.nonce_cache.items():
+                    if cache_data["expiry_time"] > time.time():
+                        # 使用缓存的认证信息
+                        auth_headers = {"Authorization": cache_data["auth_response"]}
+                        try:
+                            response = self._send_request("DESCRIBE", full_uri, auth_headers)
+                            lines = response.split('\r\n')
+                            status_line = lines[0]
+                            
+                            if "200 OK" in status_line:
+                                # 提取SDP信息
+                                sdp_start = response.find('\r\n\r\n')
+                                if sdp_start != -1:
+                                    sdp_content = response[sdp_start + 4:]
+                                    media_info = self._parse_sdp(sdp_content)
+                                    logger.info(f"DESCRIBE (缓存认证)成功，媒体信息: {media_info}")
+                                    return {
+                                        "success": True,
+                                        "media_info": media_info,
+                                        "response": response,
+                                        "cached_auth": True
+                                    }
+                        except Exception as e:
+                            logger.debug(f"缓存认证失败，尝试重新认证: {e}")
+                            # 继续执行正常的认证流程
+            
+            # 第一次请求，不包含认证信息
+            response = self._send_request("DESCRIBE", full_uri)
+            
+            # 解析响应
+            lines = response.split('\r\n')
+            status_line = lines[0]
+            
+            if "200 OK" in status_line:
+                # 提取SDP信息
+                sdp_start = response.find('\r\n\r\n')
+                if sdp_start != -1:
+                    sdp_content = response[sdp_start + 4:]
+                    
+                    # 解析SDP获取媒体信息
+                    media_info = self._parse_sdp(sdp_content)
+                    
+                    logger.info(f"DESCRIBE成功，媒体信息: {media_info}")
+                    return {
+                        "success": True,
+                        "media_info": media_info,
+                        "response": response
+                    }
+                else:
+                    return {"success": False, "error": "未找到SDP内容"}
+            elif "401 Unauthorized" in status_line:
+                # 需要认证，查找WWW-Authenticate头
+                auth_header = None
+                for line in lines:
+                    if line.lower().startswith('www-authenticate:'):
+                        auth_header = line.split(':', 1)[1].strip()
+                        break
+                
+                if auth_header and self.username and self.password:
+                    logger.info(f"收到401认证挑战，开始Digest认证: {auth_header}")
+                    
+                    # 生成Digest认证响应，使用完整URI
+                    auth_response = self._generate_digest_auth(auth_header, "DESCRIBE", full_uri)
+                    if not auth_response:
+                        return {"success": False, "error": "生成Digest认证失败"}
+                    
+                    logger.info(f"生成的认证响应: {auth_response}")
+
+                    # 重试请求，包含认证信息
+                    headers = {"Authorization": auth_response}
+                    retry_response = self._send_request("DESCRIBE", full_uri, headers)
+                    
+                    # 解析重试响应
+                    retry_lines = retry_response.split('\r\n')
+                    retry_status_line = retry_lines[0]
+                    
+                    if "200 OK" in retry_status_line:
+                        # 提取SDP信息
+                        sdp_start = retry_response.find('\r\n\r\n')
+                        if sdp_start != -1:
+                            sdp_content = retry_response[sdp_start + 4:]
+                            
+                            # 解析SDP获取媒体信息
+                            media_info = self._parse_sdp(sdp_content)
+                            
+                            logger.info(f"DESCRIBE (Digest认证)成功，媒体信息: {media_info}")
+                            return {
+                                "success": True,
+                                "media_info": media_info,
+                                "response": retry_response
+                            }
+                        else:
+                            return {"success": False, "error": "Digest认证后未找到SDP内容"}
+                    else:
+                        return {"success": False, "error": f"Digest认证后DESCRIBE失败: {retry_status_line}"}
+                else:
+                    if not auth_header:
+                        return {"success": False, "error": "401 Unauthorized但缺少WWW-Authenticate头"}
+                    else:
+                        return {"success": False, "error": "需要认证但未提供用户名和密码"}
+            else:
+                # 记录完整的响应内容以便调试
+                logger.error(f"DESCRIBE失败，完整响应:\n{response}")
+                return {"success": False, "error": f"DESCRIBE失败: {status_line}"}
+                
+        except Exception as e:
+            logger.error(f"DESCRIBE命令失败: {e}")
+            return {"success": False, "error": str(e)}
+    
+    def _parse_sdp(self, sdp_content: str) -> Dict[str, Any]:
+        """解析SDP内容"""
+        media_info = {
+            "video_codec": "unknown",
+            "framerate": 25.0,
+            "resolution": "unknown"
+        }
+        
+        try:
+            lines = sdp_content.split('\n')
+            for line in lines:
+                line = line.strip()
+                if line.startswith('m=video'):
+                    # 解析视频媒体行
+                    parts = line.split()
+                    if len(parts) >= 4:
+                        media_info["video_codec"] = parts[3]
+                elif line.startswith('a=framerate:'):
+                    # 解析帧率
+                    try:
+                        framerate = float(line.split(':')[1])
+                        media_info["framerate"] = framerate
+                    except:
+                        pass
+                elif line.startswith('a=control:trackID='):
+                    # 解析轨道ID
+                    track_id = line.split('=')[1]
+                    media_info["track_id"] = track_id
+                    
+        except Exception as e:
+            logger.warning(f"解析SDP失败: {e}")
+        
+        return media_info
+    
+    def setup(self, channel: int = 1, subtype: int = 0, client_port_start: int = 63088) -> Dict[str, Any]:
+        """发送SETUP命令建立传输通道"""
+        try:
+            # 生成客户端端口
+            client_port_rtp = client_port_start
+            client_port_rtcp = client_port_start + 1
+            
+            # 构建相对路径URI（用于RTSP请求行）
+            request_uri = f"/cam/realmonitor?channel={channel}&subtype={subtype}/trackID=0"
+            # 构建完整URL（用于Digest认证）
+            full_uri = f"rtsp://{self.ip_address}:{self.port}{request_uri}"
+            
+            headers = {
+                "Transport": f"RTP/AVP;unicast;client_port={client_port_rtp}-{client_port_rtcp}"
+            }
+            
+            # 检查是否有缓存的认证信息可以直接使用
+            if self.username and self.password:
+                # 尝试使用缓存的认证信息
+                for cache_key, cache_data in self.nonce_cache.items():
+                    if cache_data["expiry_time"] > time.time():
+                        # 使用缓存的认证信息
+                        auth_headers = {**headers, "Authorization": cache_data["auth_response"]}
+                        try:
+                            response = self._send_request("SETUP", full_uri, auth_headers)
+                            lines = response.split('\r\n')
+                            status_line = lines[0]
+                            
+                            if "200 OK" in status_line:
+                                # 提取会话ID和传输信息
+                                session_id, server_ports = self._extract_setup_info(lines)
+                                if session_id:
+                                    self.session_id = session_id
+                                    logger.info(f"SETUP (缓存认证)成功，会话ID: {session_id}, 服务器端口: {server_ports}")
+                                    return {
+                                        "success": True,
+                                        "session_id": session_id,
+                                        "server_ports": server_ports,
+                                        "client_ports": (client_port_rtp, client_port_rtcp),
+                                        "cached_auth": True
+                                    }
+                        except Exception as e:
+                            logger.debug(f"缓存认证失败，尝试重新认证: {e}")
+                            # 继续执行正常的认证流程
+            
+            # 第一次请求，可能包含认证信息（如果之前已经建立）
+            response = self._send_request("SETUP", full_uri, headers)
+            
+            # 解析响应
+            lines = response.split('\r\n')
+            status_line = lines[0]
+            
+            if "200 OK" in status_line:
+                # 提取会话ID和传输信息
+                session_id, server_ports = self._extract_setup_info(lines)
+                if session_id:
+                    self.session_id = session_id
+                    logger.info(f"SETUP成功，会话ID: {session_id}, 服务器端口: {server_ports}")
+                    return {
+                        "success": True,
+                        "session_id": session_id,
+                        "server_ports": server_ports,
+                        "client_ports": (client_port_rtp, client_port_rtcp)
+                    }
+                else:
+                    return {"success": False, "error": "未找到会话ID"}
+            elif "401 Unauthorized" in status_line:
+                # 需要认证，查找WWW-Authenticate头
+                auth_header = None
+                for line in lines:
+                    if line.lower().startswith('www-authenticate:'):
+                        auth_header = line.split(':', 1)[1].strip()
+                        break
+                
+                if auth_header and self.username and self.password:
+                    logger.info(f"SETUP收到401认证挑战，开始Digest认证: {auth_header}")
+                    
+                    # 生成Digest认证响应，使用完整URI
+                    auth_response = self._generate_digest_auth(auth_header, "SETUP", full_uri)
+                    if not auth_response:
+                        return {"success": False, "error": "生成Digest认证失败"}
+                    
+                    # 重试请求，包含认证信息
+                    auth_headers = {**headers, "Authorization": auth_response}
+                    retry_response = self._send_request("SETUP", full_uri, auth_headers)
+                    
+                    # 解析重试响应
+                    retry_lines = retry_response.split('\r\n')
+                    retry_status_line = retry_lines[0]
+                    
+                    if "200 OK" in retry_status_line:
+                        # 提取会话ID和传输信息
+                        session_id, server_ports = self._extract_setup_info(retry_lines)
+                        if session_id:
+                            self.session_id = session_id
+                            logger.info(f"SETUP (Digest认证)成功，会话ID: {session_id}, 服务器端口: {server_ports}")
+                            return {
+                                "success": True,
+                                "session_id": session_id,
+                                "server_ports": server_ports,
+                                "client_ports": (client_port_rtp, client_port_rtcp)
+                            }
+                        else:
+                            return {"success": False, "error": "Digest认证后未找到会话ID"}
+                    else:
+                        return {"success": False, "error": f"Digest认证后SETUP失败: {retry_status_line}"}
+                else:
+                    if not auth_header:
+                        return {"success": False, "error": "401 Unauthorized但缺少WWW-Authenticate头"}
+                    else:
+                        return {"success": False, "error": "需要认证但未提供用户名和密码"}
+            else:
+                return {"success": False, "error": f"SETUP失败: {status_line}"}
+                
+        except Exception as e:
+            logger.error(f"SETUP命令失败: {e}")
+            return {"success": False, "error": str(e)}
+    
+    def _extract_setup_info(self, lines: list) -> Tuple[Optional[str], Optional[Tuple[int, int]]]:
+        """从SETUP响应中提取会话ID和服务器端口信息"""
+        session_id = None
+        server_ports = None
+        
+        for line in lines:
+            if line.startswith("Session:"):
+                session_id = line.split(":")[1].split(";")[0].strip()
+            elif line.startswith("Transport:"):
+                # 解析服务器端口
+                transport_line = line.split(":")[1]
+                server_port_match = re.search(r'server_port=(\d+)-(\d+)', transport_line)
+                if server_port_match:
+                    server_ports = (int(server_port_match.group(1)), int(server_port_match.group(2)))
+        
+        return session_id, server_ports
+    
+    def play(self, channel: int = 1, subtype: int = 0) -> Dict[str, Any]:
+        """发送PLAY命令开始播放"""
+        try:
+            # 构建相对路径URI（用于RTSP请求行）
+            request_uri = f"/cam/realmonitor?channel={channel}&subtype={subtype}/"
+            # 构建完整URL（用于Digest认证）
+            full_uri = f"rtsp://{self.ip_address}:{self.port}{request_uri}"
+            
+            headers = {
+                "Range": "npt=0.000-"
+            }
+            
+            # 检查是否有缓存的认证信息可以直接使用
+            if self.username and self.password:
+                # 尝试使用缓存的认证信息
+                for cache_key, cache_data in self.nonce_cache.items():
+                    if cache_data["expiry_time"] > time.time():
+                        # 使用缓存的认证信息
+                        auth_headers = {**headers, "Authorization": cache_data["auth_response"]}
+                        try:
+                            response = self._send_request("PLAY", full_uri, auth_headers)
+                            lines = response.split('\r\n')
+                            status_line = lines[0]
+                            
+                            if "200 OK" in status_line:
+                                logger.info("PLAY (缓存认证)命令成功，开始接收RTP流")
+                                return {"success": True, "response": response, "cached_auth": True}
+                        except Exception as e:
+                            logger.debug(f"缓存认证失败，尝试重新认证: {e}")
+                            # 继续执行正常的认证流程
+            
+            response = self._send_request("PLAY", full_uri, headers)
+            
+            # 解析响应
+            lines = response.split('\r\n')
+            status_line = lines[0]
+            
+            if "200 OK" in status_line:
+                logger.info("PLAY命令成功，开始接收RTP流")
+                return {"success": True, "response": response}
+            elif "401 Unauthorized" in status_line:
+                # 需要认证，查找WWW-Authenticate头
+                auth_header = None
+                for line in lines:
+                    if line.lower().startswith('www-authenticate:'):
+                        auth_header = line.split(':', 1)[1].strip()
+                        break
+                
+                if auth_header and self.username and self.password:
+                    logger.info(f"PLAY收到401认证挑战，开始Digest认证: {auth_header}")
+                    
+                    # 生成Digest认证响应，使用完整URI
+                    auth_response = self._generate_digest_auth(auth_header, "PLAY", full_uri)
+                    if not auth_response:
+                        return {"success": False, "error": "生成Digest认证失败"}
+                    
+                    # 重试请求，包含认证信息
+                    auth_headers = {**headers, "Authorization": auth_response}
+                    retry_response = self._send_request("PLAY", full_uri, auth_headers)
+                    
+                    # 解析重试响应
+                    retry_lines = retry_response.split('\r\n')
+                    retry_status_line = retry_lines[0]
+                    
+                    if "200 OK" in retry_status_line:
+                        logger.info("PLAY (Digest认证)命令成功，开始接收RTP流")
+                        return {"success": True, "response": retry_response}
+                    else:
+                        return {"success": False, "error": f"Digest认证后PLAY失败: {retry_status_line}"}
+                else:
+                    if not auth_header:
+                        return {"success": False, "error": "401 Unauthorized但缺少WWW-Authenticate头"}
+                    else:
+                        return {"success": False, "error": "需要认证但未提供用户名和密码"}
+            else:
+                return {"success": False, "error": f"PLAY失败: {status_line}"}
+                
+        except Exception as e:
+            logger.error(f"PLAY命令失败: {e}")
+            return {"success": False, "error": str(e)}
+    
+    def pause(self, channel: int = 1, subtype: int = 0) -> Dict[str, Any]:
+        """发送PAUSE命令暂停播放"""
+        try:
+            # 构建相对路径URI（用于RTSP请求行）
+            request_uri = f"/cam/realmonitor?channel={channel}&subtype={subtype}/"
+            # 构建完整URL（用于Digest认证）
+            full_uri = f"rtsp://{self.ip_address}:{self.port}{request_uri}"
+            
+            # 检查是否有缓存的认证信息可以直接使用
+            if self.username and self.password:
+                # 尝试使用缓存的认证信息
+                for cache_key, cache_data in self.nonce_cache.items():
+                    if cache_data["expiry_time"] > time.time():
+                        # 使用缓存的认证信息
+                        auth_headers = {"Authorization": cache_data["auth_response"]}
+                        try:
+                            response = self._send_request("PAUSE", full_uri, auth_headers)
+                            lines = response.split('\r\n')
+                            status_line = lines[0]
+                            
+                            if "200 OK" in status_line:
+                                logger.info("PAUSE (缓存认证)命令成功")
+                                return {"success": True, "response": response, "cached_auth": True}
+                        except Exception as e:
+                            logger.debug(f"缓存认证失败，尝试重新认证: {e}")
+                            # 继续执行正常的认证流程
+            
+            response = self._send_request("PAUSE", full_uri)
+            
+            lines = response.split('\r\n')
+            status_line = lines[0]
+            
+            if "200 OK" in status_line:
+                logger.info("PAUSE命令成功")
+                return {"success": True, "response": response}
+            elif "401 Unauthorized" in status_line:
+                # 需要认证，查找WWW-Authenticate头
+                auth_header = None
+                for line in lines:
+                    if line.lower().startswith('www-authenticate:'):
+                        auth_header = line.split(':', 1)[1].strip()
+                        break
+                
+                if auth_header and self.username and self.password:
+                    logger.info(f"PAUSE收到401认证挑战，开始Digest认证: {auth_header}")
+                    
+                    # 生成Digest认证响应，使用完整URI
+                    auth_response = self._generate_digest_auth(auth_header, "PAUSE", full_uri)
+                    if not auth_response:
+                        return {"success": False, "error": "生成Digest认证失败"}
+                    
+                    # 重试请求，包含认证信息
+                    headers = {"Authorization": auth_response}
+                    retry_response = self._send_request("PAUSE", full_uri, headers)
+                    
+                    # 解析重试响应
+                    retry_lines = retry_response.split('\r\n')
+                    retry_status_line = retry_lines[0]
+                    
+                    if "200 OK" in retry_status_line:
+                        logger.info("PAUSE (Digest认证)命令成功")
+                        return {"success": True, "response": retry_response}
+                    else:
+                        return {"success": False, "error": f"Digest认证后PAUSE失败: {retry_status_line}"}
+                else:
+                    if not auth_header:
+                        return {"success": False, "error": "401 Unauthorized但缺少WWW-Authenticate头"}
+                    else:
+                        return {"success": False, "error": "需要认证但未提供用户名和密码"}
+            else:
+                return {"success": False, "error": f"PAUSE失败: {status_line}"}
+                
+        except Exception as e:
+            logger.error(f"PAUSE命令失败: {e}")
+            return {"success": False, "error": str(e)}
+    
+    def teardown(self, channel: int = 1, subtype: int = 0) -> Dict[str, Any]:
+        """发送TEARDOWN命令停止播放"""
+        try:
+            # 构建相对路径URI（用于RTSP请求行）
+            request_uri = f"/cam/realmonitor?channel={channel}&subtype={subtype}/"
+            # 构建完整URL（用于Digest认证）
+            full_uri = f"rtsp://{self.ip_address}:{self.port}{request_uri}"
+            
+            # 检查是否有缓存的认证信息可以直接使用
+            if self.username and self.password:
+                # 尝试使用缓存的认证信息
+                for cache_key, cache_data in self.nonce_cache.items():
+                    if cache_data["expiry_time"] > time.time():
+                        # 使用缓存的认证信息
+                        auth_headers = {"Authorization": cache_data["auth_response"]}
+                        try:
+                            response = self._send_request("TEARDOWN", full_uri, auth_headers)
+                            lines = response.split('\r\n')
+                            status_line = lines[0]
+                            
+                            if "200 OK" in status_line:
+                                logger.info("TEARDOWN (缓存认证)命令成功")
+                                return {"success": True, "response": response, "cached_auth": True}
+                        except Exception as e:
+                            logger.debug(f"缓存认证失败，尝试重新认证: {e}")
+                            # 继续执行正常的认证流程
+            
+            response = self._send_request("TEARDOWN", full_uri)
+            
+            lines = response.split('\r\n')
+            status_line = lines[0]
+            
+            if "200 OK" in status_line:
+                logger.info("TEARDOWN命令成功")
+                return {"success": True, "response": response}
+            elif "401 Unauthorized" in status_line:
+                # 需要认证，查找WWW-Authenticate头
+                auth_header = None
+                for line in lines:
+                    if line.lower().startswith('www-authenticate:'):
+                        auth_header = line.split(':', 1)[1].strip()
+                        break
+                
+                if auth_header and self.username and self.password:
+                    logger.info(f"TEARDOWN收到401认证挑战，开始Digest认证: {auth_header}")
+                    
+                    # 生成Digest认证响应，使用完整URI
+                    auth_response = self._generate_digest_auth(auth_header, "TEARDOWN", full_uri)
+                    if not auth_response:
+                        return {"success": False, "error": "生成Digest认证失败"}
+                    
+                    # 重试请求，包含认证信息
+                    headers = {"Authorization": auth_response}
+                    retry_response = self._send_request("TEARDOWN", full_uri, headers)
+                    
+                    # 解析重试响应
+                    retry_lines = retry_response.split('\r\n')
+                    retry_status_line = retry_lines[0]
+                    
+                    if "200 OK" in retry_status_line:
+                        logger.info("TEARDOWN (Digest认证)命令成功")
+                        return {"success": True, "response": retry_response}
+                    else:
+                        return {"success": False, "error": f"Digest认证后TEARDOWN失败: {retry_status_line}"}
+                else:
+                    if not auth_header:
+                        return {"success": False, "error": "401 Unauthorized但缺少WWW-Authenticate头"}
+                    else:
+                        return {"success": False, "error": "需要认证但未提供用户名和密码"}
+            else:
+                return {"success": False, "error": f"TEARDOWN失败: {status_line}"}
+                
+        except Exception as e:
+            logger.error(f"TEARDOWN命令失败: {e}")
+            return {"success": False, "error": str(e)}
+    
+    def start_stream(self, channel: int = 1, subtype: int = 0, client_port_start: int = 63088) -> Dict[str, Any]:
+        """启动完整的RTSP流流程"""
+        try:
+            logger.info(f"开始RTSP流流程: {self.ip_address}:{self.port}, 通道: {channel}, 码流: {subtype}")
+            
+            # 1. 建立连接
+            if not self.connect():
+                return {"success": False, "error": "连接失败"}
+            
+            # 2. DESCRIBE
+            describe_result = self.describe(channel, subtype)
+            if not describe_result["success"]:
+                self.disconnect()
+                return describe_result
+            
+            # 3. SETUP
+            setup_result = self.setup(channel, subtype, client_port_start)
+            if not setup_result["success"]:
+                self.disconnect()
+                return setup_result
+            
+            # 4. PLAY
+            play_result = self.play(channel, subtype)
+            if not play_result["success"]:
+                self.disconnect()
+                return play_result
+            
+            logger.info("RTSP流启动成功")
+            return {
+                "success": True,
+                "session_id": self.session_id,
+                "client_ports": setup_result["client_ports"],
+                "server_ports": setup_result["server_ports"],
+                "media_info": describe_result["media_info"]
+            }
+            
+        except Exception as e:
+            logger.error(f"启动RTSP流失败: {e}")
+            self.disconnect()
+            return {"success": False, "error": str(e)}
+    
+    def stop_stream(self) -> Dict[str, Any]:
+        """停止RTSP流"""
+        try:
+            if self.session_id:
+                # 发送TEARDOWN命令
+                teardown_result = self.teardown()
+                if not teardown_result["success"]:
+                    logger.warning(f"TEARDOWN失败: {teardown_result['error']}")
+            
+            # 断开连接
+            self.disconnect()
+            logger.info("RTSP流已停止")
+            return {"success": True}
+            
+        except Exception as e:
+            logger.error(f"停止RTSP流失败: {e}")
+            return {"success": False, "error": str(e)}
+
+    def get_cache_stats(self) -> Dict[str, Any]:
+        """获取nonce缓存统计信息"""
+        total_cached = len(self.nonce_cache)
+        expired_count = 0
+        valid_count = 0
+        current_time = time.time()
+        
+        for cache_key, cache_data in self.nonce_cache.items():
+            if cache_data["expiry_time"] > current_time:
+                valid_count += 1
+            else:
+                expired_count += 1
+        
+        return {
+            "total_cached": total_cached,
+            "valid_count": valid_count,
+            "expired_count": expired_count,
+            "cache_hit_rate": valid_count / max(total_cached, 1) * 100 if total_cached > 0 else 0
+        }
+
+# RTSP流管理类
+class RTSPStreamManager:
+    """管理多个RTSP流连接"""
+    
+    def __init__(self):
+        self.active_streams: Dict[str, RTSPClient] = {}
+        self.stream_info: Dict[str, Dict[str, Any]] = {}
+    
+    def start_stream(self, stream_id: str, ip_address: str, port: int = 554, 
+                    username: str = "", password: str = "", channel: int = 1, 
+                    subtype: int = 0, client_port_start: int = 63088) -> Dict[str, Any]:
+        """启动新的RTSP流"""
+        try:
+            # 检查是否已存在
+            if stream_id in self.active_streams:
+                return {"success": False, "error": "流ID已存在"}
+            
+            # 创建RTSP客户端
+            client = RTSPClient(ip_address, port, username, password)
+            
+            # 启动流
+            result = client.start_stream(channel, subtype, client_port_start)
+            
+            if result["success"]:
+                self.active_streams[stream_id] = client
+                self.stream_info[stream_id] = {
+                    "ip_address": ip_address,
+                    "port": port,
+                    "channel": channel,
+                    "subtype": subtype,
+                    "session_id": result["session_id"],
+                    "client_ports": result["client_ports"],
+                    "server_ports": result["server_ports"],
+                    "media_info": result["media_info"],
+                    "start_time": time.time()
+                }
+                
+                logger.info(f"RTSP流启动成功: {stream_id}")
+                return {"success": True, "stream_id": stream_id, **result}
+            else:
+                return result
+                
+        except Exception as e:
+            logger.error(f"启动RTSP流失败: {e}")
+            return {"success": False, "error": str(e)}
+    
+    def stop_stream(self, stream_id: str) -> Dict[str, Any]:
+        """停止指定的RTSP流"""
+        try:
+            if stream_id not in self.active_streams:
+                return {"success": False, "error": "流ID不存在"}
+            
+            client = self.active_streams[stream_id]
+            result = client.stop_stream()
+            
+            if result["success"]:
+                del self.active_streams[stream_id]
+                del self.stream_info[stream_id]
+                logger.info(f"RTSP流已停止: {stream_id}")
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"停止RTSP流失败: {e}")
+            return {"success": False, "error": str(e)}
+    
+    def get_stream_info(self, stream_id: str) -> Dict[str, Any]:
+        """获取流信息"""
+        if stream_id in self.stream_info:
+            return {"success": True, "info": self.stream_info[stream_id]}
+        else:
+            return {"success": False, "error": "流ID不存在"}
+    
+    def get_all_streams(self) -> Dict[str, Any]:
+        """获取所有活跃流信息"""
+        return {
+            "success": True,
+            "streams": list(self.stream_info.keys()),
+            "count": len(self.active_streams)
+        }
+    
+    def stop_all_streams(self) -> Dict[str, Any]:
+        """停止所有RTSP流"""
+        try:
+            stopped_count = 0
+            for stream_id in list(self.active_streams.keys()):
+                result = self.stop_stream(stream_id)
+                if result["success"]:
+                    stopped_count += 1
+            
+            logger.info(f"已停止所有RTSP流，共 {stopped_count} 个")
+            return {"success": True, "stopped_count": stopped_count}
+            
+        except Exception as e:
+            logger.error(f"停止所有RTSP流失败: {e}")
+            return {"success": False, "error": str(e)}
+
+# 创建全局RTSP流管理器实例
+rtsp_stream_manager = RTSPStreamManager()
+
+# 定义请求模型
+from pydantic import BaseModel
+
+class StartStreamRequest(BaseModel):
+    stream_id: str
+    ip_address: str
+    port: int = 554
+    username: str = ""
+    password: str = ""
+    channel: int = 1
+    subtype: int = 0
+    client_port_start: int = 63088
+
+class StopStreamRequest(BaseModel):
+    stream_id: str
+
+class TestConnectionRequest(BaseModel):
+    ip_address: str
+    port: int = 554
+    username: str = ""
+    password: str = ""
+    channel: int = 1
+    subtype: int = 0
+
+# RTSP流管理API端点
+@router.post("/start-stream", tags=["RTSP流管理"])
+async def start_rtsp_stream(request: StartStreamRequest):
+    """启动RTSP流"""
+    try:
+        result = rtsp_stream_manager.start_stream(
+            request.stream_id, request.ip_address, request.port, 
+            request.username, request.password, 
+            request.channel, request.subtype, request.client_port_start
+        )
+        
+        if result["success"]:
+            return {"success": True, "data": result}
+        else:
+            return {"success": False, "error": result["error"]}
+            
+    except Exception as e:
+        logger.error(f"启动RTSP流API失败: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@router.post("/stop-stream", tags=["RTSP流管理"])
+async def stop_rtsp_stream(request: StopStreamRequest):
+    """停止RTSP流"""
+    try:
+        result = rtsp_stream_manager.stop_stream(request.stream_id)
+        return result
+        
+    except Exception as e:
+        logger.error(f"停止RTSP流API失败: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@router.get("/stream-info/{stream_id}", tags=["RTSP流管理"])
+async def get_rtsp_stream_info(stream_id: str):
+    """获取RTSP流信息"""
+    try:
+        result = rtsp_stream_manager.get_stream_info(stream_id)
+        return result
+        
+    except Exception as e:
+        logger.error(f"获取RTSP流信息API失败: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@router.get("/all-streams", tags=["RTSP流管理"])
+async def get_all_rtsp_streams():
+    """获取所有RTSP流信息"""
+    try:
+        result = rtsp_stream_manager.get_all_streams()
+        return result
+        
+    except Exception as e:
+        logger.error(f"获取所有RTSP流信息API失败: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@router.post("/stop-all-streams", tags=["RTSP流管理"])
+async def stop_all_rtsp_streams():
+    """停止所有RTSP流"""
+    try:
+        result = rtsp_stream_manager.stop_all_streams()
+        return result
+        
+    except Exception as e:
+        logger.error(f"停止所有RTSP流API失败: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@router.post("/test-rtsp-connection", tags=["RTSP流管理"])
+async def test_rtsp_connection(request: TestConnectionRequest):
+    """测试RTSP连接"""
+    try:
+        # 创建临时客户端进行测试
+        client = RTSPClient(request.ip_address, request.port, request.username, request.password)
+        
+        # 测试连接
+        if not client.connect():
+            return {"success": False, "error": "连接失败"}
+        
+        # 测试DESCRIBE
+        describe_result = client.describe(request.channel, request.subtype)
+        
+        # 断开连接
+        client.disconnect()
+        
+        if describe_result["success"]:
+            return {
+                "success": True,
+                "message": "RTSP连接测试成功",
+                "media_info": describe_result["media_info"]
+            }
+        else:
+            return {
+                "success": False,
+                "error": f"DESCRIBE失败: {describe_result['error']}"
+            }
+            
+    except Exception as e:
+        logger.error(f"RTSP连接测试失败: {e}")
+        return {"success": False, "error": str(e)}
+
+@router.get("/cache-stats", tags=["RTSP流管理"])
+async def get_rtsp_cache_stats():
+    """获取RTSP nonce缓存统计信息"""
+    try:
+        # 获取所有活跃流的缓存统计
+        all_stats = {}
+        total_stats = {
+            "total_cached": 0,
+            "valid_count": 0,
+            "expired_count": 0,
+            "cache_hit_rate": 0.0
+        }
+        
+        for stream_id, client in rtsp_stream_manager.active_streams.items():
+            if hasattr(client, 'get_cache_stats'):
+                stats = client.get_cache_stats()
+                all_stats[stream_id] = stats
+                
+                # 累计总统计
+                total_stats["total_cached"] += stats["total_cached"]
+                total_stats["valid_count"] += stats["valid_count"]
+                total_stats["expired_count"] += stats["expired_count"]
+        
+        # 计算总体缓存命中率
+        if total_stats["total_cached"] > 0:
+            total_stats["cache_hit_rate"] = total_stats["valid_count"] / total_stats["total_cached"] * 100
+        
+        return {
+            "success": True,
+            "stream_cache_stats": all_stats,
+            "total_cache_stats": total_stats
+        }
+        
+    except Exception as e:
+        logger.error(f"获取RTSP缓存统计信息失败: {e}")
+        return {"success": False, "error": str(e)}

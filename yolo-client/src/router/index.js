@@ -38,9 +38,18 @@ const routes = [
   {
     path: '/devices',
     name: 'Devices',
-    component: () => import('../views/Devices.vue'),
+    component: () => import('../views/device/Devices.vue'),
     meta: {
       requiresAuth: true
+    }
+  },
+  {
+    path: '/devices/area-config/:deviceId',
+    name: 'AreaConfigSetting',
+    component: () => import('../views/device/AreaConfigSetting.vue'),
+    meta: {
+      requiresAuth: true,
+      title: '区域设置'
     }
   },
   {

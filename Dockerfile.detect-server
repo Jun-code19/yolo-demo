@@ -7,7 +7,7 @@ RUN echo "deb http://mirrors.aliyun.com/debian/ bullseye main non-free contrib" 
     echo "deb http://mirrors.aliyun.com/debian-security/ bullseye-security main non-free contrib" >> /etc/apt/sources.list && \
     echo "deb http://mirrors.aliyun.com/debian/ bullseye-updates main non-free contrib" >> /etc/apt/sources.list
 
-# 安装系统依赖
+# 安装系统依赖，包括FFmpeg
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     python3-dev \
@@ -19,11 +19,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
     tzdata \
     fonts-wqy-zenhei \
+    ffmpeg \
+    iputils-ping \
     && rm -rf /var/lib/apt/lists/*
     
 # 设置时区为中国标准时间
 RUN ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \
     dpkg-reconfigure -f noninteractive tzdata
+
+# 验证FFmpeg安装
+RUN ffmpeg -version && ffprobe -version
 
 COPY pip.conf /etc/pip.conf
 

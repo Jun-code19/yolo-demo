@@ -400,31 +400,31 @@ class SmartSchemer:
         """更新心跳时间"""
 
         # 推送设备连接状态
-        cameraStatuses = []
+        # cameraStatuses = []
 
         for device_conn in self.device_connections.values():
 
             if device_conn.is_connected:
                 device_conn.last_heartbeat = datetime.now()
-                cameraStatuses.append({
-                    'deviceId': device_conn.device_id,
-                    'online': True,
-                })
-            else:
-                cameraStatuses.append({
-                    'deviceId': device_conn.device_id,
-                    'online': False,
-                })    
+            #     cameraStatuses.append({
+            #         'deviceId': device_conn.device_id,
+            #         'online': True,
+            #     })
+            # else:
+            #     cameraStatuses.append({
+            #         'deviceId': device_conn.device_id,
+            #         'online': False,
+            #     })    
 
         # 增加推送设备连接状态
-        try:
-            if data_pusher.push_configs:
-                data_pusher.push_data(
-                    data={'cameraStatuses': cameraStatuses},
-                    tags=["device_online_status"]
-                )
-        except Exception as push_error:
-            logger.error(f"数据推送失败: {push_error}")
+        # try:
+        #     if data_pusher.push_configs:               
+        #         data_pusher.push_data(
+        #             data={'cameraStatuses': cameraStatuses},
+        #             tags=["device_online_status"]
+        #         )
+        # except Exception as push_error:
+        #     logger.error(f"数据推送失败: {push_error}")
     
     def _create_smart_event(self, scheme_id: str, event_type: str, title: str, 
                            description: str = None, priority: str = 'normal', 

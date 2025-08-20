@@ -162,19 +162,7 @@ async def create_analysis_job(
         db.add(db_job)
         db.commit()
         db.refresh(db_job)
-        
-        # 添加到运行时服务
-        # job_details = crowd_analyzer.add_analysis_job(
-        #     job_id=job_id,
-        #     job_name=job_data.job_name,
-        #     device_ids=job_data.device_ids,
-        #     models_id=job_data.models_id,  # 添加模型ID
-        #     interval=job_data.interval,
-        #     cron_expression=job_data.cron_expression,
-        #     tags=job_data.tags,
-        #     location_info=db_job.location_info
-        # )
-        
+              
         # 记录创建操作
         log_action(db, current_user.user_id, 'create_crowd_task', job_id, f"创建人群分析任务: {job_data.job_name}")
 
@@ -197,10 +185,6 @@ async def create_analysis_job(
             "status": "created",
             "last_result": None,
             "last_error": None
-            # "last_run": job_details.get("last_run"),
-            # "status": job_details.get("status", "created"),
-            # "last_result": job_details.get("last_result"),
-            # "last_error": job_details.get("last_error")
         }
         
         return response

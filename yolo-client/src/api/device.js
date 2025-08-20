@@ -238,4 +238,9 @@ export default {
       }
     });
   },
+  
+  // 获取设备抓图
+  getDeviceImage(deviceData) {
+    return apiClient.post(`/devices/snapshot`, deviceData);
+  },
 }; 

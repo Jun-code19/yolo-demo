@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File,
 from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
-from src.database import get_db, Device, User, SysLog, DetectionModel, DetectionConfig, DetectionEvent, DetectionPerformance, SaveMode, EventStatus, DetectionFrequency, DetectionLog, CrowdAnalysisJob,CrowdAnalysisResult, DataPushConfig, EdgeServer,ExternalEvent,ListenerConfig
+from src.database import get_db, Device, User, SysLog, DetectionModel, DetectionConfig, DetectionEvent, DetectionPerformance, SaveMode, EventStatus, DetectionFrequency, DetectionLog, CrowdAnalysisJob,CrowdAnalysisResult, DataPushConfig, EdgeServer,ExternalEvent,ListenerConfig,SmartEvent
 from pydantic import BaseModel, Field, validator
 from fastapi.security import OAuth2PasswordRequestForm
 from api.auth import authenticate_user, create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES, get_current_user, check_admin_permission, get_password_hash, verify_password
@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 import requests
 
 import os
-import shutil
+import base64
 import uuid
 import json
 import io
@@ -24,6 +24,13 @@ from sqlalchemy import func, text, desc, and_, or_
 router = APIRouter()
 
 # Pydantic模型定义
+class Point(BaseModel):
+    x: float
+    y: float
+
+class Coordinates(BaseModel):
+    points: Optional[List[Point]] = None  # 使用 Point 模型来表示坐标点
+
 class DeviceCreate(BaseModel):
     device_id: str
     device_name: str
@@ -51,21 +58,23 @@ class DeviceResponse(BaseModel):
     area: Optional[str] = None
     status: bool
     last_heartbeat: Optional[datetime]
+    area_coordinates:Optional[Coordinates] = None
 
     class Config:
         from_attributes = True
 
 class DeviceUpdate(BaseModel):
-    device_name: str
-    device_type: str
-    ip_address: str
-    port: int
-    username: str
-    password: Optional[str]
-    channel: Optional[int] = 1
-    stream_type: Optional[str] = "main"
+    device_name: str = None
+    device_type: str = None
+    ip_address: str = None
+    port: int = None
+    username: str = None
+    password: Optional[str] = None
+    channel: Optional[int] = None
+    stream_type: Optional[str] = None
     location: Optional[str] = None
     area: Optional[str] = None
+    area_coordinates:Optional[Coordinates] = None
 
 # 设备管理API
 @router.post("/devices/", response_model=DeviceResponse)
@@ -185,7 +194,7 @@ def update_device_status(db: Session = Depends(get_db)):
             )
             # 严格的状态码检查
             print(f"异常状态码: {response.status_code}, 响应内容: {response.text}")
-            if response.status_code == 200 or response.status_code == 401:
+            if response.status_code == 200 or response.status_code == 401 or response.status_code == 404:
                 # 解析响应体               
                 device.status = True
                 device.last_heartbeat = datetime.now()
@@ -310,56 +319,6 @@ def delete_device(device_id: str, db: Session = Depends(get_db), current_user: U
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
-
-# # 分析结果API
-# class AnalysisResultCreate(BaseModel):
-#     # video_id: str
-#     target_type: str
-#     confidence: float
-#     start_frame: Optional[int]
-#     end_frame: Optional[int]
-#     meta_data: dict
-
-# @router.post("/analysis-results/")
-# def create_analysis_result(result: AnalysisResultCreate, db: Session = Depends(get_db)):
-#     db_result = AnalysisResult(**result.dict())
-#     try:
-#         db.add(db_result)
-#         db.commit()
-#         db.refresh(db_result)
-#         return db_result
-#     except Exception as e:
-#         db.rollback()
-#         raise HTTPException(status_code=400, detail=str(e))
-
-# # 报警管理API
-# class AlarmCreate(BaseModel):
-#     alarm_id: str
-#     event_type: str
-#     device_id: str
-#     # video_id: str
-#     snapshot_path: Optional[str]
-
-# @router.post("/alarms/")
-# def create_alarm(alarm: AlarmCreate, db: Session = Depends(get_db)):
-#     db_alarm = Alarm(**alarm.dict())
-#     try:
-#         db.add(db_alarm)
-#         db.commit()
-#         db.refresh(db_alarm)
-#         return db_alarm
-#     except Exception as e:
-#         db.rollback()
-#         raise HTTPException(status_code=400, detail=str(e))
-
-# @router.put("/alarms/{alarm_id}/status")
-# def update_alarm_status(alarm_id: str, status: str, db: Session = Depends(get_db)):
-#     alarm = db.query(Alarm).filter(Alarm.alarm_id == alarm_id).first()
-#     if not alarm:
-#         raise HTTPException(status_code=404, detail="Alarm not found")
-#     alarm.status = status
-#     db.commit()
-#     return {"message": "Alarm status updated successfully"}
 
 # 用户管理API相关数据模型
 class UserCreate(BaseModel):
@@ -1006,25 +965,6 @@ class DetectionConfigResponse(DetectionConfigBase):
     class Config:
         from_attributes = True
 
-class DetectionConfigDetailResponse(DetectionConfigBase):
-    config_id: str
-    device_name: str
-    device_type: str
-    ip_address: str
-    port: int
-    username: str
-    password: str
-    models_name: str
-    models_type: str
-    area_coordinates: dict # 定义为列表，包含坐标对
-    created_at: datetime
-    updated_at: datetime
-    created_by: Optional[str] = None
-    schedule_config: Optional[Dict[str, Any]] = None  # 定时检测配置
-
-    class Config:
-        from_attributes = True
-
 class DetectionConfigInfoResponse(DetectionConfigBase):
     config_id: str
     device_name: str
@@ -1036,24 +976,6 @@ class DetectionConfigInfoResponse(DetectionConfigBase):
 
     class Config:
         from_attributes = True
-
-# 添加检测计划的Pydantic模型
-# class DetectionScheduleBase(BaseModel):
-#     config_id: str
-#     start_time: datetime
-#     end_time: datetime
-#     weekdays: List[int] = []
-#     is_active: bool = True
-
-# class DetectionScheduleCreate(DetectionScheduleBase):
-#     pass
-
-# class DetectionScheduleResponse(DetectionScheduleBase):
-#     schedule_id: str
-#     created_at: datetime
-
-#     class Config:
-#         from_attributes = True
 
 class BoundingBoxItem(BaseModel):
     bbox: List[float]
@@ -2007,112 +1929,6 @@ async def get_detection_events_overview(db: Session = Depends(get_db)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取检测事件统计失败: {str(e)}")
 
-# # 检测计划相关API
-# @router.get("/detection/schedules", response_model=List[DetectionScheduleResponse], tags=["检测计划"])
-# async def get_detection_schedules(
-#     config_id: Optional[str] = None,
-#     active_only: bool = False,
-#     db: Session = Depends(get_db)):
-#     """
-#     获取检测计划列表
-#     """
-#     query = db.query(DetectionSchedule)
-    
-#     if config_id:
-#         query = query.filter(DetectionSchedule.config_id == config_id)
-#     if active_only:
-#         query = query.filter(DetectionSchedule.is_active == True)
-    
-#     schedules = query.all()
-#     return schedules
-
-# @router.post("/detection/schedules", response_model=DetectionScheduleResponse, tags=["检测计划"])
-# async def create_detection_schedule(
-#     schedule: DetectionScheduleCreate,
-#     db: Session = Depends(get_db)):
-#     """
-#     创建新的检测计划
-#     """
-#     # 检查配置是否存在
-#     config = db.query(DetectionConfig).filter(DetectionConfig.config_id == schedule.config_id).first()
-#     if not config:
-#         raise HTTPException(status_code=404, detail="检测配置不存在")
-    
-#     # 验证时间范围
-#     if schedule.start_time >= schedule.end_time:
-#         raise HTTPException(status_code=400, detail="开始时间必须早于结束时间")
-    
-#     # 验证周几设置
-#     for day in schedule.weekdays:
-#         if day < 1 or day > 7:
-#             raise HTTPException(status_code=400, detail="周几设置必须是1-7的整数")
-    
-#     try:
-#         schedule_id = str(uuid.uuid4())
-#         db_schedule = DetectionSchedule(
-#             schedule_id=schedule_id,
-#             config_id=schedule.config_id,
-#             start_time=schedule.start_time,
-#             end_time=schedule.end_time,
-#             weekdays=schedule.weekdays,
-#             is_active=schedule.is_active,
-#             created_at=datetime.now()
-#         )
-#         db.add(db_schedule)
-#         db.commit()
-#         db.refresh(db_schedule)
-#         return db_schedule
-#     except Exception as e:
-#         db.rollback()
-#         raise HTTPException(status_code=500, detail=f"创建检测计划失败: {str(e)}")
-
-# # 辅助函数：更新检测统计数据
-# def update_detection_stats(db: Session, device_id: str, event_type: str):
-#     # 获取今天的日期（不包含时间）
-#     today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-    
-#     # 查找今天的统计记录
-#     stat = db.query(DetectionStat).filter(
-#         DetectionStat.device_id == device_id,
-#         func.date(DetectionStat.date) == func.date(today)
-#     ).first()
-    
-#     # 如果不存在，创建新记录
-#     if not stat:
-#         stat = DetectionStat(
-#             stat_id=str(uuid.uuid4()),
-#             device_id=device_id,
-#             date=today,
-#             total_events=1,
-#             by_class={event_type: 1},
-#             peak_hour=datetime.now().hour,
-#             peak_hour_count=1,
-#             created_at=datetime.now()
-#         )
-#         db.add(stat)
-#     else:
-#         # 更新统计数据
-#         stat.total_events += 1
-        
-#         # 更新分类统计
-#         by_class = stat.by_class or {}
-#         by_class[event_type] = by_class.get(event_type, 0) + 1
-#         stat.by_class = by_class
-        
-#         # 更新峰值小时
-#         current_hour = datetime.now().hour
-#         hourly_events = db.query(func.count(DetectionEvent.event_id)).filter(
-#             DetectionEvent.device_id == device_id,
-#             func.date(DetectionEvent.created_at) == func.date(today),
-#             func.extract('hour', DetectionEvent.created_at) == current_hour
-#         ).scalar()
-        
-#         if hourly_events > stat.peak_hour_count:
-#             stat.peak_hour = current_hour
-#             stat.peak_hour_count = hourly_events
-    
-#     db.commit() 
-
 @router.get("/files/{file_path:path}")
 async def get_file(file_path: str):
     # 构建完整的文件路径
@@ -3055,19 +2871,22 @@ def get_comprehensive_dashboard_overview(db: Session = Depends(get_db)):
         ).group_by(ExternalEvent.status).all()
         external_status_distribution = {status.value: count for status, count in external_status_stats}
         
+        # 订阅事件统计
+        total_scheme_events = db.query(SmartEvent).count()
+
         # 10. 用户统计
         total_users = db.query(User).count()
-        admin_users = db.query(User).filter(User.role == "admin").count()
-        operator_users = db.query(User).filter(User.role == "operator").count()
-        auditor_users = db.query(User).filter(User.role == "auditor").count()
+        # admin_users = db.query(User).filter(User.role == "admin").count()
+        # operator_users = db.query(User).filter(User.role == "operator").count()
+        # auditor_users = db.query(User).filter(User.role == "auditor").count()
         
         # 11. 系统日志统计
         total_system_logs = db.query(SysLog).count()
-        today_system_logs = db.query(SysLog).filter(SysLog.log_time >= today).count()
+        # today_system_logs = db.query(SysLog).filter(SysLog.log_time >= today).count()
         
         # 12. 检测日志统计
         total_detection_logs = db.query(DetectionLog).count()
-        today_detection_logs = db.query(DetectionLog).filter(DetectionLog.created_at >= today).count()
+        # today_detection_logs = db.query(DetectionLog).filter(DetectionLog.created_at >= today).count()
         
         # 13. 近7天的数据趋势
         seven_days_ago = today - timedelta(days=7)
@@ -3088,28 +2907,35 @@ def get_comprehensive_dashboard_overview(db: Session = Depends(get_db)):
                 ExternalEvent.timestamp >= day_start,
                 ExternalEvent.timestamp < day_end
             ).count()
+
+            #订阅事件数
+            scheme_count = db.query(SmartEvent).filter(
+                SmartEvent.created_at >= day_start,
+                SmartEvent.created_at < day_end
+            ).count()
             
             # 系统日志数
-            system_log_count = db.query(SysLog).filter(
-                SysLog.log_time >= day_start,
-                SysLog.log_time < day_end
-            ).count()
+            # system_log_count = db.query(SysLog).filter(
+            #     SysLog.log_time >= day_start,
+            #     SysLog.log_time < day_end
+            # ).count()
             
             daily_trends.append({
                 "date": day_start.strftime("%Y-%m-%d"),
                 "detection_events": detection_count,
                 "external_events": external_count,
-                "system_logs": system_log_count
+                "scheme_events":scheme_count
+                # "system_logs": system_log_count
             })
         
         # 14. 最近活动（合并检测事件和外部事件）
         recent_detection_events = db.query(DetectionEvent).order_by(
             DetectionEvent.created_at.desc()
-        ).limit(10).all()
+        ).limit(20).all()
         
-        recent_external_events = db.query(ExternalEvent).order_by(
-            ExternalEvent.timestamp.desc()
-        ).limit(10).all()
+        # recent_external_events = db.query(ExternalEvent).order_by(
+        #     ExternalEvent.timestamp.desc()
+        # ).limit(10).all()
         
         def getModelTypeName(type):
             typeMap = {
@@ -3168,34 +2994,34 @@ def get_comprehensive_dashboard_overview(db: Session = Depends(get_db)):
             })
         
         # 添加外部事件
-        for event in recent_external_events:
-            # 从normalized_data.targets获取
-            if event.normalized_data and event.normalized_data.get('targets'):
-                count = len(event.normalized_data['targets'])
-            # 从 algorithm_data 获取 - 修正字段访问
-            elif event.algorithm_data and event.algorithm_data.get('detections'):
-                count = len(event.algorithm_data['detections'])
-            # 从原始数据获取
-            elif event.original_data and event.original_data.get('detections'):
-                count = len(event.original_data['detections'])
-            # 修正 nn_output 处理 - 它本身是结果数组
-            elif event.original_data and event.original_data.get('nn_output'):
-                # nn_output 本身是检测结果数组
-                count = len(event.original_data['nn_output'])
-            else:
-                count = 0
+        # for event in recent_external_events:
+        #     # 从normalized_data.targets获取
+        #     if event.normalized_data and event.normalized_data.get('targets'):
+        #         count = len(event.normalized_data['targets'])
+        #     # 从 algorithm_data 获取 - 修正字段访问
+        #     elif event.algorithm_data and event.algorithm_data.get('detections'):
+        #         count = len(event.algorithm_data['detections'])
+        #     # 从原始数据获取
+        #     elif event.original_data and event.original_data.get('detections'):
+        #         count = len(event.original_data['detections'])
+        #     # 修正 nn_output 处理 - 它本身是结果数组
+        #     elif event.original_data and event.original_data.get('nn_output'):
+        #         # nn_output 本身是检测结果数组
+        #         count = len(event.original_data['nn_output'])
+        #     else:
+        #         count = 0
 
-            recent_activities.append({
-                "content": f"[外部事件][{event.engine_name or '未知引擎'}][{event.location or '未知位置'}]检测到:{count}个目标",    
-                "timestamp": formatTimeAgo(event.timestamp),
-                "type": "info",
-                "event_id": event.event_id,
-                "source": "external"
-            })
+        #     recent_activities.append({
+        #         "content": f"[外部事件][{event.engine_name or '未知引擎'}][{event.location or '未知位置'}]检测到:{count}个目标",    
+        #         "timestamp": formatTimeAgo(event.timestamp),
+        #         "type": "info",
+        #         "event_id": event.event_id,
+        #         "source": "external"
+        #     })
         
         # 按时间排序
-        recent_activities.sort(key=lambda x: x["timestamp"], reverse=True)
-        recent_activities = recent_activities[:20]  # 只取前20个
+        # recent_activities.sort(key=lambda x: x["timestamp"], reverse=True)
+        # recent_activities = recent_activities[:20]  # 只取前20个
         
         # 15. 系统性能统计
         latest_performance = db.query(DetectionPerformance).order_by(
@@ -3245,6 +3071,9 @@ def get_comprehensive_dashboard_overview(db: Session = Depends(get_db)):
                     "total": total_external_events,
                     "status_distribution": external_status_distribution,
                     "engine_distribution": external_engine_distribution
+                },
+                "scheme_events":{
+                    "total":total_scheme_events
                 }
             },
             "distributions": {
@@ -3256,12 +3085,6 @@ def get_comprehensive_dashboard_overview(db: Session = Depends(get_db)):
             "crowd_analysis": {
                 "total_results": total_crowd_results,
                 "job_distribution": crowd_job_distribution
-            },
-            "users": {
-                "total": total_users,
-                "admin": admin_users,
-                "operator": operator_users,
-                "auditor": auditor_users
             },
             "performance": {
                 "accuracy": accuracy,
@@ -3814,3 +3637,181 @@ def get_dashboard_detection_type_data(db: Session = Depends(get_db)):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail="获取数据大屏检测类型数据失败")
+
+# 设备抓图API
+class DeviceSnapshotRequest(BaseModel):
+    device_id: str
+    ip_address: str
+    device_type: str
+    channel: int = 1
+    username: str
+    password: str
+
+@router.post("/devices/snapshot", tags=["设备管理"])
+async def get_device_snapshot(
+    request: DeviceSnapshotRequest
+):
+    """
+    获取设备抓图
+    支持Digest认证和Basic认证
+    """
+    try:
+        
+        # 构建设备抓图URL
+        if request.device_type.lower() == 'nvr':
+            snapshot_url = f"http://{request.ip_address}/cgi-bin/snapshot.cgi?channel={request.channel}&type=0"
+        else:
+            snapshot_url = f"http://{request.ip_address}/cgi-bin/snapshot.cgi?channel=1&type=0"
+        
+        # 第一次请求，获取认证信息
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+        
+        first_response = requests.get(snapshot_url, headers=headers, timeout=10)
+
+        if first_response.status_code == 200:
+            # 如果直接成功，返回图片数据
+            return Response(
+                content=first_response.content,
+                media_type="image/jpeg",
+                headers={"Cache-Control": "no-cache"}
+            )
+        
+        elif first_response.status_code == 401:
+            # 需要认证
+            auth_header = first_response.headers.get('www-authenticate', '')
+            
+            if 'Digest' in auth_header:
+                # Digest认证
+                auth_response = await _generate_digest_auth(
+                    auth_header, request.username, request.password, 
+                    'GET', snapshot_url
+                )
+                
+                # 发送带认证的请求
+                auth_headers = {
+                    'Authorization': auth_response,
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                }
+                
+                auth_response_obj = requests.get(snapshot_url, headers=auth_headers, timeout=10)
+                
+                if auth_response_obj.status_code == 200:
+                    return Response(
+                        content=auth_response_obj.content,
+                        media_type="image/jpeg",
+                        headers={"Cache-Control": "no-cache"}
+                    )
+                else:
+                    raise HTTPException(
+                        status_code=auth_response_obj.status_code,
+                        detail=f"Digest认证失败: {auth_response_obj.status_code}"
+                    )
+            
+            elif 'Basic' in auth_header:
+                # Basic认证
+                credentials = f"{request.username}:{request.password}"
+                encoded_credentials = base64.b64encode(credentials.encode()).decode()
+                
+                basic_headers = {
+                    'Authorization': f'Basic {encoded_credentials}',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                }
+                
+                basic_response = requests.get(snapshot_url, headers=basic_headers, timeout=10)
+                
+                if basic_response.status_code == 200:
+                    return Response(
+                        content=basic_response.content,
+                        media_type="image/jpeg",
+                        headers={"Cache-Control": "no-cache"}
+                    )
+                else:
+                    raise HTTPException(
+                        status_code=basic_response.status_code,
+                        detail=f"Basic认证失败: {basic_response.status_code}"
+                    )
+            
+            else:
+                # 尝试Basic认证（某些设备不返回www-authenticate头）
+                credentials = f"{request.username}:{request.password}"
+                encoded_credentials = base64.b64encode(credentials.encode()).decode()
+                
+                basic_headers = {
+                    'Authorization': f'Basic {encoded_credentials}',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                }
+                
+                basic_response = requests.get(snapshot_url, headers=basic_headers, timeout=10)
+                
+                if basic_response.status_code == 200:
+                    return Response(
+                        content=basic_response.content,
+                        media_type="image/jpeg",
+                        headers={"Cache-Control": "no-cache"}
+                    )
+                else:
+                    raise HTTPException(
+                        status_code=basic_response.status_code,
+                        detail=f"Basic认证失败: {basic_response.status_code}"
+                    )
+        
+        else:
+            # 其他状态码
+            raise HTTPException(
+                status_code=first_response.status_code,
+                detail=f"设备抓图失败: {first_response.status_code}"
+            )
+            
+    except requests.exceptions.Timeout:
+        raise HTTPException(status_code=408, detail="请求超时，设备可能离线或网络不通")
+    except requests.exceptions.ConnectionError:
+        raise HTTPException(status_code=503, detail="连接失败，设备可能离线或网络不通")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"设备抓图失败: {str(e)}")
+
+async def _generate_digest_auth(auth_header: str, username: str, password: str, method: str, uri: str) -> str:
+    """
+    生成Digest认证响应
+    """
+    import hashlib
+    import re
+    
+    # 解析认证头
+    auth_info = {}
+    pattern = r'(\w+)="([^"]*)"'
+    matches = re.findall(pattern, auth_header)
+    
+    for key, value in matches:
+        auth_info[key] = value
+    
+    realm = auth_info.get('realm', '')
+    nonce = auth_info.get('nonce', '')
+    qop = auth_info.get('qop', '')
+    algorithm = auth_info.get('algorithm', 'MD5')
+    
+    # 生成随机值
+    import secrets
+    cnonce = secrets.token_hex(8)
+    nc = '00000001'
+    
+    # 计算HA1 = MD5(username:realm:password)
+    ha1 = hashlib.md5(f"{username}:{realm}:{password}".encode()).hexdigest()
+    
+    # 计算HA2 = MD5(method:uri)
+    ha2 = hashlib.md5(f"{method}:{uri}".encode()).hexdigest()
+    
+    # 计算response
+    if qop:
+        response = hashlib.md5(f"{ha1}:{nonce}:{nc}:{cnonce}:{qop}:{ha2}".encode()).hexdigest()
+    else:
+        response = hashlib.md5(f"{ha1}:{nonce}:{ha2}".encode()).hexdigest()
+    
+    # 构建Authorization头
+    auth_response = f'Digest username="{username}", realm="{realm}", nonce="{nonce}", uri="{uri}", algorithm={algorithm}, response="{response}"'
+    
+    if qop:
+        auth_response += f', qop={qop}, nc={nc}, cnonce="{cnonce}"'
+    
+    return auth_response

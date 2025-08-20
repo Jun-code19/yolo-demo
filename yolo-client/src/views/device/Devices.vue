@@ -115,6 +115,9 @@
         <el-table-column label="操作" width="200" fixed="right">
           <template #default="{ row }">
             <el-button-group>
+              <el-button type="warning" link @click="setInterestArea(row)">
+                区域
+              </el-button>
               <el-button type="primary" link @click="handlePreview(row)">
                 预览
               </el-button>
@@ -131,7 +134,7 @@
 
       <div class="pagination">
         <el-pagination v-model:current-page="currentPage" v-model:page-size="pageSize" :total="total"
-          :page-sizes="[10, 20, 50, 100]" layout="prev, pager, next, jumper, ->, total, sizes"
+          :page-sizes="[20, 50, 100, 200]" layout="prev, pager, next, jumper, ->, total, sizes"
           @size-change="handleSizeChange" @current-change="handleCurrentChange" />
       </div>
     </el-card>
@@ -252,6 +255,11 @@
           <el-button @click="toggleFallbackMode" v-if="previewStream">
             切换显示模式
           </el-button>
+          <el-button @click="toggleFullscreen">
+            <el-icon>
+              <FullScreen />
+            </el-icon>{{ isFullscreen ? '退出全屏' : '全屏' }}
+          </el-button>
         </el-space>
       </div>
       <template #footer>
@@ -298,15 +306,16 @@
 
 <script setup>
 import { ref, reactive, onMounted, onUnmounted } from 'vue'
-import { Plus, VideoCamera, CircleClose, Camera, Download, ArrowDown, Upload, UploadFilled, Search, Refresh } from '@element-plus/icons-vue'
+import { Plus, VideoCamera, CircleClose, Camera, Download, ArrowDown, Upload, UploadFilled, Search, Refresh, FullScreen } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import deviceApi from '@/api/device'
+import router from '@/router'
 
 // 列表数据
 const loading = ref(false)
 const devices = ref([])
 const currentPage = ref(1)
-const pageSize = ref(10)
+const pageSize = ref(20)
 const total = ref(0)
 
 // 对话框控制
@@ -358,6 +367,7 @@ const streamResolution = ref('')
 let ws = null
 const currentFrame = ref(null)
 const showFallbackImage = ref(false)
+const isFullscreen = ref(false)
 
 // 导入相关
 const importDialogVisible = ref(false)
@@ -417,13 +427,25 @@ const refreshStatus = async () => {
   }
 }
 
-// 定时刷新
-let refreshInterval
+// 处理全屏状态变化
+const handleFullscreenChange = () => {
+  isFullscreen.value = !!document.fullscreenElement || !!document.mozFullScreenElement || !!document.webkitFullscreenElement || !!document.msFullscreenElement;
+};
+
 // 初始化
 onMounted(() => {
   loadData()
   // refreshStatus()
   // refreshInterval = setInterval(refreshStatus, 60000)
+  
+  // 监听全屏状态变化
+  document.addEventListener('fullscreenchange', handleFullscreenChange)
+  document.addEventListener('webkitfullscreenchange', handleFullscreenChange)
+  document.addEventListener('mozfullscreenchange', handleFullscreenChange)
+  document.addEventListener('MSFullscreenChange', handleFullscreenChange)
+  
+  // 监听键盘事件
+  document.addEventListener('keydown', handleKeyDown)
 })
 
 onUnmounted(() => {
@@ -431,7 +453,42 @@ onUnmounted(() => {
   // if (refreshInterval) {
   //   clearInterval(refreshInterval)
   // }
+  
+  // 确保清理全屏资源
+  stopFullscreenFrameUpdate()
+  if (isFullscreen.value) {
+    exitFullscreen()
+  }
+  
+  // 移除全屏状态监听
+  document.removeEventListener('fullscreenchange', handleFullscreenChange)
+  document.removeEventListener('webkitfullscreenchange', handleFullscreenChange)
+  document.removeEventListener('mozfullscreenchange', handleFullscreenChange)
+  document.removeEventListener('MSFullscreenChange', handleFullscreenChange)
+  
+  // 移除键盘事件监听
+  document.removeEventListener('keydown', handleKeyDown)
 })
+
+// 设置感兴趣区域方法（跳转到新页面）
+const setInterestArea = (device) => {
+      router.push({
+        name: 'AreaConfigSetting',
+        params: {
+          deviceId: device.device_id
+        },
+        query: {
+          deviceId: device.device_id
+        }
+      });
+    };
+
+// 处理键盘事件
+const handleKeyDown = (event) => {
+  if (event.key === 'Escape' && isFullscreen.value) {
+    exitFullscreen()
+  }
+}
 
 // 分页处理
 const handleSizeChange = (val) => {
@@ -543,6 +600,7 @@ const handlePreview = (row) => {
   currentFrame.value = null
   showFallbackImage.value = true
   streamResolution.value = ''
+  isFullscreen.value = false // 重置全屏状态
 
   // 清除之前的预览状态
   if (videoRef.value && videoRef.value.srcObject) {
@@ -562,6 +620,12 @@ const startPreview = async () => {
   try {
     if (!currentDevice.value) {
       throw new Error('设备信息不完整')
+    }
+
+    if(currentDevice.value.status == false){
+      previewLoading.value = false
+      previewError.value = '设备离线，无法预览'
+      return
     }
 
     // 构建流地址
@@ -743,6 +807,11 @@ const handleStreamData = (data) => {
         streamResolution.value = `${data.width}x${data.height}`;
       }
 
+      // 如果当前在全屏模式，立即更新全屏图像
+      if (isFullscreen.value && showFallbackImage.value) {
+        updateFullscreenImage();
+      }
+
       // 默认使用备用图像显示方式，简单可靠
       if (!videoRef.value || !videoRef.value.parentElement) {
         // console.log('使用备用图像显示模式 - videoRef不可用');
@@ -849,28 +918,70 @@ const onVideoLoaded = () => {
 
 // 截图功能
 const takeSnapshot = () => {
-  if (!videoRef.value || !previewStream.value) return
+  if (!previewStream.value) return
 
   try {
-    // 创建Canvas并绘制当前视频帧
-    const canvas = document.createElement('canvas')
-    canvas.width = videoRef.value.videoWidth
-    canvas.height = videoRef.value.videoHeight
+    let canvas, ctx, width, height
 
-    const ctx = canvas.getContext('2d')
-    ctx.drawImage(videoRef.value, 0, 0)
+    if (showFallbackImage.value && currentFrame.value) {
+      // 备用图像模式：从当前帧截图
+      const img = new Image()
+      img.onload = () => {
+        width = img.naturalWidth || 640
+        height = img.naturalHeight || 480
+        
+        canvas = document.createElement('canvas')
+        canvas.width = width
+        canvas.height = height
+        ctx = canvas.getContext('2d')
+        
+        // 绘制图像
+        ctx.drawImage(img, 0, 0, width, height)
+        
+        // 下载截图
+        downloadSnapshot(canvas)
+      }
+      img.onerror = () => {
+        ElMessage.error('图像加载失败，无法截图')
+      }
+      img.src = currentFrame.value
+    } else if (videoRef.value && videoRef.value.videoWidth > 0) {
+      // 视频模式：从视频元素截图
+      width = videoRef.value.videoWidth
+      height = videoRef.value.videoHeight
+      
+      canvas = document.createElement('canvas')
+      canvas.width = width
+      canvas.height = height
+      ctx = canvas.getContext('2d')
+      
+      // 绘制当前视频帧
+      ctx.drawImage(videoRef.value, 0, 0, width, height)
+      
+      // 下载截图
+      downloadSnapshot(canvas)
+    } else {
+      ElMessage.warning('当前没有可用的视频流或图像，无法截图')
+    }
+  } catch (error) {
+    console.error('截图失败:', error)
+    ElMessage.error('截图失败')
+  }
+}
 
-    // 将Canvas转换为图片并下载
+// 下载截图
+const downloadSnapshot = (canvas) => {
+  try {
     const image = canvas.toDataURL('image/png')
     const link = document.createElement('a')
     link.href = image
     link.download = `${currentDevice.value?.device_name || 'device'}_snapshot_${new Date().toISOString().replace(/:/g, '-')}.png`
     link.click()
-
+    
     ElMessage.success('截图已保存')
   } catch (error) {
-    // console.error('截图失败:', error)
-    ElMessage.error('截图失败')
+    console.error('保存截图失败:', error)
+    ElMessage.error('保存截图失败')
   }
 }
 
@@ -899,9 +1010,13 @@ const stopPreview = () => {
     videoRef.value.srcObject = null
   }
 
+  // 停止全屏帧更新
+  stopFullscreenFrameUpdate()
+
   // 重置状态
   previewStream.value = null
   streamResolution.value = ''
+  isFullscreen.value = false // 退出全屏
 }
 
 // 格式化日期时间
@@ -936,6 +1051,183 @@ const getDeviceTypeTag = (type) => {
 // 切换备用图像显示模式
 const toggleFallbackMode = () => {
   showFallbackImage.value = !showFallbackImage.value
+}
+
+// 切换全屏
+const toggleFullscreen = () => {
+  if (!isFullscreen.value) {
+    // 进入全屏
+    if (showFallbackImage.value && currentFrame.value) {
+      // 备用图像模式：全屏显示图像，并实时更新
+      createFullscreenDisplay()
+    } else if (videoRef.value) {
+      // 视频模式：使用浏览器原生全屏
+      if (videoRef.value.requestFullscreen) {
+        videoRef.value.requestFullscreen().catch(err => {
+          console.error(`错误进入全屏模式: ${err.message} (${err.name})`)
+        })
+      } else if (videoRef.value.mozRequestFullScreen) { // Firefox
+        videoRef.value.mozRequestFullScreen()
+      } else if (videoRef.value.webkitRequestFullscreen) { // Chrome, Safari and Opera
+        videoRef.value.webkitRequestFullscreen()
+      } else if (videoRef.value.msRequestFullscreen) { // IE/Edge
+        videoRef.value.msRequestFullscreen()
+      }
+      isFullscreen.value = true
+    }
+  } else {
+    // 退出全屏
+    exitFullscreen()
+  }
+}
+
+// 创建全屏显示（备用模式）
+const createFullscreenDisplay = () => {
+  // 创建全屏容器
+  const fullscreenDiv = document.createElement('div')
+  fullscreenDiv.id = 'fullscreen-container'
+  fullscreenDiv.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: #000;
+    z-index: 999999;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+  `
+  
+  // 创建图像元素
+  const fullscreenImg = document.createElement('img')
+  fullscreenImg.id = 'fullscreen-image'
+  fullscreenImg.style.cssText = `
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+  `
+  
+  // 创建设备信息显示
+  const infoDiv = document.createElement('div')
+  infoDiv.style.cssText = `
+    position: absolute;
+    bottom: 20px;
+    left: 20px;
+    right: 20px;
+    padding: 10px 15px;
+    background-color: rgba(0, 0, 0, 0.7);
+    color: #fff;
+    font-size: 14px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-radius: 4px;
+  `
+  
+  // 添加设备名称和分辨率信息
+  const deviceName = document.createElement('span')
+  deviceName.textContent = currentDevice.value?.device_name || '未知设备'
+  
+  const resolution = document.createElement('span')
+  resolution.textContent = streamResolution.value || ''
+  
+  infoDiv.appendChild(deviceName)
+  infoDiv.appendChild(resolution)
+  
+  // 添加退出全屏提示
+  const exitHint = document.createElement('div')
+  exitHint.style.cssText = `
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    padding: 8px 12px;
+    background-color: rgba(0, 0, 0, 0.7);
+    color: #fff;
+    font-size: 12px;
+    border-radius: 4px;
+  `
+  exitHint.textContent = '点击任意位置或按ESC键退出全屏'
+  
+  fullscreenDiv.appendChild(fullscreenImg)
+  fullscreenDiv.appendChild(infoDiv)
+  fullscreenDiv.appendChild(exitHint)
+  
+  // 点击退出全屏
+  fullscreenDiv.onclick = () => exitFullscreen()
+  
+  // 添加到页面
+  document.body.appendChild(fullscreenDiv)
+  
+  // 设置初始图像
+  updateFullscreenImage()
+  
+  // 启动帧更新定时器
+  startFullscreenFrameUpdate()
+  
+  isFullscreen.value = true
+}
+
+// 更新全屏图像
+const updateFullscreenImage = () => {
+  if (!isFullscreen.value || !currentFrame.value) return
+  
+  const fullscreenImg = document.getElementById('fullscreen-image')
+  if (fullscreenImg) {
+    fullscreenImg.src = currentFrame.value
+  }
+}
+
+// 启动全屏帧更新
+const startFullscreenFrameUpdate = () => {
+  // 清除之前的定时器
+  if (window.fullscreenUpdateTimer) {
+    clearInterval(window.fullscreenUpdateTimer)
+  }
+  
+  // 创建新的定时器，每100ms更新一次（10fps）
+  window.fullscreenUpdateTimer = setInterval(() => {
+    if (isFullscreen.value && showFallbackImage.value && currentFrame.value) {
+      updateFullscreenImage()
+    } else {
+      // 如果不再全屏或切换到视频模式，停止更新
+      stopFullscreenFrameUpdate()
+    }
+  }, 100)
+}
+
+// 停止全屏帧更新
+const stopFullscreenFrameUpdate = () => {
+  if (window.fullscreenUpdateTimer) {
+    clearInterval(window.fullscreenUpdateTimer)
+    window.fullscreenUpdateTimer = null
+  }
+}
+
+// 退出全屏
+const exitFullscreen = () => {
+  // 停止帧更新
+  stopFullscreenFrameUpdate()
+  
+  // 移除自定义全屏显示
+  const customFullscreen = document.getElementById('fullscreen-container')
+  if (customFullscreen) {
+    document.body.removeChild(customFullscreen)
+  }
+  
+  // 退出浏览器原生全屏
+  if (document.exitFullscreen) {
+    document.exitFullscreen()
+  } else if (document.mozCancelFullScreen) { // Firefox
+    document.mozCancelFullScreen()
+  } else if (document.webkitExitFullscreen) { // Chrome, Safari and Opera
+    document.webkitExitFullscreen()
+  } else if (document.msExitFullscreen) { // IE/Edge
+    document.msExitFullscreen()
+  }
+  
+  isFullscreen.value = false
 }
 
 // 构建RTSP URL
@@ -1222,5 +1514,38 @@ const handleResetFilter = () => {
 
 .import-dialog {
   z-index: 100001 !important;
+}
+
+/* 全屏样式 */
+.video-player:fullscreen {
+  object-fit: contain;
+}
+
+.video-player:-webkit-full-screen {
+  object-fit: contain;
+}
+
+.video-player:-moz-full-screen {
+  object-fit: contain;
+}
+
+.video-player:-ms-fullscreen {
+  object-fit: contain;
+}
+
+/* 全屏按钮样式 */
+.preview-controls .el-button {
+  min-width: 80px;
+}
+
+/* 全屏时的图像显示 */
+.fullscreen-image {
+  max-width: 100vw;
+  max-height: 100vh;
+  object-fit: contain;
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
 }
 </style> 

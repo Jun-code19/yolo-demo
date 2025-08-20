@@ -3,6 +3,7 @@ import numpy as np
 from collections import defaultdict
 import colorsys
 from PIL import Image, ImageDraw, ImageFont
+from datetime import datetime
 
 class ObjectTracker:
     def __init__(self, max_age=30, min_hits=3, iou_threshold=0.3):
@@ -25,6 +26,7 @@ class ObjectTracker:
         self.today_out_count = 0  # 今日离开总数
         self.triggered_events = {}  # 已触发的事件，避免重复触发
         self.line_crossed_tracks = {}  # 记录已过线的轨迹
+        self.date = datetime.now().strftime("%Y-%m-%d")  # 记录当前日期
 
         # 尝试加载中文字体，如果失败则使用默认字体
         try:
@@ -186,6 +188,13 @@ class ObjectTracker:
             pass  # 实际统计在update方法中进行
         
         elif counting_type == 'flow':
+            
+            # 如果日期发生变化，重置今日计数
+            if self.date != datetime.now().strftime("%Y-%m-%d"):
+                self.today_in_count = 0
+                self.today_out_count = 0
+                self.date = datetime.now().strftime("%Y-%m-%d")
+
             # 人流统计
             crossed, intersection = self._crossed_line(track_id, current_center, prev_center)
             

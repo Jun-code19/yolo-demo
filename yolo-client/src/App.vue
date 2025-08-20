@@ -216,10 +216,10 @@ const openDashboard = () => {
           <template #title>系统管理</template>
         </el-menu-item>
 
-        <el-menu-item @click="openDashboard">
+        <!-- <el-menu-item @click="openDashboard">
           <el-icon><DataLine /></el-icon>
           <template #title>数据大屏</template>
-        </el-menu-item>
+        </el-menu-item> -->
          
       </el-menu>
     </el-aside>

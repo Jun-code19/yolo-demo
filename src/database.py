@@ -62,31 +62,10 @@ class Device(Base):
     location = Column(String(255))
     area = Column(String(255))
     created_at = Column(DateTime, default=datetime.now)
+    area_coordinates = Column(JSONB)  # 新增字段，用于存储区域坐标
     
     detection_configs = relationship("DetectionConfig", back_populates="device", cascade="all, delete-orphan")
     detection_events = relationship("DetectionEvent", back_populates="device", cascade="all, delete-orphan")
-
-# class AnalysisResult(Base):
-#     __tablename__ = "analysis_result"
-    
-#     result_id = Column(Integer, primary_key=True)
-#     # video_id = Column(String(64), ForeignKey('video.video_id'))
-#     target_type = Column(Enum(AnalysisTarget), nullable=False)
-#     confidence = Column(Float, nullable=False)
-#     start_frame = Column(Integer)
-#     end_frame = Column(Integer)
-#     meta_data = Column(JSONB)
-
-# class Alarm(Base):
-#     __tablename__ = "alarm"
-    
-#     alarm_id = Column(String(64), primary_key=True)
-#     event_type = Column(String(50), nullable=False)
-#     trigger_time = Column(DateTime, default=datetime.now)
-#     device_id = Column(String(64), ForeignKey('device.device_id'))
-#     # video_id = Column(String(64), ForeignKey('video.video_id'))
-#     status = Column(Enum(AlarmStatus), default=AlarmStatus.pending)
-#     snapshot_path = Column(Text)
 
 class User(Base):
     __tablename__ = "users"
@@ -150,19 +129,6 @@ class DetectionConfig(Base):
     # schedules = relationship("DetectionSchedule", back_populates="config", cascade="all, delete-orphan")
     events = relationship("DetectionEvent", back_populates="config", cascade="all, delete-orphan")
 
-# class DetectionSchedule(Base):
-#     __tablename__ = "detection_schedule"
-    
-#     schedule_id = Column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
-#     config_id = Column(String(64), ForeignKey('detection_config.config_id'), nullable=False)
-#     start_time = Column(DateTime, nullable=False)
-#     end_time = Column(DateTime, nullable=False)
-#     weekdays = Column(ARRAY(Integer))
-#     is_active = Column(Boolean, default=True)
-#     created_at = Column(DateTime, default=datetime.now)
-    
-#     config = relationship("DetectionConfig", back_populates="schedules")
-
 class DetectionEvent(Base):
     __tablename__ = "detection_event"
     
@@ -191,20 +157,6 @@ class DetectionEvent(Base):
     device = relationship("Device", back_populates="detection_events")
     config = relationship("DetectionConfig", back_populates="events")
     viewer = relationship("User", foreign_keys=[viewed_by])
-
-# class DetectionStat(Base):
-#     __tablename__ = "detection_stat"
-    
-#     stat_id = Column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
-#     device_id = Column(String(64), ForeignKey('device.device_id'))
-#     date = Column(DateTime, default=datetime.now)
-#     total_events = Column(Integer, default=0)
-#     by_class = Column(JSONB)
-#     peak_hour = Column(Integer)
-#     peak_hour_count = Column(Integer)
-#     created_at = Column(DateTime, default=datetime.now)
-    
-#     device = relationship("Device")
 
 class DetectionPerformance(Base):
     __tablename__ = "detection_performance"
