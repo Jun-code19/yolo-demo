@@ -20,7 +20,7 @@
       <el-divider content-position="left">基本信息</el-divider>
       
       <el-form-item label="摄像机" prop="camera_id">
-        <el-select v-model="form.camera_id" placeholder="请选择摄像机" style="width: 100%" popper-append-to-body>
+        <el-select v-model="form.camera_id" placeholder="请选择摄像机" style="width: 100%" popper-append-to-body filterable>
           <el-option
             v-for="camera in cameras"
             :key="camera.id"

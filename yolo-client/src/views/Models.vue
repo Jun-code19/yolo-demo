@@ -1,10 +1,10 @@
 <template>
-  <div class="models-container">    
+  <div class="models-container">
     <div class="card-header">
       <h2>检测模型管理</h2>
       <el-button type="primary" @click="showUploadDialog">上传新模型</el-button>
     </div>
-      
+
     <!-- 模型列表 -->
     <el-card v-loading="loading">
       <el-tabs type="border-card">
@@ -37,42 +37,40 @@
             <el-table-column label="操作" width="280" fixed="right">
               <template #default="scope">
                 <el-button-group>
-                <el-button type="info" size="small" @click="viewModelDetails(scope.row)">
-                  详情
-                </el-button>
-                <el-button type="primary" size="small" @click="editModel(scope.row)">
-                  编辑
-                </el-button>
-                <el-button 
-                  :type="scope.row.is_active ? 'warning' : 'success'" 
-                  size="small"
-                  @click="toggleModelActive(scope.row)"
-                >
-                  {{ scope.row.is_active ? '停用' : '启用' }}
-                </el-button>
-                <el-button type="danger" size="small" @click="confirmDelete(scope.row)">
-                  删除
-                </el-button>
+                  <el-button type="info" size="small" @click="viewModelDetails(scope.row)">
+                    详情
+                  </el-button>
+                  <el-button type="primary" size="small" @click="editModel(scope.row)">
+                    编辑
+                  </el-button>
+                  <el-button :type="scope.row.is_active ? 'warning' : 'success'" size="small"
+                    @click="toggleModelActive(scope.row)">
+                    {{ scope.row.is_active ? '停用' : '启用' }}
+                  </el-button>
+                  <el-button type="danger" size="small" @click="confirmDelete(scope.row)">
+                    删除
+                  </el-button>
                 </el-button-group>
               </template>
             </el-table-column>
           </el-table>
         </el-tab-pane>
-        
+
         <!-- 如果没有模型 -->
         <div v-if="!Object.keys(groupedModels).length" class="no-data">
           <el-empty description="暂无模型数据，请上传模型文件"></el-empty>
         </div>
       </el-tabs>
     </el-card>
-    
+
     <!-- 上传模型对话框 -->
-    <el-dialog v-model="uploadDialogVisible" title="上传模型" width="30%" top="5vh" :z-index="999999" append-to-body class="high-priority-dialog">
+    <el-dialog v-model="uploadDialogVisible" title="上传模型" width="30%" top="5vh" :z-index="999999" append-to-body
+      class="high-priority-dialog">
       <el-form :model="uploadForm" label-width="80px" :rules="uploadRules" ref="uploadFormRef">
         <el-form-item label="模型名称" prop="modelName">
           <el-input v-model="uploadForm.modelName" placeholder="请输入模型名称"></el-input>
         </el-form-item>
-        
+
         <el-form-item label="模型类型" prop="modelType">
           <el-select v-model="uploadForm.modelType" placeholder="请选择模型类型" style="width: 100%" popper-append-to-body>
             <el-option label="目标检测" value="object_detection"></el-option>
@@ -83,21 +81,11 @@
             <el-option label="其他类型" value="other"></el-option>
           </el-select>
         </el-form-item>
-        
+
         <el-form-item label="模型文件" prop="modelFile">
-          <el-upload
-            class="model-upload"
-            drag
-            action="#"
-            :auto-upload="false"
-            :limit="1"
-            accept=".pt,.onnx,.pth,.weights"
-            :on-change="handleFileChange"
-            :on-exceed="handleExceed"
-            :on-remove="handleRemove"
-            :file-list="uploadForm.fileList"
-            :before-upload="beforeUpload"
-          >
+          <el-upload class="model-upload" drag action="#" :auto-upload="false" :limit="1"
+            accept=".pt,.onnx,.pth,.weights" :on-change="handleFileChange" :on-exceed="handleExceed"
+            :on-remove="handleRemove" :file-list="uploadForm.fileList" :before-upload="beforeUpload">
             <el-icon class="el-icon--upload"><upload-filled /></el-icon>
             <div class="el-upload__text">
               拖拽文件到此处或<em>点击上传</em>
@@ -109,18 +97,15 @@
               </div>
             </template>
           </el-upload>
-          
+
           <!-- 上传进度显示 -->
           <div v-if="uploadProgress.visible" class="upload-progress">
             <div class="progress-info">
               <span>{{ uploadProgress.fileName }}</span>
               <span>{{ uploadProgress.percent }}%</span>
             </div>
-            <el-progress 
-              :percentage="uploadProgress.percent" 
-              :status="uploadProgress.status"
-              :show-text="false"
-            ></el-progress>
+            <el-progress :percentage="uploadProgress.percent" :status="uploadProgress.status"
+              :show-text="false"></el-progress>
             <div class="progress-details">
               <span>已上传: {{ formatFileSize(uploadProgress.loaded) }}</span>
               <span>总大小: {{ formatFileSize(uploadProgress.total) }}</span>
@@ -129,11 +114,11 @@
             </div>
           </div>
         </el-form-item>
-        
+
         <el-form-item label="描述">
           <el-input v-model="uploadForm.description" type="textarea" :rows="3" placeholder="请输入模型描述（可选）"></el-input>
         </el-form-item>
-        
+
         <el-form-item label="参数">
           <el-collapse>
             <el-collapse-item title="添加模型参数（可选）">
@@ -149,7 +134,7 @@
           </el-collapse>
         </el-form-item>
       </el-form>
-      
+
       <template #footer>
         <span class="dialog-footer">
           <el-button @click="cancelUpload">{{ uploading ? '取消上传' : '取消' }}</el-button>
@@ -159,9 +144,10 @@
         </span>
       </template>
     </el-dialog>
-    
+
     <!-- 模型详情对话框 -->
-    <el-dialog v-model="detailsDialogVisible" title="模型详情" width="50%" top="5vh" :z-index="999999" append-to-body class="high-priority-dialog">
+    <el-dialog v-model="detailsDialogVisible" title="模型详情" width="50%" top="5vh" :z-index="999999" append-to-body
+      class="high-priority-dialog">
       <div v-if="selectedModel" class="model-details">
         <el-descriptions :column="2" border>
           <el-descriptions-item label="模型ID">{{ selectedModel.models_id }}</el-descriptions-item>
@@ -175,17 +161,20 @@
             </el-tag>
           </el-descriptions-item>
           <el-descriptions-item label="上传时间">{{ formatDate(selectedModel.upload_time) }}</el-descriptions-item>
-          <el-descriptions-item label="最后使用">{{ selectedModel.last_used ? formatDate(selectedModel.last_used) : '暂未使用' }}</el-descriptions-item>
+          <el-descriptions-item label="最后使用">{{ selectedModel.last_used ? formatDate(selectedModel.last_used) : '暂未使用'
+            }}</el-descriptions-item>
           <el-descriptions-item label="文件路径" :span="2">{{ selectedModel.file_path }}</el-descriptions-item>
           <el-descriptions-item label="描述" :span="2">{{ selectedModel.description || '暂无描述' }}</el-descriptions-item>
           <!-- 新增的类别信息展示 -->
           <el-descriptions-item label="检测类别" :span="2">
             <div>
               <div v-if="Array.isArray(selectedModel.models_classes) && selectedModel.models_classes.length > 5">
-                <el-tag v-for="(name, index) in selectedModel.models_classes.slice(0, 5)" :key="index" style="margin-right: 5px;">
+                <el-tag v-for="(name, index) in selectedModel.models_classes.slice(0, 5)" :key="index"
+                  style="margin-right: 5px;">
                   {{ name.name }}
                 </el-tag>
-                <el-link type="primary" @click="showAllClasses">查看所有类别，共计{{ selectedModel.models_classes.length }}个</el-link>
+                <el-link type="primary" @click="showAllClasses">查看所有类别，共计{{ selectedModel.models_classes.length
+                  }}个</el-link>
               </div>
               <div v-else>
                 <el-tag v-for="(name, index) in selectedModel.models_classes" :key="index" style="margin-right: 5px;">
@@ -195,13 +184,10 @@
             </div>
           </el-descriptions-item>
         </el-descriptions>
-        
+
         <h3 class="mt-4">模型参数</h3>
-        <el-table v-if="selectedModel.parameters && Object.keys(selectedModel.parameters).length" 
-                 :data="formatParameters(selectedModel.parameters)" 
-                 border 
-                 style="width: 100%"
-                 class="mt-2">
+        <el-table v-if="selectedModel.parameters && Object.keys(selectedModel.parameters).length"
+          :data="formatParameters(selectedModel.parameters)" border style="width: 100%" class="mt-2">
           <el-table-column prop="key" label="参数名" width="200" />
           <el-table-column prop="value" label="参数值" />
         </el-table>
@@ -210,12 +196,13 @@
     </el-dialog>
 
     <!-- 编辑模型对话框 -->
-    <el-dialog v-model="editDialogVisible" title="编辑模型信息" width="30%" top="5vh" :z-index="999999" append-to-body class="high-priority-dialog">
+    <el-dialog v-model="editDialogVisible" title="编辑模型信息" width="30%" top="5vh" :z-index="999999" append-to-body
+      class="high-priority-dialog">
       <el-form :model="editForm" label-width="80px" :rules="editRules" ref="editFormRef">
         <el-form-item label="模型名称" prop="models_name">
           <el-input v-model="editForm.models_name" placeholder="请输入模型名称"></el-input>
         </el-form-item>
-        
+
         <el-form-item label="模型类型" prop="models_type">
           <el-select v-model="editForm.models_type" placeholder="请选择模型类型" style="width: 100%" popper-append-to-body>
             <el-option label="目标检测" value="object_detection"></el-option>
@@ -226,11 +213,11 @@
             <el-option label="其他类型" value="other"></el-option>
           </el-select>
         </el-form-item>
-        
+
         <el-form-item label="描述">
           <el-input v-model="editForm.description" type="textarea" :rows="3" placeholder="请输入模型描述（可选）"></el-input>
         </el-form-item>
-        
+
         <el-form-item label="参数">
           <el-collapse>
             <el-collapse-item title="修改模型参数（可选）">
@@ -246,7 +233,7 @@
           </el-collapse>
         </el-form-item>
       </el-form>
-      
+
       <template #footer>
         <span class="dialog-footer">
           <el-button @click="editDialogVisible = false">取消</el-button>
@@ -256,21 +243,21 @@
     </el-dialog>
 
     <!-- 查看所有类别对话框 -->
-    <el-dialog v-model="allClassesDialogVisible" title="所有检测类别" width="80%" draggable top="5vh" :z-index="999999" append-to-body class="high-priority-dialog">
+    <el-dialog v-model="allClassesDialogVisible" title="所有检测类别" width="80%" draggable top="5vh" :z-index="999999"
+      append-to-body class="high-priority-dialog">
       <div style="max-height: 500px; overflow-y: auto;">
         <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;">
-          <div v-for="(item, index) in selectedModel.models_classes" :key="index" 
-              :style="{
-                display: 'flex',
-                justifyContent: 'space-between',
-                border: hoveredIndex === index ? '1px solid #409EFF' : '1px solid #dcdfe6',
-                padding: '10px',
-                borderRadius: '4px',
-                transition: 'all 0.3s',
-                cursor: 'pointer'
-              }"
-              @mouseover="hoveredIndex = index" @mouseleave="hoveredIndex = null">
-            <span :style="{ borderRight: '1px solid #dcdfe6', paddingRight: '10px', color: hoveredIndex === index ? '#409EFF' : 'inherit' }">
+          <div v-for="(item, index) in selectedModel.models_classes" :key="index" :style="{
+            display: 'flex',
+            justifyContent: 'space-between',
+            border: hoveredIndex === index ? '1px solid #409EFF' : '1px solid #dcdfe6',
+            padding: '10px',
+            borderRadius: '4px',
+            transition: 'all 0.3s',
+            cursor: 'pointer'
+          }" @mouseover="hoveredIndex = index" @mouseleave="hoveredIndex = null">
+            <span
+              :style="{ borderRight: '1px solid #dcdfe6', paddingRight: '10px', color: hoveredIndex === index ? '#409EFF' : 'inherit' }">
               {{ item.id }}
             </span>
             <span :style="{ color: hoveredIndex === index ? '#409EFF' : 'inherit' }">{{ item.name }}</span>
@@ -435,22 +422,22 @@ const beforeUpload = (file) => {
     ElMessage.error(`文件大小不能超过 2GB，当前文件大小为 ${formatFileSize(file.size)}`);
     return false;
   }
-  
+
   // 检查文件格式
   const allowedFormats = ['.pt', '.onnx', '.pth', '.weights'];
   const fileName = file.name.toLowerCase();
   const isValidFormat = allowedFormats.some(format => fileName.endsWith(format));
-  
+
   if (!isValidFormat) {
     ElMessage.error('请上传正确格式的模型文件 (.pt/.onnx/.pth/.weights)');
     return false;
   }
-  
+
   // 大文件上传提示
   if (file.size > 100 * 1024 * 1024) { // 100MB以上
     ElMessage.warning('检测到大文件，上传可能需要较长时间，请耐心等待');
   }
-  
+
   return true;
 }
 
@@ -477,22 +464,22 @@ const removeParam = (index) => {
 // 上传模型
 const uploadModel = async () => {
   if (!uploadFormRef.value) return
-  
+
   await uploadFormRef.value.validate(async (valid) => {
     if (!valid) return
-    
+
     if (!uploadForm.value.modelFile) {
       ElMessage.error('请上传模型文件')
       return
     }
-    
+
     // 再次检查文件大小
     if (!beforeUpload(uploadForm.value.modelFile)) {
       return
     }
-    
+
     uploading.value = true
-    
+
     // 初始化进度追踪
     uploadProgress.value = {
       visible: true,
@@ -505,18 +492,18 @@ const uploadModel = async () => {
       remainingTime: '',
       startTime: Date.now()
     }
-    
+
     try {
       // 创建FormData
       const formData = new FormData()
       formData.append('models_file', uploadForm.value.modelFile)
       formData.append('models_name', uploadForm.value.modelName)
       formData.append('models_type', uploadForm.value.modelType)
-      
+
       if (uploadForm.value.description) {
         formData.append('description', uploadForm.value.description)
       }
-      
+
       // 处理自定义参数
       if (uploadForm.value.parameters.length > 0) {
         const params = {}
@@ -527,10 +514,10 @@ const uploadModel = async () => {
         })
         formData.append('parameters', JSON.stringify(params))
       }
-      
+
       // 创建上传控制器
       uploadController = new AbortController()
-      
+
       // 发送请求，使用优化的上传API
       await deviceApi.uploadModelWithProgress(formData, {
         signal: uploadController.signal,
@@ -538,19 +525,19 @@ const uploadModel = async () => {
           updateUploadProgress(progressEvent)
         }
       })
-      
+
       // 上传成功
       uploadProgress.value.status = 'success'
       uploadProgress.value.percent = 100
-      
+
       ElMessage.success('模型上传成功')
       uploadDialogVisible.value = false
-      
+
       // 延迟隐藏进度条
       setTimeout(() => {
         uploadProgress.value.visible = false
       }, 2000)
-      
+
       loadModels() // 重新加载模型列表
     } catch (error) {
       // 检查是否是用户取消的请求
@@ -558,9 +545,9 @@ const uploadModel = async () => {
         // 用户取消，不显示错误消息
         return
       }
-      
+
       uploadProgress.value.status = 'exception'
-      
+
       // 针对不同错误类型显示不同消息
       let errorMessage = '上传模型失败'
       if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
@@ -572,9 +559,9 @@ const uploadModel = async () => {
       } else {
         errorMessage = `上传失败: ${error.message}`
       }
-      
+
       ElMessage.error(errorMessage)
-      
+
       // 延迟隐藏进度条
       setTimeout(() => {
         uploadProgress.value.visible = false
@@ -592,14 +579,14 @@ const updateUploadProgress = (progressEvent) => {
   const percent = Math.round((loaded / total) * 100)
   const currentTime = Date.now()
   const elapsedTime = (currentTime - uploadProgress.value.startTime) / 1000 // 秒
-  
+
   uploadProgress.value.loaded = loaded
   uploadProgress.value.percent = percent
-  
+
   if (elapsedTime > 1) { // 至少1秒后开始计算速度
     const speed = loaded / elapsedTime // 字节/秒
     uploadProgress.value.speed = formatSpeed(speed)
-    
+
     if (speed > 0) {
       const remainingBytes = total - loaded
       const remainingSeconds = remainingBytes / speed
@@ -640,18 +627,18 @@ const cancelUpload = () => {
     // 取消正在进行的上传请求
     uploadController.abort()
     uploadController = null
-    
+
     // 重置状态
     uploading.value = false
     uploadProgress.value.visible = false
     uploadProgress.value.status = 'exception'
-    
+
     ElMessage.warning('上传已取消')
   }
-  
+
   // 关闭对话框
   uploadDialogVisible.value = false
-  
+
   // 重置表单
   uploadForm.value = {
     modelName: '',
@@ -694,10 +681,10 @@ const editModel = (model) => {
     description: model.description || '',
     parameters: formatParametersForEdit(model.parameters)
   }
-  
+
   // 存储当前编辑的模型ID
   editForm.value.models_id = model.models_id
-  
+
   editDialogVisible.value = true
 }
 
@@ -723,10 +710,10 @@ const removeEditParam = (index) => {
 // 更新模型
 const updateModel = async () => {
   if (!editFormRef.value) return
-  
+
   await editFormRef.value.validate(async (valid) => {
     if (!valid) return
-    
+
     updating.value = true
     try {
       // 准备更新数据
@@ -735,7 +722,7 @@ const updateModel = async () => {
         models_type: editForm.value.models_type,
         description: editForm.value.description
       }
-      
+
       // 处理自定义参数
       if (editForm.value.parameters.length > 0) {
         const params = {}
@@ -751,10 +738,10 @@ const updateModel = async () => {
         })
         updateData.parameters = params
       }
-      
+
       // 发送更新请求
       await deviceApi.updateModel(editForm.value.models_id, updateData)
-      
+
       ElMessage.success('模型信息更新成功')
       editDialogVisible.value = false
       loadModels() // 重新加载模型列表
@@ -902,6 +889,7 @@ const formatParameters = (params) => {
   border: 1px solid #e4e7ed;
   border-radius: 4px;
   background-color: #fafafa;
+  width: 100%;
 }
 
 .progress-info {
@@ -929,4 +917,4 @@ const formatParameters = (params) => {
 .high-priority-dialog {
   z-index: 999999 !important;
 }
-</style> 
+</style>

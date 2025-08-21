@@ -162,6 +162,7 @@
             placeholder="请选择监控设备" 
             style="width: 100%"
             popper-class="edit-dialog-select"
+            filterable
           >
             <el-option v-for="device in availableDevices" :key="device.device_id" :label="device.device_name"
               :value="device.device_id">

@@ -997,7 +997,8 @@ class CrowdAnalyzer:
             model = YOLO(model_path)
             
             # 设置设备
-            device = 'cuda' if torch.cuda.is_available() else 'cpu'
+            # device = 'cuda' if torch.cuda.is_available() else 'cpu'
+            device = 'cpu'
             model.to(torch.device(device))
 
             if device == 'cuda' and hasattr(model, 'model'): 

@@ -26,6 +26,7 @@
           multiple
           placeholder="请选择监控设备"
           style="width: 100%"
+          filterable
         >
           <el-option
             v-for="device in availableDevices"

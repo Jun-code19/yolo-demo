@@ -81,13 +81,13 @@
 
     <el-card class="filter-card">
       <div class="filters">
-        <el-select v-model="filterConfigId" placeholder="按检测配置筛选" clearable style="width: 180px;"
+        <el-select v-model="filterConfigId" placeholder="按检测配置筛选" clearable filterable style="width: 180px;"
           @change="loadPushConfigs">
           <el-option v-for="config in detectionConfigs" :key="config.config_id"
             :label="config.device_name || config.config_id" :value="config.config_id" />
         </el-select>
 
-        <el-select v-model="filterMethod" placeholder="按推送方式筛选" clearable style="width: 180px;"
+        <el-select v-model="filterMethod" placeholder="按推送方式筛选" clearable filterable style="width: 180px;"
           @change="filterPushConfigs">
           <el-option label="HTTP" value="http" />
           <el-option label="HTTPS" value="https" />
@@ -95,7 +95,7 @@
           <el-option label="MQTT" value="mqtt" />
         </el-select>
 
-        <el-select v-model="filterTag" placeholder="按标签筛选" clearable style="width: 180px;" @change="filterPushConfigs">
+        <el-select v-model="filterTag" placeholder="按标签筛选" clearable filterable style="width: 180px;" @change="filterPushConfigs">
           <el-option v-for="tag in allTags" :key="tag" :label="tag" :value="tag" />
         </el-select>
       </div>
@@ -208,7 +208,7 @@
         </el-form-item>
 
         <el-form-item label="检测配置" prop="config_id">
-          <el-select v-model="pushForm.config_id" placeholder="选择关联的检测配置（可选）" clearable style="width: 100%;" popper-append-to-body>
+          <el-select v-model="pushForm.config_id" placeholder="选择关联的检测配置（可选）" clearable filterable style="width: 100%;" popper-append-to-body>
             <el-option v-for="config in detectionConfigs" :key="config.config_id"
               :label="config.device_name || config.config_id" :value="config.config_id" />
           </el-select>

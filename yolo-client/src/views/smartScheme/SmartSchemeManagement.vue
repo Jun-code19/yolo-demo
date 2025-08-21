@@ -82,7 +82,7 @@
     <!-- 过滤器 -->
     <el-card class="filter-card">
       <div class="filters">
-        <el-select v-model="filters.camera_id" placeholder="选择摄像头" clearable style="width: 200px" @change="loadData">
+        <el-select v-model="filters.camera_id" placeholder="选择摄像头" clearable filterable style="width: 200px" @change="loadData">
           <el-option v-for="camera in cameras" :key="camera.id" :label="camera.name" :value="camera.id" />
         </el-select>
 
