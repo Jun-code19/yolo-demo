@@ -101,6 +101,7 @@ class DetectionModel(Base):
     upload_time = Column(DateTime, default=datetime.now)
     last_used = Column(DateTime)
     is_active = Column(Boolean, default=True)
+    is_gpu = Column(Boolean, default=False)
     models_classes = Column(JSONB, nullable=True)  # 新增字段，用于存储类别信息
 
     detection_configs = relationship("DetectionConfig", back_populates="model", cascade="all, delete-orphan")

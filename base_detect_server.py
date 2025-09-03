@@ -332,6 +332,7 @@ class DetectionServer:
             model_path=model_path,  # 使用可能已更新的模型路径
             confidence=config.sensitivity,  
             models_type=model.models_type,
+            is_gpu=model.is_gpu,
             target_class=config.target_classes,
             save_mode=config.save_mode,
             area_coordinates=config.area_coordinates
@@ -343,7 +344,7 @@ class DetectionServer:
             task.model = self.models_cache[model_path]
             # 设置其他必要属性
             task.class_names = task.model.names
-            device = 'cuda' if torch.cuda.is_available() else 'cpu'
+            device = 'cuda' if torch.cuda.is_available() and model.is_gpu else 'cpu'
             task.device = torch.device(device)
             if device == 'cuda' and hasattr(task.model, 'model'):
                 if hasattr(task.model.model, 'dtype'):

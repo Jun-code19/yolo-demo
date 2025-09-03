@@ -645,6 +645,7 @@ class ModelUpdate(BaseModel):
     models_type: Optional[str] = None
     description: Optional[str] = None
     parameters: Optional[Dict[str, Any]] = None
+    is_gpu: Optional[bool] = None
 
 class ModelResponse(ModelBase):
     models_id: str
@@ -654,6 +655,7 @@ class ModelResponse(ModelBase):
     upload_time: datetime
     last_used: Optional[datetime] = None
     is_active: bool
+    is_gpu: bool
     models_classes: Optional[Dict[int, str]] = None
 
     class Config:

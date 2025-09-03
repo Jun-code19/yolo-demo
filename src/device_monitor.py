@@ -28,7 +28,7 @@ class DeviceMonitor:
         self.running = False
         self.monitoring_config = {
             'check_interval': 600,  # 10分钟检测一次设备状态
-            'push_interval': 30,    # 30秒推送一次状态数据
+            'push_interval': 10,    # 30秒推送一次状态数据
             'enable_notifications': True  # 是否启用通知
         }
         self.device_status_history = {}  # 设备状态历史记录

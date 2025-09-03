@@ -30,10 +30,10 @@ from src.data_pusher import data_pusher
 logger = logging.getLogger(__name__)
 # 导入GPU解码器
 try:
-    # from src.ffmpeg_decoder_docker_gpu import FFmpegGPUDecoder
-    from src.ffmpeg_decoder_docker import FFmpegDecoderDocker
-    # from src.ffmpeg_decoder import FFmpegDecoder
-    GPU_DECODER_AVAILABLE = False
+    # from src.ffmpeg_decoder_docker_gpu import FFmpegGPUDecoder #docker环境使用，用于GPU解码器
+    from src.ffmpeg_decoder_docker import FFmpegDecoderDocker #docker环境使用，用于CPU解码器
+    # from src.ffmpeg_decoder import FFmpegDecoder #本地使用，用于CPU解码器
+    GPU_DECODER_AVAILABLE = False  # 是否使用GPU解码器，由于ffmpeg存在卡顿问题，暂时关闭，需要进一步优化
 except ImportError:
     GPU_DECODER_AVAILABLE = False
     logger.warning("GPU解码器不可用，将使用OpenCV解码")
@@ -42,7 +42,7 @@ class DetectionTask:
     """优化后的检测任务类"""
     
     def __init__(self, device_id: str, device_name: str, device_ip: str, config_id: str, model_path: str, 
-                 confidence: float, models_type: str, target_class: List[str], save_mode: SaveMode, area_coordinates:Optional[dict]=None):
+                 confidence: float, models_type: str, is_gpu: bool, target_class: List[str], save_mode: SaveMode, area_coordinates:Optional[dict]=None):
         self.device_id = device_id
         self.device_name = device_name
         self.device_ip = device_ip
@@ -50,6 +50,7 @@ class DetectionTask:
         self.model_path = model_path       
         self.confidence = confidence
         self.models_type = models_type
+        self.is_gpu = is_gpu
         self.target_class = target_class
         self.save_mode = save_mode
         self.area_coordinates = area_coordinates  #点坐标值，前端生成的归一化坐标  
@@ -141,7 +142,7 @@ class DetectionTask:
                 self.model = YOLO(abs_model_path, task=task_type)
    
                 # 使用GPU并进行优化
-                device = 'cuda' if torch.cuda.is_available() else 'cpu'
+                device = 'cuda' if torch.cuda.is_available() and self.is_gpu else 'cpu'
                 self.device = torch.device(device)
                 self.model.to(self.device)
                 
@@ -329,7 +330,7 @@ class DetectionTask:
                     if frame_count % skip_frame_count == 0:
                          # 执行检测
                         detect_frame = frame_rgb.copy()
-                        img_result = frame_rgb.copy()                      
+                        # img_result = frame_rgb.copy() 保留如果保存不带检测结果的帧，可以用于调试 _process_detection_events                 
                         # 使用 try-except 捕获模型推理过程中的错误
                         try:
                             results = self.model(detect_frame, conf=self.confidence,iou=0.45,max_det=300,device=self.device)
@@ -349,29 +350,29 @@ class DetectionTask:
                             if detections:
                                 if self.models_type == 'pose':
                                     # 姿态检测结果
-                                    img_result = self.display_pose_results(detect_frame, results[0])
+                                    detect_frame = self.display_pose_results(detect_frame, results[0])
                                 else:
                                     # 智能分析处理
                                     if self.area_coordinates and self.area_coordinates.get('analysisType'):
                                         # 开启目标追踪功能进行智能分析
                                         self.object_tracker.update(detections)
-                                        img_result = self.object_tracker.draw_tracks(
-                                            detect_frame.copy(), 
+                                        detect_frame = self.object_tracker.draw_tracks(
+                                            detect_frame, 
                                             max_trajectory_length=self.max_trajectory_length,
                                             show_boxes=True,
                                         )
                                         # 处理智能分析事件
-                                        self._process_smart_analysis_events(img_result, detections, speed, cooldown_period)
+                                        self._process_smart_analysis_events(detect_frame, detections, speed, cooldown_period)
                                     else:
                                         # 普通检测：仅显示检测结果，没有智能分析
-                                        img_result = self.display_detection_results(detect_frame, results[0],show_boxes=True)
+                                        detect_frame = self.display_detection_results(detect_frame, results[0],show_boxes=True)
                                         # 处理检测事件
-                                        self._process_detection_events(img_result, detections, speed, cooldown_period)                            
+                                        self._process_detection_events(detect_frame, detections, speed, cooldown_period)                            
 
                             if not self.clients:
                                 continue  # 没有客户端连接，跳过下面步骤
                             else:
-                                self.broadcast_img_result(img_result, detections) # 向WebSocket客户端推送检测结果                                                               
+                                self.broadcast_img_result(detect_frame, detections) # 向WebSocket客户端推送检测结果                                                               
                             
                         except Exception as e:
                             logger.error(f"模型推理过程中出错: {e}")

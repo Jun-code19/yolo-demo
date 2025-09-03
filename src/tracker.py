@@ -33,13 +33,13 @@ class ObjectTracker:
             # Windows系统中文字体路径
             self.font_path = "C:/Windows/Fonts/simhei.ttf"  # 黑体
             self.font = ImageFont.truetype(self.font_path, 30)
-            self.font_small = ImageFont.truetype(self.font_path, 24)
+            self.font_small = ImageFont.truetype(self.font_path, 16)
         except:
             try:
                 # 尝试其他常见中文字体
                 self.font_path = "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"  # 微软雅黑
                 self.font = ImageFont.truetype(self.font_path, 30)
-                self.font_small = ImageFont.truetype(self.font_path, 24)
+                self.font_small = ImageFont.truetype(self.font_path, 16)
             except:
                 # 如果都找不到，使用默认字体
                 self.font = ImageFont.load_default()
@@ -478,6 +478,11 @@ class ObjectTracker:
     
     def _draw_chinese_text(self, frame, text, position, font_size=24, color=(255, 255, 255)):
         """使用PIL绘制中文文字到OpenCV图像上"""
+        height, width, _ = frame.shape
+    
+        # 根据画面高度动态调整字体大小
+        font_size = int(height / 25)  # 例如，设置字体大小为画面高度的1/20
+
         # 将OpenCV图像转换为PIL图像
         frame_pil = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
         draw = ImageDraw.Draw(frame_pil)
@@ -511,7 +516,7 @@ class ObjectTracker:
             if counting_type == 'occupancy':
                 # 区域人数统计 - 显示当前人数
                 info_text = f"当前人数: {self.current_count}"
-                self._draw_chinese_text(frame, info_text, (10, 10), 30, (0, 255, 0))
+                self._draw_chinese_text(frame, info_text, (10, 10), 30, (0, 255, 0))  #分辨率太低，字体太大？
                 
                 # 显示今日统计
                 # today_text = f"今日进入: {self.today_in_count} | 今日离开: {self.today_out_count}"

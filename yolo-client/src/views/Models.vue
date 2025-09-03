@@ -214,6 +214,13 @@
           </el-select>
         </el-form-item>
 
+        <el-form-item label="IS_GPU" prop="is_gpu" style="display: flex; align-items: center;"> 
+          <el-switch v-model="editForm.is_gpu" />
+          <el-tooltip content="使用GPU进行推理,主机不支持则不起作用" placement="right" >
+            <el-icon><InfoFilled /></el-icon>
+          </el-tooltip>
+        </el-form-item>
+
         <el-form-item label="描述">
           <el-input v-model="editForm.description" type="textarea" :rows="3" placeholder="请输入模型描述（可选）"></el-input>
         </el-form-item>
@@ -313,6 +320,7 @@ const editFormRef = ref(null)
 const editForm = ref({
   models_name: '',
   models_type: '',
+  is_gpu: false,
   description: '',
   parameters: []
 })
@@ -678,6 +686,7 @@ const editModel = (model) => {
   editForm.value = {
     models_name: model.models_name,
     models_type: model.models_type,
+    is_gpu: model.is_gpu,
     description: model.description || '',
     parameters: formatParametersForEdit(model.parameters)
   }
@@ -720,6 +729,7 @@ const updateModel = async () => {
       const updateData = {
         models_name: editForm.value.models_name,
         models_type: editForm.value.models_type,
+        is_gpu: editForm.value.is_gpu,
         description: editForm.value.description
       }
 
