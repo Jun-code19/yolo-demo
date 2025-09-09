@@ -1,3 +1,6 @@
+"""
+目标追踪模块 - 用于追踪目标，并进行智能分析
+"""
 import cv2
 import numpy as np
 from collections import defaultdict

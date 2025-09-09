@@ -35,22 +35,43 @@ Run
 安装后端依赖
 Apply to README.md
 Run
+```bash
+pip install -r requirements.txt
+```
 安装前端依赖
 Apply to README.md
 Run
+```bash
+cd yolo-client
+npm install
+```
 配置数据库
 修改models/database.py中的数据库连接信息：
+```python
+DATABASE_URL = "postgresql://user:password@host:port/dbname"
+```
 Apply to README.md
 初始化数据库
 Apply to README.md
 Run
+```bash
+python src/database.py
+```
 3. 启动系统
 启动后端服务
 Apply to README.md
 Run
+```bash
+uvicorn api.routes:app --host 0.0.0.0 --port 8000
+```
 启动前端服务(开发模式)
 Apply to README.md
 Run
+```bash
+cd yolo-client
+npm install
+npm run dev
+```
 4. 使用流程
 设备管理
 添加摄像设备，配置IP、端口、用户名和密码
@@ -92,31 +113,111 @@ device_xxx: 关联特定设备的数据
 alarm: 关联报警事件
 自定义标签：可根据需求自定义其他标签
 五、打包发布准备
-后端打包
+后端打包示例：这里只是示例具体参考打包文件。
 使用PyInstaller打包
 Apply to README.md
 Run
+```bash
+pyinstaller --onefile base_data_server.py
+```
 Docker容器化
 创建Dockerfile：
+Apply to README.md
+Run
+```dockerfile
+# 使用官方Python运行时作为父镜像
+FROM python:3.8-slim-buster
+
+# 设置工作目录
+WORKDIR /app
+
+# 将当前目录内容复制到容器中的/app
+COPY .
+
+# 安装所需的包
+RUN pip install --no-cache-dir -r requirements.txt
+
+# 暴露端口
+EXPOSE 8000
+
+# 定义环境变量
+ENV NAME World
+
+# 运行 uvicorn 服务器
+CMD ["uvicorn", "api.routes:app", "--host", "0.0.0.0", "--port", "8000"]
+```
 Apply to README.md
 构建和运行：
 Apply to README.md
 Run
+```bash
+docker build -t yolo-backend .
+docker run -p 8000:8000 yolo-backend
+```
 前端打包
 构建生产版本
 Apply to README.md
 Run
+```bash
+cd yolo-client
+npm run build
+```
+Apply to README.md
+Run
 配置Nginx
+Apply to README.md
+```nginx
+server {
+    listen 80;
+    server_name your_domain.com;
+
+    location / {
+        root /app/yolo-client/dist;
+        index index.html;
+        try_files $uri $uri/ /index.html;
+    }
+
+    location /api/ {
+        proxy_pass http://localhost:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location /ws/ {
+        proxy_pass http://localhost:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+    }
+}
+```
 Apply to README.md
 数据库迁移
 创建迁移脚本
 Apply to README.md
 Run
-应用迁移
+```bash
+alembic revision -m "initial migration"
+```
 Apply to README.md
 Run
+alembic upgrade head
+Apply to README.md
+Run
+```bash
+alembic upgrade head
+```
 环境变量配置
 创建.env文件：
+Apply to README.md
+```ini
+DATABASE_URL="postgresql://user:password@host:port/dbname"
+LOG_LEVEL="INFO"
+# 其他环境变量...
+```
 Apply to README.md
 六、常见问题与排错
 推送服务未启动
@@ -137,6 +238,10 @@ Apply to README.md
 检查数据库用户权限
 七、API文档
 完整API文档可通过以下URL访问：
+Apply to README.md
+```
+http://localhost:8000/docs
+```
 Apply to README.md
 主要API端点包括：
 /api/detection/{config_id}/start - 启动检测任务

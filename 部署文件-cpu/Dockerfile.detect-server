@@ -19,7 +19,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
     tzdata \
     fonts-wqy-zenhei \
-    ffmpeg \
     iputils-ping \
     && rm -rf /var/lib/apt/lists/*
     

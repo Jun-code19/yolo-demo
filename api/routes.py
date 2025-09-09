@@ -1580,8 +1580,6 @@ async def create_detection_event(
         db.refresh(db_event)
         
         log_action(db, current_user.user_id, 'create_detection_event', db_event.event_id, f"Created detection event {db_event.event_id}")
-        # 更新统计数据
-        update_detection_stats(db, event.device_id, event.event_type)
         
         # 处理返回数据中的bounding_box
         bounding_box_result = db_event.bounding_box

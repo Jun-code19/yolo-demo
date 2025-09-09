@@ -1,3 +1,6 @@
+"""
+检测任务模块 - 用于执行检测任务，包括目标检测、姿态检测、智能分析等
+"""
 import asyncio
 import cv2
 import numpy as np

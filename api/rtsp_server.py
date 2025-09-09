@@ -1,3 +1,6 @@
+"""
+RTSP流处理模块 - 用于处理RTSP流，包括启动、停止、捕获帧等
+"""
 from fastapi import APIRouter, WebSocket,WebSocketDisconnect # 导入FastAPI相关模块
 from typing import Dict, Tuple # 导入字典类型和元组类型
 import cv2 # 导入OpenCV模块

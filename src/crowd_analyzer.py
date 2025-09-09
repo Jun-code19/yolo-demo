@@ -396,7 +396,7 @@ class CrowdAnalyzer:
                 return None
             
             # 加载YOLO模型
-            yolo_model = self._get_model(model.file_path, confidence_threshold)  # 使用任务配置的置信度
+            yolo_model = self._get_model(model.file_path, confidence_threshold, model.is_gpu)  # 使用任务配置的置信度
             if not yolo_model:
                 logger.error(f"模型加载失败: {model.file_path}")
                 with self.lock:
@@ -971,7 +971,7 @@ class CrowdAnalyzer:
             logger.error(f"分析摄像头 {device_id} 失败: {e}")
             return None
     
-    def _get_model(self, model_path: str, confidence: float):
+    def _get_model(self, model_path: str, confidence: float, is_gpu: bool):
         """
         获取YOLO模型（优先使用缓存）
         
@@ -997,7 +997,7 @@ class CrowdAnalyzer:
             model = YOLO(model_path)
             
             # 设置设备
-            # device = 'cuda' if torch.cuda.is_available() else 'cpu'
+            # device = 'cuda' if torch.cuda.is_available() and is_gpu else 'cpu'
             device = 'cpu'
             model.to(torch.device(device))
 

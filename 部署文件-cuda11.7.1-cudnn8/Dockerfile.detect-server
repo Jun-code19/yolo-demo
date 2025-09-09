@@ -1,0 +1,39 @@
+# 使用包含完整编解码库的Runtime镜像（替代Base镜像）
+FROM nvidia/cuda:11.7.1-cudnn8-runtime-ubuntu20.04
+
+WORKDIR /app
+
+# 配置阿里云APT源
+RUN sed -i 's@archive.ubuntu.com@mirrors.aliyun.com@g' /etc/apt/sources.list \
+    && sed -i 's@security.ubuntu.com@mirrors.aliyun.com@g' /etc/apt/sources.list
+
+# 显式安装视频硬解码库（NVIDIA Video Codec SDK）
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    build-essential python3.10 python3-pip \
+    libgl1-mesa-glx libglib2.0-0 libsm6 libxext6 libxrender-dev libpq-dev fonts-wqy-zenhei ffmpeg \
+    && ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime \
+    && echo "Asia/Shanghai" > /etc/timezone \
+    && rm -rf /var/lib/apt/lists/*
+
+# 删除冗余CUDA仓库配置（官方镜像已包含）
+# RUN apt-key adv ... (删除此行)
+
+# 配置PyTorch安装源
+COPY pip.conf /etc/pip.conf
+
+# 安装Python依赖
+COPY requirements.base.txt requirements.detect-server.txt ./
+RUN pip install --no-cache-dir -r requirements.base.txt -r requirements.detect-server.txt
+
+# 复制项目文件
+COPY . .
+
+# 创建目录
+RUN mkdir -p models storage uploads
+
+# 启用GPU支持
+ENV NVIDIA_VISIBLE_DEVICES=all
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility,video
+
+EXPOSE 8000
+CMD ["uvicorn", "base_detect_server:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

@@ -1,3 +1,6 @@
+"""
+数据监听器管理模块 - 用于管理数据监听器，将原始数据标准化为统一格式，并推送到外部平台
+"""
 import asyncio
 import json
 import uuid
