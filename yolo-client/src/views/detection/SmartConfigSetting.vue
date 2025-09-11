@@ -303,14 +303,18 @@
                   </el-form-item>
                 </el-col>
                 <el-col :span="12">
-                  <el-form-item label="统计周期">
+                  <el-form-item label="检测方向" >
+                    <template #label>
+                      <span>检测方向 </span>
+                      <el-tooltip effect="dark" content="简单的Y坐标判断，默认向下为进，向上为出" placement="top">
+                        <el-icon><InfoFilled /></el-icon>
+                      </el-tooltip>
+                    </template>
                     <el-select v-model="configForm.coordinates.flowPeriod" style="width: 100%">
-                      <el-option label="实时" value="realtime" />
-                      <el-option label="每分钟" value="minute" />
-                      <el-option label="每5分钟" value="5minute" />
-                      <el-option label="每小时" value="hour" />
+                      <el-option label="进入" value="detect_in" />
+                      <el-option label="离开" value="detect_out" />                     
                     </el-select>
-                  </el-form-item>
+                  </el-form-item>                  
                 </el-col>
               </el-row>
             </div>
@@ -379,7 +383,7 @@
 import { defineComponent, ref, reactive, onMounted } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { ElMessage } from 'element-plus';
-import { ArrowLeft, Operation, Setting, Edit, VideoCamera, Files, CircleClose } from '@element-plus/icons-vue';
+import { ArrowLeft, Operation, Setting, Edit, VideoCamera, Files, CircleClose, InfoFilled } from '@element-plus/icons-vue';
 import deviceApi from '@/api/device';
 import { detectionConfigApi } from '@/api/detection';
 
@@ -392,7 +396,8 @@ export default defineComponent({
     Edit,
     VideoCamera,
     Files,
-    CircleClose
+    CircleClose,
+    InfoFilled
   },
   setup() {
     const router = useRouter();
@@ -418,7 +423,7 @@ export default defineComponent({
         countingInterval: 5,
         maxCapacity: 100,
         flowDirection: 'bidirectional',
-        flowPeriod: 'realtime',
+        flowPeriod: 'detect_in',
         alarm_interval: 0,
         pushLabel: '',
         enableAlert: false,
@@ -456,7 +461,7 @@ export default defineComponent({
         countingInterval: 5,
         maxCapacity: 100,
         flowDirection: 'bidirectional',
-        flowPeriod: 'realtime',
+        flowPeriod: 'detect_in',
         alarm_interval: 0,
         pushLabel: '',
         enableAlert: false,
@@ -487,7 +492,7 @@ export default defineComponent({
               countingInterval: 5,
               maxCapacity: 100,
               flowDirection: 'bidirectional',
-              flowPeriod: 'realtime',
+              flowPeriod: 'detect_in',
               alarm_interval: configForm.coordinates.alarm_interval || 0,
               pushLabel: configForm.coordinates.pushLabel || '',
               enableAlert: false,

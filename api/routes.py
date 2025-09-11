@@ -2839,7 +2839,8 @@ def get_comprehensive_dashboard_overview(db: Session = Depends(get_db)):
         
         # 8. 检测事件统计（总数而非今日）
         total_detection_events = db.query(DetectionEvent).count()
-        
+        today_detection_events = db.query(DetectionEvent).filter(DetectionEvent.created_at >= today).count()
+
         # 按状态统计检测事件
         event_status_stats = db.query(
             DetectionEvent.status, 
@@ -2873,6 +2874,7 @@ def get_comprehensive_dashboard_overview(db: Session = Depends(get_db)):
         
         # 订阅事件统计
         total_scheme_events = db.query(SmartEvent).count()
+        today_scheme_events = db.query(SmartEvent).filter(SmartEvent.created_at >= today).count()
 
         # 10. 用户统计
         total_users = db.query(User).count()
@@ -3064,6 +3066,7 @@ def get_comprehensive_dashboard_overview(db: Session = Depends(get_db)):
             "events": {
                 "detection_events": {
                     "total": total_detection_events,
+                    "today": today_detection_events,
                     "status_distribution": event_status_distribution,
                     "type_distribution": event_type_distribution
                 },
@@ -3073,7 +3076,8 @@ def get_comprehensive_dashboard_overview(db: Session = Depends(get_db)):
                     "engine_distribution": external_engine_distribution
                 },
                 "scheme_events":{
-                    "total":total_scheme_events
+                    "total":total_scheme_events,
+                    "today": today_scheme_events
                 }
             },
             "distributions": {

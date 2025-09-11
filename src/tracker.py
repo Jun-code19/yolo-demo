@@ -226,10 +226,17 @@ class ObjectTracker:
     def _get_crossing_direction(self, prev_point, current_point):
         """判断穿越方向（简化版本，可根据实际需求优化）"""
         # 这里使用简单的Y坐标判断，实际应用中可能需要更复杂的算法
+        flowPeriod = self.area_coordinates.get('flowPeriod', 'detect_in')
         if current_point[1] > prev_point[1]:
-            return 'in'  # 向下为进入
+            if flowPeriod == 'detect_in'
+                return 'in'  # 向下为进入
+            else:
+                return 'out'
         else:
-            return 'out'  # 向上为离开
+            if flowPeriod == 'detect_in'
+                return 'out'  # 向上为离开
+            else:
+                return 'in'
     
     def _trigger_behavior_event(self, track_id, event_type, position):
         """触发行为事件"""

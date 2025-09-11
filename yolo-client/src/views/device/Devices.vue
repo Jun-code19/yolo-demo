@@ -165,7 +165,7 @@
           </el-select>
         </el-form-item>
         <el-form-item label="通道号" prop="channel" v-if="deviceForm.device_type === 'nvr'">
-          <el-input-number v-model="deviceForm.channel" :min="1" :max="64" placeholder="请输入通道号" style="width: 100%" />
+          <el-input-number v-model="deviceForm.channel" :min="1" :max="128" placeholder="请输入通道号" style="width: 100%" />
         </el-form-item>
         <el-form-item label="码流选择" prop="stream_type">
           <el-select v-model="deviceForm.stream_type" placeholder="请选择码流" style="width: 100%">

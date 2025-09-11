@@ -6,7 +6,9 @@
         <el-card class="stat-card">
           <div class="stat-content">
             <div class="stat-icon">
-              <el-icon color="#409EFF"><VideoCameraFilled /></el-icon>
+              <el-icon color="#409EFF">
+                <VideoCameraFilled />
+              </el-icon>
             </div>
             <div class="stat-info">
               <div class="stat-value">{{ comprehensiveData.summary?.total_devices || 0 }}</div>
@@ -19,46 +21,52 @@
           </div>
         </el-card>
       </el-col>
-      
+
       <el-col :md="6" :sm="12" :xs="24">
         <el-card class="stat-card">
           <div class="stat-content">
             <div class="stat-icon">
-              <el-icon color="#67C23A"><DataLine /></el-icon>
+              <el-icon color="#67C23A">
+                <DataLine />
+              </el-icon>
             </div>
             <div class="stat-info">
               <div class="stat-value">{{ comprehensiveData.events?.detection_events?.total || 0 }}</div>
               <div class="stat-label">检测事件总数</div>
               <div class="stat-detail">
-                <span class="total">累计检测事件</span>
+                <span class="total">{{ comprehensiveData.events?.detection_events?.today || 0 }} 今日事件</span>
               </div>
             </div>
           </div>
         </el-card>
       </el-col>
-      
+
       <el-col :md="6" :sm="12" :xs="24">
         <el-card class="stat-card">
           <div class="stat-content">
             <div class="stat-icon">
-              <el-icon color="#E6A23C"><Warning /></el-icon>
+              <el-icon color="#E6A23C">
+                <Warning />
+              </el-icon>
             </div>
             <div class="stat-info">
               <div class="stat-value">{{ comprehensiveData.events?.scheme_events?.total || 0 }}</div>
               <div class="stat-label">订阅事件总数</div>
               <div class="stat-detail">
-                <span class="total">累计订阅事件</span>
+                <span class="total">{{ comprehensiveData.events?.scheme_events?.today || 0 }} 今日事件</span>
               </div>
             </div>
           </div>
         </el-card>
       </el-col>
-      
+
       <el-col :md="6" :sm="12" :xs="24">
         <el-card class="stat-card">
           <div class="stat-content">
             <div class="stat-icon">
-              <el-icon color="#F56C6C"><Timer /></el-icon>
+              <el-icon color="#F56C6C">
+                <Timer />
+              </el-icon>
             </div>
             <div class="stat-info">
               <div class="stat-value">{{ comprehensiveData.performance?.accuracy || 0 }}%</div>
@@ -79,7 +87,8 @@
           <template #header>
             <div class="card-header">
               <span>模型管理</span>
-              <el-tag type="success">{{ comprehensiveData.summary?.active_models || 0 }}/{{ comprehensiveData.summary?.total_models || 0 }}</el-tag>
+              <el-tag type="success">{{ comprehensiveData.summary?.active_models || 0 }}/{{
+                comprehensiveData.summary?.total_models || 0 }}</el-tag>
             </div>
           </template>
           <div class="module-content">
@@ -89,41 +98,47 @@
             </div>
             <div class="module-item">
               <span class="label">检测配置:</span>
-              <span class="value">{{ comprehensiveData.summary?.active_detection_configs || 0 }}/{{ comprehensiveData.summary?.total_detection_configs || 0 }}</span>
+              <span class="value">{{ comprehensiveData.summary?.active_detection_configs || 0 }}/{{
+                comprehensiveData.summary?.total_detection_configs || 0 }}</span>
             </div>
             <div class="module-item">
               <span class="label">人群分析:</span>
-              <span class="value">{{ comprehensiveData.summary?.active_crowd_jobs || 0 }}/{{ comprehensiveData.summary?.total_crowd_jobs || 0 }}</span>
+              <span class="value">{{ comprehensiveData.summary?.active_crowd_jobs || 0 }}/{{
+                comprehensiveData.summary?.total_crowd_jobs || 0 }}</span>
             </div>
           </div>
         </el-card>
       </el-col>
-      
+
       <el-col :md="8" :sm="12" :xs="24">
         <el-card class="module-card">
           <template #header>
             <div class="card-header">
               <span>数据推送</span>
-              <el-tag type="success">{{ comprehensiveData.summary?.active_push_configs || 0 }}/{{ comprehensiveData.summary?.total_push_configs || 0 }}</el-tag>
+              <el-tag type="success">{{ comprehensiveData.summary?.active_push_configs || 0 }}/{{
+                comprehensiveData.summary?.total_push_configs || 0 }}</el-tag>
             </div>
           </template>
           <div class="module-content">
             <div class="module-item">
               <span class="label">推送配置:</span>
-              <span class="value">{{ comprehensiveData.summary?.active_push_configs || 0 }}/{{ comprehensiveData.summary?.total_push_configs || 0 }}</span>
+              <span class="value">{{ comprehensiveData.summary?.active_push_configs || 0 }}/{{
+                comprehensiveData.summary?.total_push_configs || 0 }}</span>
             </div>
             <div class="module-item">
               <span class="label">数据监听:</span>
-              <span class="value">{{ comprehensiveData.summary?.active_listeners || 0 }}/{{ comprehensiveData.summary?.total_listeners || 0 }}</span>
+              <span class="value">{{ comprehensiveData.summary?.active_listeners || 0 }}/{{
+                comprehensiveData.summary?.total_listeners || 0 }}</span>
             </div>
             <div class="module-item">
               <span class="label">边缘设备:</span>
-              <span class="value">{{ comprehensiveData.summary?.online_edge_servers || 0 }}/{{ comprehensiveData.summary?.total_edge_servers || 0 }}</span>
+              <span class="value">{{ comprehensiveData.summary?.online_edge_servers || 0 }}/{{
+                comprehensiveData.summary?.total_edge_servers || 0 }}</span>
             </div>
           </div>
         </el-card>
       </el-col>
-      
+
       <el-col :md="8" :sm="12" :xs="24">
         <el-card class="module-card">
           <template #header>
@@ -178,7 +193,7 @@
           </div>
         </el-card>
       </el-col>
-      
+
       <el-col :md="8" :sm="24">
         <el-card class="activity-card">
           <template #header>
@@ -191,11 +206,8 @@
           </template>
           <div class="activity-container" ref="activityContainer">
             <div class="activity-list" :style="{ transform: `translateY(${scrollOffset}px)` }">
-              <div 
-                v-for="activity in comprehensiveData.recent_activities" 
-                :key="activity.event_id"
-                class="activity-item"
-              >
+              <div v-for="activity in comprehensiveData.recent_activities" :key="activity.event_id"
+                class="activity-item">
                 <div class="activity-content">
                   <div class="activity-text">{{ activity.content }}</div>
                   <div class="activity-meta">
@@ -237,7 +249,7 @@
           </div>
         </el-card>
       </el-col>
-      
+
       <el-col :md="12" :sm="24">
         <el-card>
           <template #header>
@@ -277,7 +289,7 @@
           </div>
         </el-card>
       </el-col>
-      
+
       <el-col :md="12" :sm="24">
         <el-card>
           <template #header>
@@ -370,7 +382,7 @@ const startActivityScroll = () => {
   if (scrollInterval) {
     clearInterval(scrollInterval)
   }
-  
+
   if (comprehensiveData.recent_activities && comprehensiveData.recent_activities.length > 0) {
     scrollInterval = setInterval(() => {
       scrollOffset.value -= 1
@@ -396,17 +408,17 @@ const renderCharts = () => {
 // 渲染趋势图表
 const renderTrendChart = () => {
   if (!chartRef.value) return
-  
+
   if (!chart) {
     chart = echarts.init(chartRef.value)
   }
-  
+
   const trends = comprehensiveData.trends?.daily || []
   const dates = trends.map(item => item.date)
   const detectionData = trends.map(item => item.detection_events)
   const externalData = trends.map(item => item.external_events)
   const schemeData = trends.map(item => item.scheme_events)
-  
+
   const option = {
     tooltip: {
       trigger: 'axis',
@@ -464,7 +476,7 @@ const renderTrendChart = () => {
       }
     ]
   }
-  
+
   chart.setOption(option)
 }
 
@@ -497,17 +509,17 @@ const getStatusLabel = (status) => {
 // 渲染检测事件状态分布图表
 const renderDetectionStatusChart = () => {
   if (!detectionStatusChartRef.value) return
-  
+
   if (!detectionStatusChart) {
     detectionStatusChart = echarts.init(detectionStatusChartRef.value)
   }
-  
+
   const statusDistribution = comprehensiveData.events?.detection_events?.status_distribution || {}
   const data = Object.entries(statusDistribution).map(([status, count]) => ({
     name: getStatusLabel(status),
     value: count
   }))
-  
+
   const option = {
     tooltip: {
       trigger: 'item',
@@ -523,7 +535,7 @@ const renderDetectionStatusChart = () => {
         label: {
           show: true,
           position: 'outside',
-          formatter: function(params) {
+          formatter: function (params) {
             // 如果数值为0，不显示标签
             if (params.value === 0) return '';
             // 如果百分比小于5%，不显示标签
@@ -550,24 +562,24 @@ const renderDetectionStatusChart = () => {
       }
     ]
   }
-  
+
   detectionStatusChart.setOption(option)
 }
 
 // 渲染检测事件类型分布图表
 const renderDetectionTypeChart = () => {
   if (!detectionTypeChartRef.value) return
-  
+
   if (!detectionTypeChart) {
     detectionTypeChart = echarts.init(detectionTypeChartRef.value)
   }
-  
+
   const typeDistribution = comprehensiveData.events?.detection_events?.type_distribution || {}
   const data = Object.entries(typeDistribution).map(([type, count]) => ({
     name: getEventTypeName(type),
     value: count
   }))
-  
+
   const option = {
     tooltip: {
       trigger: 'item',
@@ -583,7 +595,7 @@ const renderDetectionTypeChart = () => {
         label: {
           show: true,
           position: 'outside',
-          formatter: function(params) {
+          formatter: function (params) {
             // 如果数值为0，不显示标签
             if (params.value === 0) return '';
             // 如果百分比小于5%，不显示标签
@@ -610,24 +622,24 @@ const renderDetectionTypeChart = () => {
       }
     ]
   }
-  
+
   detectionTypeChart.setOption(option)
 }
 
 // 渲染外部事件状态分布图表
 const renderExternalStatusChart = () => {
   if (!externalStatusChartRef.value) return
-  
+
   if (!externalStatusChart) {
     externalStatusChart = echarts.init(externalStatusChartRef.value)
   }
-  
+
   const statusDistribution = comprehensiveData.events?.external_events?.status_distribution || {}
   const data = Object.entries(statusDistribution).map(([status, count]) => ({
     name: getStatusLabel(status),
     value: count
   }))
-  
+
   const option = {
     tooltip: {
       trigger: 'item',
@@ -643,7 +655,7 @@ const renderExternalStatusChart = () => {
         label: {
           show: true,
           position: 'outside',
-          formatter: function(params) {
+          formatter: function (params) {
             // 如果数值为0，不显示标签
             if (params.value === 0) return '';
             // 如果百分比小于5%，不显示标签
@@ -670,24 +682,24 @@ const renderExternalStatusChart = () => {
       }
     ]
   }
-  
+
   externalStatusChart.setOption(option)
 }
 
 // 渲染外部事件引擎分布图表
 const renderExternalEngineChart = () => {
   if (!externalEngineChartRef.value) return
-  
+
   if (!externalEngineChart) {
     externalEngineChart = echarts.init(externalEngineChartRef.value)
   }
-  
+
   const engineDistribution = comprehensiveData.events?.external_events?.engine_distribution || {}
   const data = Object.entries(engineDistribution).map(([engine, count]) => ({
     name: engine || '未知引擎',
     value: count
   }))
-  
+
   const option = {
     tooltip: {
       trigger: 'item',
@@ -703,7 +715,7 @@ const renderExternalEngineChart = () => {
         label: {
           show: true,
           position: 'outside',
-          formatter: function(params) {
+          formatter: function (params) {
             // 如果数值为0，不显示标签
             if (params.value === 0) return '';
             // 如果百分比小于5%，不显示标签
@@ -730,24 +742,24 @@ const renderExternalEngineChart = () => {
       }
     ]
   }
-  
+
   externalEngineChart.setOption(option)
 }
 
 // 渲染人群分析任务统计图表
 const renderCrowdJobChart = () => {
   if (!crowdJobChartRef.value) return
-  
+
   if (!crowdJobChart) {
     crowdJobChart = echarts.init(crowdJobChartRef.value)
   }
-  
+
   const jobDistribution = comprehensiveData.crowd_analysis?.job_distribution || []
   const data = jobDistribution.map(job => ({
     name: job.job_name,
     value: job.count
   }))
-  
+
   const option = {
     tooltip: {
       trigger: 'item',
@@ -763,7 +775,7 @@ const renderCrowdJobChart = () => {
         label: {
           show: true,
           position: 'outside',
-          formatter: function(params) {
+          formatter: function (params) {
             // 如果数值为0，不显示标签
             if (params.value === 0) return '';
             // 如果百分比小于5%，不显示标签
@@ -790,23 +802,23 @@ const renderCrowdJobChart = () => {
       }
     ]
   }
-  
+
   crowdJobChart.setOption(option)
 }
 
 // 渲染人群分析趋势图表
 const renderCrowdTrendChart = () => {
   if (!crowdTrendChartRef.value) return
-  
+
   if (!crowdTrendChart) {
     crowdTrendChart = echarts.init(crowdTrendChartRef.value)
   }
-  
+
   const jobDistribution = comprehensiveData.crowd_analysis?.job_distribution || []
   const jobNames = jobDistribution.map(job => job.job_name)
   const avgCounts = jobDistribution.map(job => job.avg_count)
   const maxCounts = jobDistribution.map(job => job.max_count)
-  
+
   const option = {
     tooltip: {
       trigger: 'axis',
@@ -853,7 +865,7 @@ const renderCrowdTrendChart = () => {
       }
     ]
   }
-  
+
   crowdTrendChart.setOption(option)
 }
 
@@ -1191,28 +1203,28 @@ watch(() => comprehensiveData.trends, () => {
   .el-card {
     margin-bottom: 16px;
   }
-  
+
   .chart-container {
     height: 250px;
   }
-  
+
   .distribution-chart {
     height: 200px;
   }
-  
+
   .chart-legend {
     flex-direction: column;
     gap: 8px;
   }
-  
+
   .dual-chart-container {
     flex-direction: column;
     height: auto;
     gap: 10px;
   }
-  
+
   .dual-chart-container .distribution-chart {
     min-height: 200px;
   }
 }
-</style> 
+</style>
