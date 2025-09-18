@@ -12,6 +12,16 @@ const routes = [
   {
     path: '/dashboard',
     name: 'Dashboard',
+    component: () => import('../views/Dashboard1.vue'),
+    meta: {
+      requiresAuth: false,
+      title: 'AI行为监测数据大屏',
+      layout: 'fullscreen'
+    }
+  },
+  {
+    path: '/dashboard1',
+    name: 'Dashboard1',
     component: () => import('../views/Dashboard.vue'),
     meta: {
       requiresAuth: false,

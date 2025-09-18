@@ -87,8 +87,4 @@ export default {
     return apiClient.get('/system/status');
   },
   
-  // 控制系统服务
-  controlService(serviceName, action) {
-    return apiClient.post(`/system/services/${serviceName}/${action}`);
-  },
 }

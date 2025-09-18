@@ -11,9 +11,8 @@
       <div class="header-right">
         <div class="dashboard-controls">
           <div class="weather-info">
-            <span>{{ weatherData.city }}</span>
-            <span>{{ weatherData.temperature }}</span>
-            <span>{{ weatherData.text }}</span>
+            <span>晴</span>
+            <span>22°C</span>
           </div>
         </div>
 
@@ -65,16 +64,16 @@
               <div class="overview-icon device-icon"></div>
               <div class="overview-content">
                 <div class="overview-value">{{ overviewData.smartSchemeCount }}</div>
-                <div class="overview-label">订阅设备</div>
-                <!-- 订阅设备为边缘设备列表中所有订阅设备数量 -->
+                <div class="overview-label">边缘设备</div>
+                <!-- 边缘设备为边缘设备列表中所有边缘设备数量 -->
               </div>
             </div>
             <div class="overview-item">
               <div class="overview-icon event-icon"></div>
               <div class="overview-content">
                 <div class="overview-value">{{ overviewData.smartEventCount }}</div>
-                <div class="overview-label">订阅事件</div>
-                <!-- 订阅事件为数据事件列表中所有订阅事件数量 -->
+                <div class="overview-label">异常事件</div>
+                <!-- 异常事件为数据事件列表中所有异常事件数量 -->
               </div>
             </div>
           </div>
@@ -92,16 +91,15 @@
         <!-- 游客分布 -->
         <!-- 游客分布为人群分析中各任务的游客数量 -->
         <div class="panel staff-distribution">
-          <h3 class="panel-title">项目人数分布</h3>
-          <div class="chart-container">
-            <div ref="staffDistributionChartRef" class="chart"></div>
-          </div>
-        </div>
-        <!-- 系统资源监听 -->
-        <div class="panel system-chart">
-          <h3 class="panel-title">系统资源</h3>
-          <div class="chart-container">
-            <div ref="systemChartRef" class="chart"></div>
+          <h3 class="panel-title">游客分布</h3>
+          <div class="distribution-list">
+            <div class="distribution-item" v-for="item in staffDistribution" :key="item.area">
+              <div class="area-name">{{ item.area }}</div>
+              <div class="progress-bar">
+                <div class="progress-fill" :style="{ width: item.percentage + '%' }"></div>
+              </div>
+              <div class="area-count">{{ item.count }}</div>
+            </div>
           </div>
         </div>
       </div>
@@ -111,13 +109,13 @@
         <!-- 检测告警数据 -->
         <!-- 检测告警数据为数据事件列表中的异常事件类别统计 -->
         <div class="panel alert-data">
-          <h3 class="panel-title">检测类型统计</h3>
+          <h3 class="panel-title">检测告警数据</h3>
           <div class="alert-stats">
-            <div class="alert-item" v-for="(item, index) in displayedAlertData" :key="item.event_type">
+            <div class="alert-item" v-for="(item, index) in alertData" :key="item.engine_name">
               <div class="alert-value"
-                :class="index === displayedAlertData.length - 1 ? 'danger' : index % 4 === 0 ? 'warning' : index % 4 === 1 ? 'info' : index % 4 === 2 ? 'success' : 'danger'">
-                {{ item.event_count }}</div>
-              <div class="alert-label">{{ item.event_type }}</div>
+                :class="index === alertData.length - 1 ? 'danger' : index % 4 === 0 ? 'warning' : index % 4 === 1 ? 'info' : index % 4 === 2 ? 'success' : 'danger'">
+                {{ item.detection_count }}</div>
+              <div class="alert-label">{{ item.engine_name }}</div>
             </div>
           </div>
         </div>
@@ -125,7 +123,7 @@
         <!-- 人数热力图 -->
         <div class="panel heatmap-panel">
           <h3 class="panel-title">
-            人数分布图
+            人数热力图
           </h3>
           <div class="heatmap-container">
             <DashboardHeatMap @open-map-zoom="handleOpenMapZoom" />
@@ -135,34 +133,32 @@
         <!-- 事件告警信息 -->
         <!-- 事件告警信息为数据事件列表中的异常事件 -->
         <div class="panel alert-history">
-          <h3 class="panel-title">检测事件信息</h3>
+          <h3 class="panel-title">事件告警信息</h3>
           <div class="alert-table">
             <div class="table-header">
-              <div class="col">检测类型</div>
+              <div class="col">告警类型</div>
               <div class="col">设备名称</div>
-              <div class="col col-detail">详情</div>
-              <div class="col">数量</div>
+              <div class="col">通道名称</div>
+              <div class="col">检测数量</div>
               <div class="col">置信度</div>
               <div class="col">时间</div>
               <div class="col">状态</div>
             </div>
-            <div class="table-body" ref="alertTableBodyRef">
-              <transition-group name="alert-fade" tag="div" class="table-rows-container">
-                <div v-for="alert in alertHistory" :key="alert.id" class="table-row"
-                  :class="{ 'highlight': alert.isNew }">
-                  <div class="col">{{ alert.type }}</div>
-                  <div class="col">{{ alert.device }}</div>
-                  <div class="col col-detail">{{ alert.name }}</div>
-                  <div class="col">{{ alert.detection_count }}</div>
-                  <div class="col">{{ alert.confidence }}</div>
-                  <div class="col">{{ alert.time }}</div>
-                  <div class="col">
-                    <span class="status-badge" :class="alert.status">
-                      {{ alert.statusText }}
-                    </span>
-                  </div>
+            <div class="table-body">
+              <div v-for="alert in alertHistory" :key="alert.id" class="table-row"
+                :class="{ 'highlight': alert.isNew }">
+                <div class="col">{{ alert.type }}</div>
+                <div class="col">{{ alert.device }}</div>
+                <div class="col">{{ alert.name }}</div>
+                <div class="col">{{ alert.detection_count }}</div>
+                <div class="col">{{ alert.confidence }}</div>
+                <div class="col">{{ alert.time }}</div>
+                <div class="col">
+                  <span class="status-badge" :class="alert.status">
+                    {{ alert.statusText }}
+                  </span>
                 </div>
-              </transition-group>
+              </div>
             </div>
           </div>
         </div>
@@ -173,15 +169,15 @@
         <!-- 检测各类型分析 -->
         <!-- 检测各类型分析为检测类型/算法引擎的分类统计 -->
         <div class="panel behavior-analysis">
-          <h3 class="panel-title">今日检测分析</h3>
+          <h3 class="panel-title">检测各类型分析</h3>
           <div class="behavior-stats">
-            <div class="behavior-item" v-for="item in displayedBehaviorStats" :key="item.type">
+            <div class="behavior-item" v-for="item in behaviorStats" :key="item.type">
               <div class="behavior-icon" :class="item.icon"></div>
               <div class="behavior-content">
-                <div class="behavior-name">{{ item.event_type }}</div>
-                <div class="behavior-value">{{ item.event_count }}:{{ item.total_count }}</div>
-                <div class="behavior-trend" :class="item.growth_rate > 0 ? 'up' : item.growth_rate < 0 ? 'down' : 'equal'">
-                  {{ item.growth_rate > 0 ? '↑' : item.growth_rate < 0 ? '↓' : '-' }} {{ Math.abs(item.growth_rate) }}% </div>
+                <div class="behavior-name">{{ item.name }}</div>
+                <div class="behavior-value">{{ item.value }}</div>
+                <div class="behavior-trend" :class="item.trend > 0 ? 'up' : item.trend < 0 ? 'down' : 'equal'">
+                  {{ item.trend > 0 ? '↑' : item.trend < 0 ? '↓' : '-' }} {{ Math.abs(item.trend) }}% </div>
                 </div>
               </div>
             </div>
@@ -190,7 +186,7 @@
           <!-- 历史数据事件 -->
           <!-- 历史数据事件为数据事件列表中的历史事件统计 -->
           <div class="panel compliance-chart">
-            <h3 class="panel-title">历史检测统计</h3>
+            <h3 class="panel-title">历史数据事件</h3>
             <div class="chart-container">
               <div ref="complianceChartRef" class="chart"></div>
             </div>
@@ -199,9 +195,9 @@
           <!-- 最新报警推送 -->
           <!-- 最新报警推送为数据事件列表中的最新报警推送 -->
           <div class="panel live-monitor">
-            <h3 class="panel-title">最新检测记录</h3>
+            <h3 class="panel-title">最新报警推送</h3>
             <div class="monitor-grid">
-              <div class="monitor-item" v-for="monitor in displayedLiveMonitors" :key="monitor.id">
+              <div class="monitor-item" v-for="monitor in liveMonitors" :key="monitor.id">
                 <div class="monitor-screen">
                   <img :src="getImageUrl(monitor.image)" :alt="monitor.name" @error="handleImageError" />
                   <div class="monitor-overlay">
@@ -275,7 +271,6 @@ import { ref, reactive, onMounted, onUnmounted, computed, watch, nextTick } from
 import { useRouter } from 'vue-router'
 import * as echarts from 'echarts'
 import DashboardHeatMap from '@/components/DashboardHeatMap.vue'
-import { getWeatherData } from '@/api/dashboard.js' // 新增：导入 getWeatherData
 
 const router = useRouter()
 
@@ -284,16 +279,6 @@ const currentTime = ref('')
 const waitTimeChartRef = ref(null)
 const complianceChartRef = ref(null)
 const riskChartRef = ref(null)
-const systemChartRef = ref(null)
-const staffDistributionChartRef = ref(null) // 新增：项目人数分布图表ref
-
-// 实时监控轮播相关
-const liveMonitorStartIndex = ref(0)
-let liveMonitorCarouselInterval = null
-
-// 检测事件信息滚动相关
-let alertHistoryScrollInterval = null
-const alertTableBodyRef = ref(null); // 新增：获取表格body的引用
 
 // 地图缩放功能相关
 const showMapZoomDialog = ref(false)
@@ -314,22 +299,8 @@ const zoomState = reactive({
   lastMouseY: 0
 })
 
-// 天气数据
-const weatherData = reactive({
-  city: '未知',
-  temperature: '--',
-  text: '--' // 新增天气描述字段
-});
-
-// 检测类型统计轮播相关
-const alertCarouselStartIndex = ref(0)
-let alertCarouselInterval = null
-
-// 今日检测分析轮播相关
-const behaviorCarouselStartIndex = ref(0)
-
 // 使用简化的数据管理
-import { useDashboardData } from '@/composables/useDashboardData.js'
+import { useDashboardData } from '@/composables/useDashboardData1.js'
 
 const {
   data,
@@ -338,9 +309,6 @@ const {
   refreshData,
   stopAutoRefresh
 } = useDashboardData()
-
-// 获取排队时长数据
-const waitTimeData = computed(() => data.waitTimeData);
 
 // 获取图片URL
 const getImageUrl = (imagePath) => {
@@ -364,70 +332,14 @@ const alertHistory = computed(() => data.alertHistory)
 const behaviorStats = computed(() => data.behaviorStats)
 const liveMonitors = computed(() => data.liveMonitors)
 const historicalStats = computed(() => data.historicalStats)
-const systemStatus = computed(() => data.systemStatus)
-
-// 计算属性：当前显示在轮播中的 liveMonitors
-const displayedLiveMonitors = computed(() => {
-  const monitors = liveMonitors.value
-  const startIndex = liveMonitorStartIndex.value
-  const endIndex = startIndex + 4
-  
-  if (monitors.length <= 4) {
-    return monitors
-  } else if (endIndex <= monitors.length) {
-    return monitors.slice(startIndex, endIndex)
-  } else {
-    // 循环显示：从末尾截取一部分，再从开头截取一部分
-    return monitors.slice(startIndex).concat(monitors.slice(0, endIndex % monitors.length))
-  }
-})
-
-// 计算属性：当前显示在轮播中的 alertData
-const displayedAlertData = computed(() => {
-  const data = alertData.value
-  const displayCount = 5 // 每次显示6个
-  if (data.length <= displayCount) {
-    return data
-  }
-  const startIndex = alertCarouselStartIndex.value
-  const endIndex = startIndex + displayCount
-  if (endIndex <= data.length) {
-    return data.slice(startIndex, endIndex)
-  } else {
-    // 从末尾截取一部分，再从开头截取一部分补齐
-    const firstPart = data.slice(startIndex)
-    const secondPart = data.slice(0, endIndex % data.length)
-    return firstPart.concat(secondPart)
-  }
-})
-
-// 计算属性：当前显示在轮播中的 behaviorStats
-const displayedBehaviorStats = computed(() => {
-  const data = behaviorStats.value
-  const displayCount = 5 // 每次显示5个
-  if (data.length <= displayCount) {
-    return data
-  }
-  const startIndex = behaviorCarouselStartIndex.value
-  const endIndex = startIndex + displayCount
-  if (endIndex <= data.length) {
-    return data.slice(startIndex, endIndex)
-  } else {
-    // 从末尾截取一部分，再从开头截取一部分补齐
-    const firstPart = data.slice(startIndex)
-    const secondPart = data.slice(0, endIndex % data.length)
-    return firstPart.concat(secondPart)
-  }
-})
 
 let timeInterval = null
+let dataUpdateInterval = null
 
 // 图表实例存储
 let waitTimeChart = null
 let complianceChart = null
 let riskChart = null
-let systemChart = null
-let staffDistributionChart = null // 新增：项目人数分布图表实例
 
 // 初始化图表
 const initCharts = () => {
@@ -443,20 +355,11 @@ const initCharts = () => {
   riskChart = echarts.init(riskChartRef.value)
   updateRiskChart()
 
-  systemChart = echarts.init(systemChartRef.value)
-  updateSystemChart()
-
-  // 初始化项目人数分布图表
-  staffDistributionChart = echarts.init(staffDistributionChartRef.value)
-  updateStaffDistributionChart()
-
   // 响应式处理
   window.addEventListener('resize', () => {
     waitTimeChart?.resize()
     complianceChart?.resize()
     riskChart?.resize()
-    systemChart?.resize()
-    staffDistributionChart?.resize() // 新增：项目人数分布图表响应式处理
   })
 }
 
@@ -464,132 +367,86 @@ const initCharts = () => {
 const updatewaitTimeChart = () => {
   if (!waitTimeChart) return
 
-  const projectNames = waitTimeData.value.map(item => item.projectName);
-  const waitingMinutes = waitTimeData.value.map(item => item.waitingMinutes);
-  const peopleCount = waitTimeData.value.map(item => item.peopleCount);
-  const projectInterval = waitTimeData.value.map(item => item.projectInterval);
-
   waitTimeChart.setOption({
     backgroundColor: 'transparent',
     grid: {
-      left: '8%',
-      right: '8%',
+      left: '13%',
+      right: '10%',
       top: '20%',
-      bottom: '5%',
-      containLabel: true
-    },
-    legend: {
-      data: ['排队时长', '排队人数', '项目时间'],
-      textStyle: { color: '#ffffff', fontSize: 10},
+      bottom: '20%'
     },
     tooltip: {
       trigger: 'axis',
-      axisPointer: { type: 'shadow' },
       backgroundColor: 'rgba(30, 60, 114, 0.9)',
       borderColor: '#ff8a65',
       borderWidth: 2,
-      textStyle: { color: '#ffffff' },
+      textStyle: {
+        color: '#ffffff'
+      },
       formatter: function (params) {
-        let res = `<b>${params[0].name}</b><br/>`;
-        params.forEach(item => {
-          res += `<span style="display:inline-block;margin-right:5px;border-radius:10px;width:10px;height:10px;background-color:${item.color};"></span>`;
-          res += `${item.seriesName}: ${item.value}<br/>`;
-        });
-        return res;
+        return params[0].name + '<br/>' +
+          '<span style="color:#ff8a65;">排队时长:</span> ' +
+          params[0].value + ' 分钟';
       }
     },
     xAxis: {
       type: 'category',
-      data: projectNames,
+      data: ['A区', 'B区', 'C区', 'D区', 'E区'],
       axisLabel: {
         color: '#ffffff',
-        fontSize: 10,
-        fontWeight: 'bold',
+        fontSize: 12,
+        fontWeight: 'bold'
       },
       axisLine: {
-        lineStyle: { color: '#ff8a65', width: 2 }
+        lineStyle: {
+          color: '#ff8a65',
+          width: 2
+        }
       },
       axisTick: {
-        show: false
-      },
-      splitLine: {
-        show: false
+        lineStyle: { color: '#ff8a65' }
       }
     },
     yAxis: {
       type: 'value',
+      max: 100,
       axisLabel: {
         color: '#ffffff',
-        fontSize: 10,
+        fontSize: 12,
         fontWeight: 'bold',
-        formatter: '{value}'
+        formatter: '{value} 分钟'
       },
       axisLine: {
-        lineStyle: { color: '#ff8a65', width: 2 }
+        lineStyle: {
+          color: '#ff8a65',
+          width: 2
+        }
       },
       splitLine: {
-        lineStyle: { color: 'rgba(255, 138, 101, 0.3)', type: 'dashed' }
+        lineStyle: {
+          color: 'rgba(255, 138, 101, 0.3)',
+          type: 'dashed'
+        }
       }
     },
-    series: [
-      {
-        name: '排队时长',
-        type: 'bar',
-        data: waitingMinutes,
-        itemStyle: {
-          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [ // 纵向渐变
-            { offset: 0, color: '#ff8a65' },
-            { offset: 1, color: '#ff6b6b' }
-          ]),
-          borderColor: '#ff8a65',
-          borderWidth: 1,
-          borderRadius: [5, 5, 0, 0], // 圆角
-          shadowBlur: 10,
-          shadowColor: 'rgba(255, 138, 101, 0.5)'
-        },
-        barWidth: '20%',
-        animationDelay: (idx) => idx * 100,
-        animationDuration: 1000
+    series: [{
+      data: [100, 80, 70, 60, 50],
+      type: 'bar',
+      barWidth: '50%',
+      itemStyle: {
+        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+          { offset: 0, color: '#ff8a65' },
+          { offset: 0.5, color: '#4a90e2' },
+          { offset: 1, color: '#1e3c72' }
+        ]),
+        borderColor: '#ff8a65',
+        borderWidth: 2,
+        shadowBlur: 15,
+        shadowColor: 'rgba(255, 138, 101, 0.5)'
       },
-      {
-        name: '排队人数',
-        type: 'bar',
-        data: peopleCount,
-        itemStyle: {
-          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: '#4a90e2' },
-            { offset: 1, color: '#1e3c72' }
-          ]),
-          borderColor: '#4a90e2',
-          borderWidth: 1,
-          borderRadius: [5, 5, 0, 0],
-          shadowBlur: 10,
-          shadowColor: 'rgba(74, 144, 226, 0.5)'
-        },
-        barWidth: '20%',
-        animationDelay: (idx) => idx * 100 + 150,
-        animationDuration: 1000
-      },
-      {
-        name: '项目时间',
-        type: 'bar',
-        data: projectInterval,
-        itemStyle: {
-          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: '#2ec7cd' },
-            { offset: 1, color: '#1fdac5' }
-          ]),
-          borderColor: '#2ec7cd',
-          borderWidth: 1,
-          borderRadius: [5, 5, 0, 0],
-          shadowBlur: 10,
-          shadowColor: 'rgba(46, 199, 205, 0.5)'
-        },
-        barWidth: '20%',
-        animationDelay: (idx) => idx * 100 + 300,
-        animationDuration: 1000
-      }
-    ]
+      animationDelay: (idx) => idx * 200,
+      animationDuration: 1000
+    }]
   })
 }
 
@@ -600,13 +457,9 @@ const updateComplianceChart = () => {
   // 确保有数据
   const chartData = historicalStats.value || []
 
-  // 动态计算Y轴最大值，考虑所有三个事件类型
-  const maxDetection = Math.max(...chartData.map(item => item.detection_value || 0), 0)
-  const maxExternal = Math.max(...chartData.map(item => item.external_value || 0), 0)
-  const maxSmart = Math.max(...chartData.map(item => item.smart_value || 0), 0)
-  const overallMaxValue = Math.max(maxDetection, maxExternal, maxSmart)
-
-  const yAxisMax = Math.ceil(overallMaxValue * 1.2) // 增加20%的缓冲
+  // 动态计算Y轴最大值
+  const maxValue = Math.max(...chartData.map(item => item.value || 0), 100)
+  const yAxisMax = Math.ceil(maxValue * 1.2) // 增加20%的缓冲
 
   complianceChart.setOption({
     backgroundColor: 'transparent',
@@ -625,12 +478,12 @@ const updateComplianceChart = () => {
         color: '#ffffff'
       },
       formatter: function (params) {
-        let res = params[0].name + '<br/>';
-        params.forEach(item => {
-          res += '<span style="display:inline-block;margin-right:5px;border-radius:10px;width:10px;height:10px;background-color:' + item.color + ';"></span>'
-            + item.seriesName + ': ' + item.value + '<br/>';
-        });
-        return res;
+        if (params && params[0]) {
+          return params[0].name + '<br/>' +
+            '<span style="color:#ff8a65;">事件数量:</span> ' +
+            params[0].value;
+        }
+        return '';
       }
     },
     xAxis: {
@@ -680,77 +533,34 @@ const updateComplianceChart = () => {
         }
       }
     },
-    series: [
-      {
-        name: '检测事件',
-        data: chartData.map(item => item.detection_value || 0),
-        type: 'line',
-        smooth: true,
-        symbol: 'circle',
-        symbolSize: 5,
-        itemStyle: {
-          color: '#4a90e2',
-          borderColor: '#ffffff',
-          borderWidth: 3,
-          shadowBlur: 15,
-          shadowColor: 'rgba(74, 144, 226, 0.8)'
-        },
-        areaStyle: {
-          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: 'rgba(74, 144, 226, 0.4)' },
-            { offset: 0.5, color: 'rgba(74, 144, 226, 0.2)' },
-            { offset: 1, color: 'rgba(74, 144, 226, 0.1)' }
-          ])
-        },
-        animationDuration: 2000
+    series: [{
+      data: chartData.map(item => item.value || 0),
+      type: 'line',
+      smooth: true,
+      symbol: 'circle',
+      symbolSize: 8,
+      lineStyle: {
+        color: '#ff8a65',
+        width: 4,
+        shadowBlur: 15,
+        shadowColor: 'rgba(255, 138, 101, 0.5)'
       },
-      {
-        name: '外部事件',
-        data: chartData.map(item => item.external_value || 0),
-        type: 'line',
-        smooth: true,
-        symbol: 'rect',
-        symbolSize: 5,
-        itemStyle: {
-          color: '#ffbf00',
-          borderColor: '#ffffff',
-          borderWidth: 3,
-          shadowBlur: 15,
-          shadowColor: 'rgba(255, 191, 0, 0.8)'
-        },
-        areaStyle: {
-          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: 'rgba(255, 191, 0, 0.4)' },
-            { offset: 0.5, color: 'rgba(255, 191, 0, 0.2)' },
-            { offset: 1, color: 'rgba(255, 191, 0, 0.1)' }
-          ])
-        },
-        animationDuration: 2000
+      itemStyle: {
+        color: '#ff8a65',
+        borderColor: '#ffffff',
+        borderWidth: 3,
+        shadowBlur: 15,
+        shadowColor: 'rgba(255, 138, 101, 0.8)'
       },
-      {
-        name: '订阅事件',
-        data: chartData.map(item => item.smart_value || 0),
-        type: 'line',
-        smooth: true,
-        symbol: 'triangle',
-        symbolSize: 5,
-        itemStyle: {
-          color: '#ff8a65',
-          borderColor: '#ffffff',
-          borderWidth: 3,
-          shadowBlur: 15,
-          shadowColor: 'rgba(255, 138, 101, 0.8)'
-        },
-        areaStyle: {
-          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: 'rgba(255, 138, 101, 0.4)' },
-            { offset: 0.5, color: 'rgba(255, 138, 101, 0.2)' },
-            { offset: 1, color: 'rgba(255, 138, 101, 0.1)' }
-          ])
-        },
-        animationDuration: 2000
-      }
-    ]
+      areaStyle: {
+        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+          { offset: 0, color: 'rgba(255, 138, 101, 0.4)' },
+          { offset: 0.5, color: 'rgba(74, 144, 226, 0.2)' },
+          { offset: 1, color: 'rgba(30, 60, 114, 0.1)' }
+        ])
+      },
+      animationDuration: 2000
+    }]
   })
 }
 
@@ -759,32 +569,19 @@ const updateRiskChart = () => {
   if (!riskChart) return
 
   // 计算总值
-  const total = behaviorStats.value.reduce((sum, item) => sum + item.event_count, 0)
-  // 定义一组默认颜色
-  const defaultColors = [
-    ['#83bff6', '#188df0'], // 蓝色渐变
-    ['#2ec7cd', '#1fdac5'], // 青色渐变
-    ['#b6a2de', '#8a7fd5'], // 紫色渐变
-    ['#ffbf00', '#ff8a65'], // 橙色渐变
-    ['#c23531', '#a61b18'], // 红色渐变
-    ['#d48265', '#bb505d'], // 棕色渐变
-    ['#91c7ae', '#749f83'], // 绿色渐变
-    ['#749f83', '#ca8622'], // 橄榄色渐变
-    ['#6e7074', '#546570'], // 灰色渐变
-    ['#c4ccd3', '#97a0a8']  // 浅灰色渐变
-  ];
+  const total = behaviorStats.value.reduce((sum, item) => sum + item.value, 0)
 
   // 使用 behaviorStats 数据，并计算百分比
-  const chartData = behaviorStats.value.map((item, index) => ({
-    value: total > 0 ? Number(((item.event_count / total) * 100).toFixed(1)) : 0,
-    name: item.event_type,
+  const chartData = behaviorStats.value.map(item => ({
+    value: total > 0 ? Number(((item.value / total) * 100).toFixed(1)) : 0,
+    name: item.name,
     itemStyle: {
       color: new echarts.graphic.LinearGradient(0, 0, 1, 1, [
-        { offset: 0, color: defaultColors[index % defaultColors.length][0] },
-        { offset: 1, color: defaultColors[index % defaultColors.length][1] }
+        { offset: 0, color: item.trend > 0 ? '#4CAF50' : item.trend < 0 ? '#ff6b6b' : '#4a90e2' },
+        { offset: 1, color: item.trend > 0 ? '#2E7D32' : item.trend < 0 ? '#ff8a65' : '#4a90e2' }
       ]),
       shadowBlur: 15,
-      shadowColor: `rgba(${parseInt(defaultColors[index % defaultColors.length][0].slice(1, 3), 16)}, ${parseInt(defaultColors[index % defaultColors.length][0].slice(3, 5), 16)}, ${parseInt(defaultColors[index % defaultColors.length][0].slice(5, 7), 16)}, 0.5)`
+      shadowColor: item.trend > 0 ? 'rgba(76, 175, 80, 0.5)' : item.trend < 0 ? 'rgba(255, 138, 101, 0.5)' : 'rgba(74, 144, 226, 0.5)'
     }
   }))
 
@@ -802,8 +599,8 @@ const updateRiskChart = () => {
       label: {
         show: true,
         color: '#ffffff',
-        fontSize: 13,
-        // fontWeight: 'bold',
+        fontSize: 14,
+        fontWeight: 'bold',
         formatter: '{b}: {c}%',
         textShadowBlur: 10,
         textShadowColor: 'rgba(255, 138, 101, 0.8)'
@@ -819,142 +616,6 @@ const updateRiskChart = () => {
   })
 }
 
-//更新系统资源信息
-const updateSystemChart = () =>{
-  if (!systemChart) return
-
-  const resources = [];
-
-  // 添加GPU数据 (仅当百分比大于0时)
-  if (systemStatus.value.gpu && systemStatus.value.gpu.percent > 0) {
-    resources.push({ name: 'GPU', value: systemStatus.value.gpu.percent, used: systemStatus.value.gpu.used, total: systemStatus.value.gpu.total, color: ['#1fdac5', '#2ec7cd'] });
-  }
-
-  // 添加磁盘数据
-  if (systemStatus.value.disk) {
-    resources.push({ name: '磁盘', value: systemStatus.value.disk.percent, used: systemStatus.value.disk.used, total: systemStatus.value.disk.total, color: ['#ffbf00', '#ff8a65'] });
-  }
-
-  // 添加内存数据
-  if (systemStatus.value.memory) {
-    resources.push({ name: '内存', value: systemStatus.value.memory.percent, used: systemStatus.value.memory.used, total: systemStatus.value.memory.total, color: ['#4a90e2', '#1e3c72'] });
-  }
-
-  // 添加CPU数据
-  if (systemStatus.value.cpu) {
-    resources.push({ name: 'CPU', value: systemStatus.value.cpu.percent, used: systemStatus.value.cpu.used, total: systemStatus.value.cpu.total, color: ['#ff8a65', '#ff6b6b'] });
-  }
-
-  systemChart.setOption({
-    backgroundColor: 'transparent',
-    grid: {
-      left: '10%',
-      right: '15%',
-      top: '15%',
-      bottom: '15%',
-      containLabel: true // 确保标签显示完全
-    },
-    xAxis: {
-      type: 'value',
-      max: 100,
-      axisLabel: {
-        formatter: '{value}%',
-        color: '#ffffff',
-        fontSize: 12
-      },
-      axisLine: {
-        lineStyle: {
-          color: '#ff8a65',
-          width: 2
-        }
-      },
-      splitLine: {
-        lineStyle: {
-          color: 'rgba(255, 138, 101, 0.3)',
-          type: 'dashed'
-        }
-      }
-    },
-    yAxis: {
-      type: 'category',
-      data: resources.map(r => r.name),
-      axisLabel: {
-        color: '#ffffff',
-        fontSize: 12,
-        // fontWeight: 'bold'
-      },
-      axisLine: {
-        lineStyle: {
-          color: '#ff8a65',
-          width: 2
-        }
-      },
-      axisTick: {
-        show: false
-      }
-    },
-    tooltip: {
-      trigger: 'axis',
-      axisPointer: {
-        type: 'shadow'
-      },
-      backgroundColor: 'rgba(30, 60, 114, 0.9)',
-      borderColor: '#ff8a65',
-      borderWidth: 2,
-      textStyle: {
-        color: '#ffffff'
-      },
-      formatter: function (params) {
-        const data = params[0].data;
-        // 直接从data中获取resourceData
-        const resource = data.resourceData;
-        if (!resource) return '';
-        
-        let unit = 'GB'; // 默认单位
-        if (resource.name === 'CPU' || resource.name === 'GPU') {
-          unit = ''; // CPU和GPU没有单位
-        }
-
-        return `<b>${resource.name}</b><br/>` +
-               `使用率: ${resource.value.toFixed(1)}%<br/>` +
-               (resource.total > 0 ? `已用: ${resource.used.toFixed(1)}${unit} / 总量: ${resource.total.toFixed(1)}${unit}` : '');
-      }
-    },
-    series: [
-      {
-        name: '使用率',
-        type: 'bar',
-        barWidth: '60%',
-        data: resources.map(resource => ({
-          value: resource.value,
-          name: resource.name,
-          itemStyle: {
-            borderRadius: [0, 10, 10, 0], // 圆角
-            color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [ // 水平渐变
-              { offset: 0, color: resource.color[0] },
-              { offset: 1, color: resource.color[1] }
-            ]),
-            shadowColor: 'rgba(0, 0, 0, 0.5)',
-            shadowBlur: 10
-          },
-          // 将原始资源数据存储在data中，以便tooltip访问
-          resourceData: resource
-        })),
-        label: {
-          show: true,
-          position: 'right',
-          formatter: '{c}%',
-          color: '#ffffff',
-          fontSize: 12,
-          fontWeight: 'bold',
-          textShadowColor: 'rgba(0, 0, 0, 0.5)',
-          textShadowBlur: 5
-        }
-      }
-    ]
-  });
-}
-
 // 更新时间
 const updateTime = () => {
   const now = new Date()
@@ -968,53 +629,6 @@ const updateTime = () => {
   }).replace(/\//g, '-')
 }
 
-// 启动实时监控轮播
-const startLiveMonitorCarousel = () => {
-  if (liveMonitorCarouselInterval) {
-    clearInterval(liveMonitorCarouselInterval)
-  }
-  liveMonitorCarouselInterval = setInterval(() => {
-    const monitors = liveMonitors.value
-    if (monitors.length > 4) {
-      liveMonitorStartIndex.value = (liveMonitorStartIndex.value + 4) % monitors.length
-    }
-  }, 10000) // 每10秒切换一次
-}
-
-// 启动检测事件信息滚动
-const startAlertHistoryScroll = () => {
-  if (alertHistoryScrollInterval) {
-    clearInterval(alertHistoryScrollInterval);
-  }
-  const tableBody = alertTableBodyRef.value;
-  if (!tableBody) return;
-
-  const scrollStep = 1; // 每次滚动的像素值
-  const scrollIntervalTime = 50; // 滚动间隔时间（毫秒）
-
-  alertHistoryScrollInterval = setInterval(() => {
-    tableBody.scrollTop += scrollStep;
-
-    // 如果滚动到底部，则重置滚动位置
-    if (tableBody.scrollTop + tableBody.clientHeight >= tableBody.scrollHeight) {
-      tableBody.scrollTop = 0;
-    }
-  }, scrollIntervalTime);
-}
-
-// 启动检测类型统计轮播
-const startAlertDataCarousel = () => {
-  if (alertCarouselInterval) {
-    clearInterval(alertCarouselInterval)
-  }
-    alertCarouselInterval = setInterval(() => {
-      if (alertData.value.length > 5) { // 超过5个才启动切换
-        alertCarouselStartIndex.value = (alertCarouselStartIndex.value + 1) % alertData.value.length
-        behaviorCarouselStartIndex.value = (behaviorCarouselStartIndex.value + 1) % behaviorStats.value.length
-      }
-    }, 2500) // 每3秒切换一次
-}
-
 // 简化的刷新方法
 const handleRefreshData = async () => {
   await refreshData()
@@ -1026,59 +640,13 @@ const handleRefreshData = async () => {
 
 onMounted(async () => {
   updateTime()
-  fetchWeather(); // 调用新的天气获取函数
   timeInterval = setInterval(updateTime, 1000)
+
   // 延迟初始化图表，确保DOM已渲染
   setTimeout(() => {
     initCharts()
   }, 100)
-  startLiveMonitorCarousel() // 启动实时监控轮播
-  startAlertHistoryScroll() // 启动检测事件信息滚动
-  startAlertDataCarousel() // 启动检测类型统计轮播
 })
-
-// 新的天气获取函数
-const fetchWeather = () => {
-  if (navigator.geolocation) {
-    navigator.geolocation.getCurrentPosition(
-      async (position) => {
-        const lat = position.coords.latitude;
-        const lon = position.coords.longitude;
-  
-        try {
-          const data = await getWeatherData(lat, lon);
-          if (data.results && data.results.length > 0) {
-            weatherData.city = data.results[0].location.name || '未知城市';
-            weatherData.temperature = `${data.results[0].now.temperature}°C`;
-            weatherData.text = data.results[0].now.text || '--';
-          } else {
-            console.error('心知天气API未返回有效数据');
-            weatherData.city = '获取失败';
-            weatherData.temperature = '--';
-            weatherData.text = '--';
-          }
-        } catch (error) {
-          console.error('获取天气数据失败:', error);
-          weatherData.city = '获取失败';
-          weatherData.temperature = '--';
-          weatherData.text = '--';
-        }
-      },
-      (error) => {
-        console.error('获取地理位置失败:', error);
-        weatherData.city = '位置受阻';
-        weatherData.temperature = '--';
-        weatherData.text = '--';
-      },
-      { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
-    );
-  } else {
-    console.error('浏览器不支持地理位置功能。');
-    weatherData.city = '不支持地理位置';
-    weatherData.temperature = '--';
-    weatherData.text = '--';
-  }
-};
 
 // 监听历史统计数据变化，自动更新图表
 watch(historicalStats, (newData) => {
@@ -1094,27 +662,6 @@ watch(behaviorStats, (newData) => {
     updateRiskChart()
   }
 }, { deep: true })
-
-// 监听 systemStatus 数据变化
-watch(systemStatus, (newData) => {
-  if (systemChart && newData) {
-    updateSystemChart()
-  }
-}, { deep: true })
-
-// 监听 waitTimeData 变化，自动更新图表
-watch(waitTimeData, (newData) => {
-  if (waitTimeChart && newData) {
-    updatewaitTimeChart();
-  }
-}, { deep: true });
-
-// 监听 staffDistribution 数据变化，自动更新图表
-watch(staffDistribution, (newData) => {
-  if (staffDistributionChart && newData) {
-    updateStaffDistributionChart();
-  }
-}, { deep: true });
 
 // 地图缩放功能方法
 const handleOpenMapZoom = (data) => {
@@ -1315,120 +862,7 @@ onUnmounted(() => {
   if (timeInterval) clearInterval(timeInterval)
   // 停止自动刷新
   stopAutoRefresh()
-  if (liveMonitorCarouselInterval) clearInterval(liveMonitorCarouselInterval) // 停止实时监控轮播
-  if (alertHistoryScrollInterval) clearInterval(alertHistoryScrollInterval) // 停止检测事件信息滚动
-  if (alertCarouselInterval) clearInterval(alertCarouselInterval) // 停止检测类型统计轮播
-  if (staffDistributionChart) staffDistributionChart.dispose(); // 新增：销毁图表实例
 })
-
-// 更新项目人数分布图表
-const updateStaffDistributionChart = () => {
-  if (!staffDistributionChart) return;
-
-  const chartData = staffDistribution.value.map(item => ({
-    name: item.area,
-    value: item.count
-  }));
-
-  staffDistributionChart.setOption({
-    backgroundColor: 'transparent',
-    grid: {
-      left: '10%',
-      right: '10%',
-      top: '20%',
-      bottom: '5%', // 调整底部间距以容纳图例
-      containLabel: true
-    },
-    legend: {
-      data: ['人数 (柱状图)', '人数 (折线图)'],
-      textStyle: { color: '#ffffff' }
-    },
-    xAxis: {
-      type: 'category',
-      data: chartData.map(item => item.name),
-      axisLabel: {
-        color: '#ffffff',
-        fontSize: 10,
-      },
-      axisLine: {
-        lineStyle: { color: '#ff8a65', width: 2 }
-      },
-      axisTick: {
-        show: false
-      }
-    },
-    yAxis: {
-      type: 'value',
-      axisLabel: {
-        color: '#ffffff',
-        fontSize: 10
-      },
-      axisLine: {
-        lineStyle: { color: '#ff8a65', width: 2 }
-      },
-      splitLine: {
-        lineStyle: { color: 'rgba(255, 138, 101, 0.3)', type: 'dashed' }
-      }
-    },
-    tooltip: {
-      trigger: 'axis',
-      axisPointer: { type: 'shadow' },
-      backgroundColor: 'rgba(30, 60, 114, 0.9)',
-      borderColor: '#ff8a65',
-      borderWidth: 2,
-      textStyle: { color: '#ffffff' }
-    },
-    series: [
-      {
-        name: '人数 (柱状图)',
-        type: 'bar',
-        data: chartData.map(item => item.value),
-        barWidth: '15%', // 调整柱子宽度
-        itemStyle: {
-          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: '#2ec7cd' },
-            { offset: 1, color: '#1fdac5' }
-          ]),
-          borderColor: '#2ec7cd',
-          borderWidth: 1,
-          borderRadius: [5, 5, 0, 0],
-          shadowBlur: 10,
-          shadowColor: 'rgba(46, 199, 205, 0.5)'
-        },
-        animationDelay: (idx) => idx * 100,
-        animationDuration: 1000
-      },
-      {
-        name: '人数 (折线图)',
-        type: 'line',
-        data: chartData.map(item => item.value),
-        smooth: true,
-        symbol: 'circle',
-        symbolSize: 8,
-        lineStyle: {
-          color: '#ff8a65',
-          width: 3,
-          shadowBlur: 10,
-          shadowColor: 'rgba(255, 138, 101, 0.5)'
-        },
-        itemStyle: {
-          color: '#ff8a65',
-          borderColor: '#fff',
-          borderWidth: 2
-        },
-        areaStyle: {
-          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: 'rgba(255, 138, 101, 0.3)' },
-            { offset: 1, color: 'rgba(255, 138, 101, 0)' }
-          ])
-        },
-        animationDelay: (idx) => idx * 100 + 50,
-        animationDuration: 1000
-      }
-    ]
-  });
-};
-
 </script>
 
 <style scoped>
@@ -1515,7 +949,6 @@ const updateStaffDistributionChart = () => {
   font-weight: bold;
   background: linear-gradient(45deg, #ffffff, #ffe0b5, #ff8a65);
   -webkit-background-clip: text;
-  background-clip: text;
   -webkit-text-fill-color: transparent;
   text-shadow: 0 0 30px rgba(255, 138, 101, 0.6);
   margin: 0;
@@ -1600,8 +1033,6 @@ const updateStaffDistributionChart = () => {
   color: #ffffff;
   font-weight: 500;
   text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
-  display: flex; /* 新增：使子元素横向排列 */
-  gap: 15px; /* 新增：增加子元素之间的间距 */
 }
 
 .dashboard-main {
@@ -1688,7 +1119,6 @@ const updateStaffDistributionChart = () => {
   font-weight: bold;
   background: linear-gradient(135deg, #ffffff, #ffe0b5);
   -webkit-background-clip: text;
-  background-clip: text;
   -webkit-text-fill-color: transparent;
   margin: 0 0 16px 0;
   text-align: center;
@@ -1956,9 +1386,10 @@ const updateStaffDistributionChart = () => {
 /* 告警历史样式 - 撑满父容器 */
 .alert-table {
   flex: 1;
-  overflow-y: auto; /* 隐藏滚动条，实现平滑滚动 */
-  height: 200px; /* 设定固定高度，根据实际显示行数调整 */
-  font-size:small;
+  /* min-height: 250px; */
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .table-header {
@@ -1966,8 +1397,8 @@ const updateStaffDistributionChart = () => {
   background: linear-gradient(135deg,
       rgba(74, 144, 226, 0.3) 0%,
       rgba(255, 138, 101, 0.2) 100%);
-  padding: 8px;
-  /* font-weight: bold; */
+  padding: 12px;
+  font-weight: bold;
   color: #ffffff;
   border-radius: 6px;
   margin-bottom: 10px;
@@ -1978,8 +1409,7 @@ const updateStaffDistributionChart = () => {
 .table-body {
   flex: 1;
   overflow-y: auto;
-  max-height: 149px;
-  font-size:small;
+  max-height: 140px;
 }
 
 .table-row {
@@ -2006,10 +1436,6 @@ const updateStaffDistributionChart = () => {
   flex: 1;
   padding: 0 8px;
   color: rgba(255, 255, 255, 0.9);
-}
-
-.col-detail {
-  flex: 2; /* 详情列占据双倍宽度 */
 }
 
 .status-badge {
@@ -2040,7 +1466,7 @@ const updateStaffDistributionChart = () => {
 /* 行为统计样式 */
 .behavior-stats {
   display: grid;
-  grid-template-columns: repeat(v-bind('behaviorStats.length > 5 ? 5:behaviorStats.length'), 1fr);
+  grid-template-columns: repeat(v-bind('behaviorStats.length'), 1fr);
   gap: 8px;
 }
 
@@ -2128,19 +1554,12 @@ const updateStaffDistributionChart = () => {
 .behavior-name {
   font-size: 12px;
   color: rgba(255, 255, 255, 0.8);
-  line-height: 1.2em; /* 明确设置行高 */
-  height: 2.4em; /* 两行的高度 (2 * 1.2em) */
-  overflow: hidden; /* 隐藏超出部分 */
-  display: -webkit-box; /* 启用弹性盒子 */
-  -webkit-line-clamp: 2; /* 限制显示两行 */
-  line-clamp: 2; /* 标准属性 */
-  -webkit-box-orient: vertical; /* 垂直方向排列 */
   margin-bottom: 4px;
   text-align: center;
 }
 
 .behavior-value {
-  font-size: 15px;
+  font-size: 16px;
   font-weight: bold;
   color: #ffffff;
   text-shadow: 0 0 10px rgba(255, 138, 101, 0.8);
@@ -2382,16 +1801,9 @@ const updateStaffDistributionChart = () => {
   flex-direction: column;
 }
 
-.dashboard-left .panel.system-chart {
-  flex: 0 0 auto;
-  min-height: 160px;
-  display: flex;
-  flex-direction: column;
-}
-
 .dashboard-left .panel.staff-distribution {
-  flex: 1;
-  min-height: 165px;
+  flex: 0 0 auto;
+  min-height: 280px;
   display: flex;
   flex-direction: column;
 }
@@ -2440,9 +1852,7 @@ const updateStaffDistributionChart = () => {
 
 /* 员工分布样式 */
 .distribution-list {
-  flex: 1;
-  overflow-y: auto;
-  min-height: 200px;
+  space-y: 12px;
 }
 
 /* 数据绑定管理器样式 */
@@ -2635,7 +2045,6 @@ const updateStaffDistributionChart = () => {
   font-weight: bold;
   background: linear-gradient(135deg, #ffffff, #ffe0b5);
   -webkit-background-clip: text;
-  background-clip: text;
   -webkit-text-fill-color: transparent;
   text-shadow: 0 0 20px rgba(255, 138, 101, 0.6);
 }
@@ -2859,26 +2268,10 @@ const updateStaffDistributionChart = () => {
 }
 
 .btn-icon {
-  font-size:16px;transition: transform 0.3s ease;
+  font-size: 16px;transition: transform 0.3s ease;
 }
 
 .footer-btn:hover .btn-icon {
   transform: scale(1.2);
-}
-
-.alert-fade-enter-active, 
-.alert-fade-leave-active {
-  transition: opacity 0.5s ease; /* 只有透明度过渡 */
-}
-
-.alert-fade-enter-from, 
-.alert-fade-leave-to {
-  opacity: 0;
-  /* transform: translateY(-30px); */
-}
-
-.table-row {
-  display: flex;
-  padding: 10px 12px;
 }
 </style>

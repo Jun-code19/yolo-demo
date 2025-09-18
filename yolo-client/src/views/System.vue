@@ -11,17 +11,17 @@
 
     <!-- 系统状态面板 -->
     <div v-if="activeTab === 'status'">
-      <div class="status-header">
+      <!-- <div class="status-header">
         <el-button type="primary" @click="refreshStatus">
           <el-icon>
             <Refresh />
           </el-icon>
           刷新
         </el-button>
-      </div>
+      </div> -->
 
       <el-row :gutter="20">
-        <el-col :span="12">
+        <el-col :span="10">
           <el-card class="status-card">
             <template #header>
               <div class="card-header">
@@ -36,87 +36,54 @@
               <div class="resource-item">
                 <div class="item-header">
                   <span>CPU 使用率</span>
-                  <span>{{ systemStatus.cpu }}%</span>
+                  <span>{{ systemStatus.cpu.percent }}%</span>
                 </div>
-                <el-progress :percentage="systemStatus.cpu" :status="getCpuStatus(systemStatus.cpu)" />
+                <el-progress :percentage="systemStatus.cpu.percent" :status="getCpuStatus(systemStatus.cpu.percent)" />
+                <div class="item-footer">
+                  <span>总核数: {{ systemStatus.cpu.total }}</span>
+                  <span>已使用: {{ systemStatus.cpu.used }} 核</span>
+                </div>
               </div>
 
               <div class="resource-item">
                 <div class="item-header">
                   <span>内存使用率</span>
-                  <span>{{ systemStatus.memory }}%</span>
+                  <span>{{ systemStatus.memory.percent }}%</span>
                 </div>
-                <el-progress :percentage="systemStatus.memory" :status="getMemoryStatus(systemStatus.memory)" />
+                <el-progress :percentage="systemStatus.memory.percent" :status="getMemoryStatus(systemStatus.memory.percent)" />
+                <div class="item-footer">
+                  <span>总内存: {{ systemStatus.memory.total }} GB</span>
+                  <span>已使用: {{ systemStatus.memory.used }} GB</span>
+                </div>
               </div>
 
               <div class="resource-item">
                 <div class="item-header">
                   <span>GPU 使用率</span>
-                  <span>{{ systemStatus.gpu }}%</span>
+                  <span>{{ systemStatus.gpu.percent }}%</span>
                 </div>
-                <el-progress :percentage="systemStatus.gpu" :status="getGpuStatus(systemStatus.gpu)" />
+                <el-progress :percentage="systemStatus.gpu.percent" :status="getGpuStatus(systemStatus.gpu.percent)" />
+                <div class="item-footer">
+                  <span>总显存: {{ systemStatus.gpu.total }} GB</span>
+                  <span>已使用: {{ systemStatus.gpu.used }} GB</span>
+                </div>
               </div>
 
               <div class="resource-item">
                 <div class="item-header">
                   <span>磁盘使用率</span>
-                  <span>{{ systemStatus.disk }}%</span>
+                  <span>{{ systemStatus.disk.percent }}%</span>
                 </div>
-                <el-progress :percentage="systemStatus.disk" :status="getDiskStatus(systemStatus.disk)" />
-              </div>
-            </div>
-          </el-card>
-        </el-col>
-
-        <el-col :span="12">
-          <el-card class="status-card">
-            <template #header>
-              <div class="card-header">
-                <span>服务状态</span>
-                <el-button-group>
-                  <el-button type="primary" link @click="startAllServices">
-                    启动全部
-                  </el-button>
-                  <el-button type="danger" link @click="stopAllServices">
-                    停止全部
-                  </el-button>
-                </el-button-group>
-              </div>
-            </template>
-
-            <div class="service-list">
-              <div v-for="service in services" :key="service.name" class="service-item">
-                <div class="service-info">
-                  <el-icon :class="['status-icon', service.status]">
-                    <CircleCheck v-if="service.status === 'running'" />
-                    <Warning v-else-if="service.status === 'stopped'" />
-                    <Loading v-else />
-                  </el-icon>
-                  <span class="service-name">{{ service.name }}</span>
-                  <el-tag size="small" :type="getServiceTagType(service.status)">
-                    {{ getServiceStatusText(service.status) }}
-                  </el-tag>
-                </div>
-                <div class="service-actions">
-                  <el-button-group>
-                    <el-button type="primary" link :disabled="service.status === 'running'"
-                      @click="startService(service)">
-                      启动
-                    </el-button>
-                    <el-button type="danger" link :disabled="service.status === 'stopped'"
-                      @click="stopService(service)">
-                      停止
-                    </el-button>
-                  </el-button-group>
+                <el-progress :percentage="systemStatus.disk.percent" :status="getDiskStatus(systemStatus.disk.percent)" />
+                <div class="item-footer">
+                  <span>总磁盘: {{ systemStatus.disk.total }} GB</span>
+                  <span>已使用: {{ systemStatus.disk.used }} GB</span>
                 </div>
               </div>
             </div>
           </el-card>
         </el-col>
-      </el-row>
-
-      <el-row :gutter="20" class="mt-20">
-        <el-col :span="24">
+        <el-col :span="14">
           <el-card class="status-card">
             <template #header>
               <div class="card-header">
@@ -127,7 +94,7 @@
               </div>
             </template>
 
-            <el-table :data="logs" style="width: 100%" height="300">
+            <el-table :data="logs" style="width: 100%" height="60vh">
               <el-table-column prop="time" label="时间" width="180" />
               <el-table-column prop="level" label="级别" width="100">
                 <template #default="{ row }">
@@ -141,6 +108,7 @@
           </el-card>
         </el-col>
       </el-row>
+
     </div>
 
     <!-- 系统日志面板 -->
@@ -345,7 +313,7 @@
 
 <script setup>
 import { ref, reactive, onMounted, onUnmounted } from 'vue'
-import { Refresh, CircleCheck, Warning, Loading, Search, Download, Delete } from '@element-plus/icons-vue'
+import { Refresh, Download, Delete } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import systemLogApi from '@/api/system_log'
 
@@ -355,10 +323,10 @@ const activeTab = ref('status')
 // 系统状态数据
 const systemStatus = ref({
   status: 'normal',
-  cpu: 0,
-  memory: 0,
-  gpu: 0,
-  disk: 0
+  cpu: { percent: 0, total: 0, used: 0 },
+  memory: { percent: 0, total: 0, used: 0 },
+  gpu: { percent: 0, total: 0, used: 0 },
+  disk: { percent: 0, total: 0, used: 0 }
 })
 
 // 服务列表
@@ -416,28 +384,6 @@ const getMemoryStatus = (value) => value > 90 ? 'exception' : value > 80 ? 'warn
 const getGpuStatus = (value) => value > 90 ? 'exception' : value > 70 ? 'warning' : 'success'
 const getDiskStatus = (value) => value > 90 ? 'exception' : value > 80 ? 'warning' : 'success'
 
-// 服务状态文本
-const getServiceStatusText = (status) => {
-  const statusMap = {
-    running: '运行中',
-    stopped: '已停止',
-    starting: '启动中',
-    stopping: '停止中'
-  }
-  return statusMap[status]
-}
-
-// 服务状态标签类型
-const getServiceTagType = (status) => {
-  const typeMap = {
-    running: 'success',
-    stopped: 'danger',
-    starting: 'warning',
-    stopping: 'warning'
-  }
-  return typeMap[status]
-}
-
 // 日志级别标签类型
 const getLogLevelType = (level) => {
   const typeMap = {
@@ -447,115 +393,6 @@ const getLogLevelType = (level) => {
     DEBUG: ''
   }
   return typeMap[level]
-}
-
-// 服务操作
-const startService = async (service) => {
-  try {
-    service.status = 'starting'
-
-    // 根据服务名称确定服务ID
-    let serviceId = ''
-    if (service.name === '检测服务') {
-      serviceId = 'detect'
-    } else if (service.name === '数据服务') {
-      serviceId = 'data'
-    } else if (service.name === '数据库服务') {
-      serviceId = 'database'
-    } else if (service.name === '网页服务') {
-      serviceId = 'frontend'
-    }
-
-    if (!serviceId) {
-      throw new Error('未知服务')
-    }
-
-    // 调用API启动服务
-    const response = await systemLogApi.controlService(serviceId, 'start')
-
-    if (response.status === 200) {
-      service.status = 'running'
-      addLog('INFO', `服务 ${service.name} 已启动`)
-      ElMessage.success(`${service.name}已启动`)
-    } else {
-      service.status = 'stopped'
-      addLog('ERROR', `服务 ${service.name} 启动失败`)
-      ElMessage.error(`${service.name}启动失败`)
-    }
-  } catch (error) {
-    // console.error('启动服务失败:', error)
-    service.status = 'stopped'
-    addLog('ERROR', `服务 ${service.name} 启动失败: ${error.message}`)
-    ElMessage.error(`${service.name}启动失败: ${error.response?.data?.detail || error.message}`)
-  }
-}
-
-const stopService = async (service) => {
-  try {
-    service.status = 'stopping'
-
-    // 根据服务名称确定服务ID
-    let serviceId = ''
-    if (service.name === '检测服务') {
-      serviceId = 'detect'
-    } else if (service.name === '数据服务') {
-      serviceId = 'data'
-    } else if (service.name === '数据库服务') {
-      serviceId = 'database'
-    } else if (service.name === '网页服务') {
-      serviceId = 'frontend'
-    }
-
-    if (!serviceId) {
-      throw new Error('未知服务')
-    }
-
-    // 调用API停止服务
-    const response = await systemLogApi.controlService(serviceId, 'stop')
-
-    if (response.status === 200) {
-      service.status = 'stopped'
-      addLog('INFO', `服务 ${service.name} 已停止`)
-      ElMessage.success(`${service.name}已停止`)
-    } else {
-      service.status = 'running'
-      addLog('ERROR', `服务 ${service.name} 停止失败`)
-      ElMessage.error(`${service.name}停止失败`)
-    }
-  } catch (error) {
-    // console.error('停止服务失败:', error)
-    service.status = 'running'
-    addLog('ERROR', `服务 ${service.name} 停止失败: ${error.message}`)
-    ElMessage.error(`${service.name}停止失败: ${error.response?.data?.detail || error.message}`)
-  }
-}
-
-const startAllServices = async () => {
-  for (const service of services.value) {
-    if (service.status === 'stopped') {
-      await startService(service)
-    }
-  }
-}
-
-const stopAllServices = async () => {
-  const result = await ElMessageBox.confirm(
-    '确定要停止所有服务吗？这可能会影响正在进行的检测任务。',
-    '警告',
-    {
-      confirmButtonText: '确定',
-      cancelButtonText: '取消',
-      type: 'warning'
-    }
-  ).catch(() => false)
-
-  if (result) {
-    for (const service of services.value) {
-      if (service.status === 'running') {
-        await stopService(service)
-      }
-    }
-  }
 }
 
 // 日志操作
@@ -1151,6 +988,14 @@ onUnmounted(() => {
   margin-bottom: 8px;
   color: #64748b;
   font-size: 14px;
+}
+
+.item-footer {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+  color: #909399;
+  font-size: 12px;
 }
 
 .service-list {

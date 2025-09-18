@@ -1,26 +1,24 @@
 <template>
   <div class="dashboard-heatmap">
     <div v-if="!hasConfig" class="no-config">
-      <el-icon :size="48"><PictureRounded /></el-icon>
+      <el-icon :size="48">
+        <PictureRounded />
+      </el-icon>
       <p>暂未配置热力图</p>
       <el-button type="primary" @click="goToManagement">
-        <el-icon><Setting /></el-icon>
+        <el-icon>
+          <Setting />
+        </el-icon>
         前往设置
       </el-button>
     </div>
-    
+
     <div v-else-if="displayMode === 'preview'" class="preview-mode">
       <div class="preview-grid">
-        <div 
-          v-for="area in displayAreas" 
-          :key="area.id"
-          class="area-card"
-          :style="{ 
-            backgroundColor: getAreaColor(area),
-            borderColor: getAreaBorderColor(area)
-          }"
-          @click="showAreaDetail(area)"
-        >
+        <div v-for="area in displayAreas" :key="area.id" class="area-card" :style="{
+          backgroundColor: getAreaColor(area),
+          borderColor: getAreaBorderColor(area)
+        }" @click="showAreaDetail(area)">
           <div class="area-name">{{ area.name }}</div>
           <div class="area-count">{{ area.currentCount || 0 }}</div>
           <div class="area-unit">人</div>
@@ -28,15 +26,10 @@
         </div>
       </div>
     </div>
-    
+
     <div v-else-if="displayMode === 'mini'" class="mini-mode">
-      <canvas 
-        ref="miniCanvas" 
-        class="mini-canvas"
-        @click="handleCanvasClick"
-        @mousemove="handleCanvasMouseMove"
-        @mouseleave="handleCanvasMouseLeave"
-      ></canvas>
+      <canvas ref="miniCanvas" class="mini-canvas" @click="handleCanvasClick" @mousemove="handleCanvasMouseMove"
+        @mouseleave="handleCanvasMouseLeave"></canvas>
       <div class="mini-legend">
         <div class="legend-item" v-for="area in displayAreas.slice(0, 5)" :key="area.id">
           <div class="legend-color" :style="{ backgroundColor: getAreaColor(area) }"></div>
@@ -44,15 +37,10 @@
         </div>
       </div>
     </div>
-    
+
     <div v-else-if="displayMode === 'full'" class="full-mode">
-      <canvas 
-        ref="fullCanvas" 
-        class="full-canvas"
-        @click="handleCanvasClick"
-        @mousemove="handleCanvasMouseMove"
-        @mouseleave="handleCanvasMouseLeave"
-      ></canvas>
+      <canvas ref="fullCanvas" class="full-canvas" @click="handleCanvasClick" @mousemove="handleCanvasMouseMove"
+        @mouseleave="handleCanvasMouseLeave"></canvas>
       <div class="full-legend">
         <div class="legend-title">人数分布</div>
         <div class="legend-gradient"></div>
@@ -64,11 +52,8 @@
     </div>
 
     <!-- 悬停提示框 -->
-    <div 
-      v-if="hoveredArea && showTooltip" 
-      class="area-tooltip"
-      :style="{ left: tooltipPosition.x + 'px', top: tooltipPosition.y + 'px' }"
-    >
+    <div v-if="hoveredArea && showTooltip" class="area-tooltip"
+      :style="{ left: tooltipPosition.x + 'px', top: tooltipPosition.y + 'px' }">
       <div class="tooltip-title">{{ hoveredArea.name }}</div>
       <div class="tooltip-content">
         <div class="tooltip-item">
@@ -111,9 +96,8 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
 import { PictureRounded, Setting } from '@element-plus/icons-vue'
 
 const router = useRouter()
@@ -156,13 +140,13 @@ onMounted(async () => {
   await loadConfig()
   await loadData()
   startAutoRefresh()
-  
+
   // 监听配置更新事件
   window.addEventListener('heatmap-config-updated', handleConfigUpdate)
-  
+
   // 监听窗口大小变化
   window.addEventListener('resize', handleWindowResize)
-  
+
   // 使用ResizeObserver监听容器大小变化
   initResizeObserver()
 })
@@ -171,7 +155,7 @@ onUnmounted(() => {
   stopAutoRefresh()
   window.removeEventListener('heatmap-config-updated', handleConfigUpdate)
   window.removeEventListener('resize', handleWindowResize)
-  
+
   // 清理ResizeObserver
   if (resizeObserver) {
     resizeObserver.disconnect()
@@ -185,7 +169,7 @@ watch(displayMode, (newMode) => {
     // 重新设置ResizeObserver
     if (resizeObserver) {
       resizeObserver.disconnect()
-      
+
       if (newMode === 'mini' && miniCanvas.value) {
         resizeObserver.observe(miniCanvas.value)
         drawMiniCanvas()
@@ -244,12 +228,12 @@ const loadConfig = async () => {
 // 加载数据
 const loadData = async () => {
   if (!config.value.mapId) return
-  
+
   try {
     // 尝试从API加载完整的热力图数据
     const response = await fetch('/api/v1/heatmap/dashboard/data')
     const result = await response.json()
-    
+
     if (result.success && result.data) {
       // 处理区域数据
       areas.value = result.data.areas.map(area => ({
@@ -265,7 +249,7 @@ const loadData = async () => {
         dataSourceName: area.data_source_name,
         lastUpdateTime: area.last_update_time
       }))
-      
+
       // 处理地图数据
       if (result.data.map) {
         const mapData = result.data.map
@@ -288,15 +272,15 @@ const loadData = async () => {
       if (savedAreas) {
         areas.value = JSON.parse(savedAreas)
       }
-      
+
       // 加载人群分析数据
       await loadCrowdJobs()
       updateAreaCounts()
-      
+
       // 加载地图图片
       loadMapImage()
     }
-    
+
     lastUpdateTime.value = new Date()
   } catch (error) {
     // console.error('加载数据失败:', error)
@@ -306,7 +290,7 @@ const loadData = async () => {
       if (savedAreas) {
         areas.value = JSON.parse(savedAreas)
       }
-      
+
       await loadCrowdJobs()
       updateAreaCounts()
       loadMapImage()
@@ -349,7 +333,7 @@ const updateAreaCounts = () => {
 // 加载地图图片
 const loadMapImage = () => {
   if (!config.value.mapId) return
-  
+
   try {
     const savedMaps = localStorage.getItem('heatmaps')
     if (savedMaps) {
@@ -378,46 +362,46 @@ const loadMapImage = () => {
 // 设置canvas尺寸的通用函数
 const setupCanvasSize = (canvas) => {
   if (!canvas) return null
-  
+
   const rect = canvas.getBoundingClientRect()
   const dpr = window.devicePixelRatio || 1
-  
+
   // 设置实际尺寸
   canvas.width = rect.width * dpr
   canvas.height = rect.height * dpr
-  
+
   // 设置显示尺寸
   canvas.style.width = rect.width + 'px'
   canvas.style.height = rect.height + 'px'
-  
+
   // 缩放上下文以匹配设备像素比
   const ctx = canvas.getContext('2d')
   ctx.scale(dpr, dpr)
-  
+
   return { ctx, width: rect.width, height: rect.height }
 }
 
 // 绘制迷你画布
 const drawMiniCanvas = () => {
   if (!miniCanvas.value || !mapImage.value) return
-  
+
   const setup = setupCanvasSize(miniCanvas.value)
   if (!setup) return
-  
+
   const { ctx, width, height } = setup
-  
+
   // 清除画布
   ctx.clearRect(0, 0, width, height)
-  
+
   // 绘制地图背景
   const scale = Math.min(width / mapImage.value.width, height / mapImage.value.height)
   const mapWidth = mapImage.value.width * scale
   const mapHeight = mapImage.value.height * scale
   const x = (width - mapWidth) / 2
   const y = (height - mapHeight) / 2
-  
+
   ctx.drawImage(mapImage.value, x, y, mapWidth, mapHeight)
-  
+
   // 绘制区域
   if (areas.value && areas.value.length > 0) {
     areas.value.forEach(area => {
@@ -431,24 +415,24 @@ const drawMiniCanvas = () => {
 // 绘制完整画布
 const drawFullCanvas = () => {
   if (!fullCanvas.value || !mapImage.value) return
-  
+
   const setup = setupCanvasSize(fullCanvas.value)
   if (!setup) return
-  
+
   const { ctx, width, height } = setup
-  
+
   // 清除画布
   ctx.clearRect(0, 0, width, height)
-  
+
   // 绘制地图背景
   const scale = Math.min(width / mapImage.value.width, height / mapImage.value.height)
   const mapWidth = mapImage.value.width * scale
   const mapHeight = mapImage.value.height * scale
   const x = (width - mapWidth) / 2
   const y = (height - mapHeight) / 2
-  
+
   ctx.drawImage(mapImage.value, x, y, mapWidth, mapHeight)
-  
+
   // 绘制区域
   if (areas.value && areas.value.length > 0) {
     areas.value.forEach(area => {
@@ -462,19 +446,19 @@ const drawFullCanvas = () => {
 // 在画布上绘制区域
 const drawAreaOnCanvas = (ctx, area, transform) => {
   if (!area.points || area.points.length < 3) return
-  
+
   const { x: offsetX, y: offsetY, scale } = transform
   const isHovered = hoveredArea.value && hoveredArea.value.id === area.id
-  
+
   ctx.beginPath()
   const firstPoint = area.points[0]
   ctx.moveTo(firstPoint.x * scale + offsetX, firstPoint.y * scale + offsetY)
-  
+
   area.points.forEach(point => {
     ctx.lineTo(point.x * scale + offsetX, point.y * scale + offsetY)
   })
   ctx.closePath()
-  
+
   // 悬停时的特殊效果
   if (isHovered) {
     // 绘制光晕效果
@@ -483,23 +467,23 @@ const drawAreaOnCanvas = (ctx, area, transform) => {
     ctx.shadowBlur = 20
     ctx.shadowOffsetX = 0
     ctx.shadowOffsetY = 0
-    
+
     // 填充半透明背景
     const hoverColor = getAreaColor(area).replace(/[\d\.]+\)$/g, '0.6)')
     ctx.fillStyle = hoverColor
     ctx.fill()
-    
+
     ctx.restore()
   }
-  
+
   // 填充颜色
   ctx.fillStyle = getAreaColor(area)
   ctx.fill()
-  
+
   // 绘制边框
   ctx.strokeStyle = getAreaBorderColor(area)
   ctx.lineWidth = isHovered ? Math.max(2, scale * 3) : Math.max(1, scale * 2)
-  
+
   // 悬停时边框发光效果
   if (isHovered) {
     ctx.save()
@@ -508,35 +492,35 @@ const drawAreaOnCanvas = (ctx, area, transform) => {
     ctx.shadowOffsetX = 0
     ctx.shadowOffsetY = 0
   }
-  
+
   ctx.stroke()
-  
+
   if (isHovered) {
     ctx.restore()
   }
-  
+
   // 绘制标签 - 动态调整字体大小
   const center = calculateAreaCenter(area)
   const centerX = center.x * scale + offsetX
   const centerY = center.y * scale + offsetY
-  
+
   // 根据缩放比例调整字体大小
-  const fontSize = Math.max(8, Math.min(16, scale * 12))
-  
-  ctx.fillStyle = isHovered ? '#fff' : '#333'
+  const fontSize = Math.max(12, Math.min(16, scale * 12))
+
+  ctx.fillStyle = !isHovered ? '#fff' : '#333'
   ctx.font = `${isHovered ? 'bold ' : ''}${fontSize}px Arial`
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
-  
+
   // 添加文字阴影效果
-  ctx.shadowColor = isHovered ? 'rgba(0, 0, 0, 0.8)' : 'rgba(255, 255, 255, 0.8)'
-  ctx.shadowBlur = isHovered ? 4 : 2
-  ctx.shadowOffsetX = 1
-  ctx.shadowOffsetY = 1
-  
+  // ctx.shadowColor = isHovered ? 'rgba(0, 0, 0, 0.8)' : 'rgba(255, 255, 255, 0.8)'
+  // ctx.shadowBlur = isHovered ? 4 : 2
+  // ctx.shadowOffsetX = 1
+  // ctx.shadowOffsetY = 1
+
   ctx.fillText(area.name, centerX, centerY - fontSize * 0.6)
   ctx.fillText(`${area.currentCount || 0}人`, centerX, centerY + fontSize * 0.6)
-  
+
   // 重置阴影
   ctx.shadowColor = 'transparent'
   ctx.shadowBlur = 0
@@ -547,7 +531,7 @@ const drawAreaOnCanvas = (ctx, area, transform) => {
 // 自动刷新
 const startAutoRefresh = () => {
   if (refreshTimer) return
-  
+
   refreshTimer = setInterval(() => {
     loadData()
   }, refreshInterval.value)
@@ -596,7 +580,7 @@ const initResizeObserver = () => {
         }
       }
     })
-    
+
     // 观察canvas元素
     nextTick(() => {
       if (miniCanvas.value) {
@@ -629,26 +613,26 @@ const calculateDensity = (area) => {
 
 const calculateAreaSize = (area) => {
   if (!area.points || area.points.length < 3) return 0
-  
+
   let area_px = 0
   const points = area.points
-  
+
   for (let i = 0; i < points.length; i++) {
     const j = (i + 1) % points.length
     area_px += points[i].x * points[j].y
     area_px -= points[j].x * points[i].y
   }
-  
+
   area_px = Math.abs(area_px) / 2
   return Math.round(area_px) // 简化处理，实际应该使用比例尺
 }
 
 const calculateAreaCenter = (area) => {
   if (!area.points || area.points.length === 0) return { x: 0, y: 0 }
-  
+
   const sumX = area.points.reduce((sum, point) => sum + point.x, 0)
   const sumY = area.points.reduce((sum, point) => sum + point.y, 0)
-  
+
   return {
     x: sumX / area.points.length,
     y: sumY / area.points.length
@@ -681,17 +665,26 @@ const handleCanvasClick = (event) => {
 }
 
 const handleCanvasMouseMove = (event) => {
+  let currentCanvas = null;
+  if (miniCanvas.value && miniCanvas.value.contains(event.target)) {
+    currentCanvas = miniCanvas.value;
+  } else if (fullCanvas.value && fullCanvas.value.contains(event.target)) {
+    currentCanvas = fullCanvas.value;
+  }
+
+  if (!currentCanvas) return; // 如果不是在canvas上移动，则不处理
+
   const area = getAreaAtPoint(event)
   if (area !== hoveredArea.value) {
     hoveredArea.value = area
     if (area) {
       showTooltip.value = true
-      updateTooltipPosition(event)
+      updateTooltipPosition(event, currentCanvas)
     } else {
       showTooltip.value = false
     }
   } else if (area) {
-    updateTooltipPosition(event)
+    updateTooltipPosition(event, currentCanvas)
   }
 }
 
@@ -700,11 +693,11 @@ const handleCanvasMouseLeave = () => {
   showTooltip.value = false
 }
 
-const updateTooltipPosition = (event) => {
-  const rect = event.target.getBoundingClientRect()
+const updateTooltipPosition = (event, canvasRef) => {
+  const rect = canvasRef.getBoundingClientRect()
   tooltipPosition.value = {
-    x: event.clientX - rect.left + 10,
-    y: event.clientY - rect.top - 10
+    x: event.clientX - rect.left + 20,
+    y: event.clientY - rect.top + 20
   }
 }
 
@@ -714,20 +707,20 @@ const getAreaAtPoint = (event) => {
   const rect = canvas.getBoundingClientRect()
   const x = event.clientX - rect.left
   const y = event.clientY - rect.top
-  
+
   if (!mapImage.value) return null
-  
+
   // 计算地图变换
   const scale = Math.min(rect.width / mapImage.value.width, rect.height / mapImage.value.height)
   const mapWidth = mapImage.value.width * scale
   const mapHeight = mapImage.value.height * scale
   const offsetX = (rect.width - mapWidth) / 2
   const offsetY = (rect.height - mapHeight) / 2
-  
+
   // 转换为地图坐标
   const mapX = (x - offsetX) / scale
   const mapY = (y - offsetY) / scale
-  
+
   // 检查哪个区域包含这个点
   for (const area of areas.value) {
     if (area.points && area.points.length >= 3) {
@@ -736,7 +729,7 @@ const getAreaAtPoint = (event) => {
       }
     }
   }
-  
+
   return null
 }
 
@@ -745,13 +738,12 @@ const isPointInPolygon = (x, y, polygon) => {
   let inside = false
   for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
     if ((polygon[i].y > y) !== (polygon[j].y > y) &&
-        x < (polygon[j].x - polygon[i].x) * (y - polygon[i].y) / (polygon[j].y - polygon[i].y) + polygon[i].x) {
+      x < (polygon[j].x - polygon[i].x) * (y - polygon[i].y) / (polygon[j].y - polygon[i].y) + polygon[i].x) {
       inside = !inside
     }
   }
   return inside
 }
-
 
 
 const goToManagement = () => {
@@ -786,15 +778,15 @@ const goToManagement = () => {
     gap: 12px;
     padding: 15px;
   }
-  
+
   .no-config .el-icon {
     font-size: 36px !important;
   }
-  
+
   .no-config p {
     font-size: 14px;
   }
-  
+
   .no-config .el-button {
     font-size: 12px;
     padding: 8px 16px;
@@ -862,19 +854,19 @@ const goToManagement = () => {
     padding: 8px 4px;
     min-height: 60px;
   }
-  
+
   .area-name {
     font-size: 10px !important;
   }
-  
+
   .area-count {
     font-size: 18px !important;
   }
-  
+
   .area-unit {
     font-size: 10px !important;
   }
-  
+
   .area-density {
     font-size: 8px !important;
   }
@@ -885,11 +877,11 @@ const goToManagement = () => {
     padding: 10px 6px;
     min-height: 70px;
   }
-  
+
   .area-name {
     font-size: 11px !important;
   }
-  
+
   .area-count {
     font-size: 20px !important;
   }
@@ -926,7 +918,8 @@ const goToManagement = () => {
   color: #999;
 }
 
-.mini-mode, .full-mode {
+.mini-mode,
+.full-mode {
   flex: 1;
   position: relative;
   overflow: hidden;
@@ -934,7 +927,8 @@ const goToManagement = () => {
   flex-direction: column;
 }
 
-.mini-canvas, .full-canvas {
+.mini-canvas,
+.full-canvas {
   width: 100%;
   height: 100%;
   cursor: pointer;
@@ -996,11 +990,11 @@ const goToManagement = () => {
     min-width: 60px;
     font-size: 10px;
   }
-  
+
   .legend-title {
     font-size: 10px !important;
   }
-  
+
   .legend-labels {
     font-size: 8px !important;
   }
@@ -1015,9 +1009,9 @@ const goToManagement = () => {
 
 .legend-gradient {
   height: 20px;
-  background: linear-gradient(to right, 
-    rgba(74, 144, 226, 0.3) 0%, 
-    rgba(74, 144, 226, 0.7) 100%);
+  background: linear-gradient(to right,
+      rgba(74, 144, 226, 0.3) 0%,
+      rgba(74, 144, 226, 0.7) 100%);
   border-radius: 4px;
   margin-bottom: 4px;
 }
@@ -1062,31 +1056,28 @@ const goToManagement = () => {
 /* 悬停提示框样式 */
 .area-tooltip {
   position: fixed;
-  background: linear-gradient(135deg, 
-    rgba(30, 60, 114, 0.95) 0%, 
-    rgba(15, 26, 46, 0.98) 100%
-  );
+  background: linear-gradient(135deg,
+      rgba(30, 60, 114, 0.95) 0%,
+      rgba(15, 26, 46, 0.98) 100%);
   border: 1px solid rgba(255, 138, 101, 0.6);
   border-radius: 8px;
   padding: 12px;
-  box-shadow: 
+  box-shadow:
     0 8px 32px rgba(0, 0, 0, 0.4),
     0 0 20px rgba(255, 138, 101, 0.3);
   backdrop-filter: blur(15px);
   z-index: 9999;
   pointer-events: none;
   max-width: 200px;
-  animation: tooltipFadeIn 0.2s ease;
+  animation: tooltipFadeIn 0.3s ease;
 }
 
 @keyframes tooltipFadeIn {
-  0% { 
-    opacity: 0; 
-    transform: translate(-50%, -50%) scale(0.8); 
+  from {
+    opacity: 0;
   }
-  100% { 
-    opacity: 1; 
-    transform: translate(-50%, -50%) scale(1); 
+  to {
+    opacity: 1;
   }
 }
 

@@ -228,12 +228,12 @@ class ObjectTracker:
         # 这里使用简单的Y坐标判断，实际应用中可能需要更复杂的算法
         flowPeriod = self.area_coordinates.get('flowPeriod', 'detect_in')
         if current_point[1] > prev_point[1]:
-            if flowPeriod == 'detect_in'
+            if flowPeriod == 'detect_in':
                 return 'in'  # 向下为进入
             else:
                 return 'out'
         else:
-            if flowPeriod == 'detect_in'
+            if flowPeriod == 'detect_in':
                 return 'out'  # 向上为离开
             else:
                 return 'in'

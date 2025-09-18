@@ -1,38 +1,50 @@
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
-import { apiClient_v1 } from '@/api/dashboard.js'
+import { apiClient_v1, getWaitTimeData } from '@/api/dashboard.js'
 
 export function useDashboardData() {
   // 数据状态
   const data = reactive({
-    factoryData: {},
+    overviewData: {},
     alertData: [],
     staffDistribution: [],
     alertHistory: [],
     behaviorStats: [],
     liveMonitors: [],
-    historicalStats: []
+    historicalStats: [],
+    systemStatus: {
+      status: 'normal',
+      cpu: { percent: 0, total: 0, used: 0 },
+      memory: { percent: 0, total: 0, used: 0 },
+      disk: { percent: 0, total: 0, used: 0 },
+      gpu: { percent: 0, total: 0, used: 0 }
+    },
+    waitTimeData: [] // 新增排队时长数据
   })
 
   // 加载状态
   const loading = reactive({
-    factoryData: false,
+    overviewData: false,
     alertData: false,
     staffDistribution: false,
     alertHistory: false,
     behaviorStats: false,
     liveMonitors: false,
-    historicalStats: false
+    historicalStats: false,
+    systemStatus: false,
+    waitTimeData: false // 新增排队时长加载状态
   })
 
   // 错误状态
   const errors = reactive({
-    factoryData: null,
+    overviewData: null,
     alertData: null,
     staffDistribution: null,
     alertHistory: null,
     behaviorStats: null,
     liveMonitors: null,
-    historicalStats: null
+    historicalStats: null,
+    systemStatus: null,
+    waitTimeData: null // 新增排队时长错误状态
   })
 
   // 定时器
@@ -46,54 +58,6 @@ export function useDashboardData() {
     } catch (error) {
       console.error(`API请求失败 (${endpoint}):`, error)
       return fallbackData
-    }
-  }
-
-  // 加载园区概况数据
-  const loadFactoryData = async () => {
-    loading.factoryData = true
-    errors.factoryData = null
-    
-    try {
-      const rawData = await apiRequest('/dashboard/overview-data')
-      if (rawData) {
-        const item = rawData
-        data.factoryData = {
-          factoryCount: parseInt(item.detection_config_count) || 0,
-          areaCount: parseInt(item.device_count) || 0,
-          staffCount: parseInt(item.detection_event_count) || 0,
-          cameraCount: parseInt(item.crowd_analysis_job_count) || 0,
-          deviceCount: parseInt(item.edge_server_count) || 0,
-          eventCount: parseInt(item.external_event_count) || 0
-        }
-      }
-    } catch (error) {
-      errors.factoryData = error
-      console.error('加载园区概况数据失败:', error)
-    } finally {
-      loading.factoryData = false
-    }
-  }
-
-  // 加载告警数据
-  const loadAlertData = async () => {
-    loading.alertData = true
-    errors.alertData = null
-    
-    try {
-      const rawData = await apiRequest('/dashboard/detection-event-data')
-
-      if (rawData && Array.isArray(rawData)) {
-        data.alertData = rawData.map(event => ({
-          engine_name: event.engine_name,
-          detection_count: event.detection_count
-        }))
-      }
-    } catch (error) {
-      errors.alertData = error
-      console.error('加载告警数据失败:', error)
-    } finally {
-      loading.alertData = false
     }
   }
 
@@ -124,51 +88,72 @@ export function useDashboardData() {
     }
   }
 
-  // 加载告警历史数据
-  const loadAlertHistory = async () => {
-    loading.alertHistory = true
-    errors.alertHistory = null
+  const get_dashboard_overview_data = async () => {
+    loading.overviewData = true
+    errors.overviewData = null
     
     try {
-      const rawData = await apiRequest('/dashboard/alert-history-data')
-
-      if (rawData && Array.isArray(rawData)) {
-        data.alertHistory = rawData.map(event => ({
+      const rawData = await apiRequest('/dashboard/overview-smart-data')
+      if (rawData) {
+        const item = rawData
+        data.overviewData = {
+          deviceCount: parseInt(item.device_count) || 0,
+          detectionConfigCount: parseInt(item.detection_config_count) || 0,
+          crowdAnalysisJobCount: parseInt(item.crowd_analysis_job_count) || 0,
+          smartSchemeCount: parseInt(item.smart_scheme_count) || 0,
+          smartEventCount: parseInt(item.smart_event_count) || 0,
+          detectionSmartEventCount: parseInt(item.detection_event_count) || 0
+        }
+        if (Array.isArray(rawData.detection_events)) {
+          data.alertHistory = rawData.detection_events.map(event => ({
+            id: event.event_id,
+            device: event.device_name || '未知设备',
+            type: event.event_type || '未知类型',
+            name: event.meta_data?.event_description,
+            detection_count: event.bounding_box?.length || 0,
+            confidence: (event.confidence || 0).toFixed(2),
+            time: new Date(event.timestamp).toLocaleTimeString(),
+            status: event.status === 'new' ? 'danger' : 'success',
+            statusText: event.status === 'new' ? '未处理' : '已处理',
+            isNew: (new Date() - new Date(event.timestamp)) < 300000
+          }))
+        }
+      }
+      if (Array.isArray(rawData.detection_lasted_events)) {
+        data.liveMonitors = rawData.detection_lasted_events.map((event, index) => ({
           id: event.event_id,
-          device: event.device_name || '未知设备',
-          type: event.engine_name || '未知算法',
-          name: event.location || '未知名称',
-          detection_count: event.normalized_data?.targets?.length || 0,
-          confidence: (event.confidence || 0).toFixed(2),
-          time: new Date(event.timestamp).toLocaleTimeString(),
+          name: event.device_name || '未知设备',
+          image: event.thumbnail_path,
           status: event.status === 'new' ? 'danger' : 'success',
-          statusText: event.status === 'new' ? '未处理' : '已处理',
-          isNew: (new Date() - new Date(event.timestamp)) < 300000
+          statusText: event.status === 'new' ? '告警' : '正常'
         }))
       }
     } catch (error) {
-      errors.alertHistory = error
-      console.error('加载告警历史数据失败:', error)
+      errors.overviewData = error
+      console.error('加载园区概况数据失败:', error)
     } finally {
-      loading.alertHistory = false
+      loading.overviewData = false
     }
   }
-
-  // 加载行为统计数据
-  const loadBehaviorStats = async () => {
+  
+  const get_dashboard_type_data= async () => {
     loading.behaviorStats = true
     errors.behaviorStats = null
     
     try {
-      const rawData = await apiRequest('/dashboard/detection-type-data')
-
+      const rawData = await apiRequest('/dashboard/type-smart-data')
       if (rawData && Array.isArray(rawData)) {
         data.behaviorStats = rawData.map((event, index) => ({
           type: index + 1,
-          name: event.engine_name,
-          value: event.count,
-          trend: event.count_yesterday_rate,
+          event_type: event.category,
+          event_count: event.event_total,
+          total_count: event.today_total,
+          growth_rate: event.growth_rate,
           icon: ['production-icon', 'storage-icon', 'operation-icon', 'maintenance-icon', 'environment-icon', 'safety-icon'][index] || 'safety-icon'
+        }));
+          data.alertData = rawData.map(event => ({
+          event_type: event.category,
+          event_count: event.event_total
         }))
       }
     } catch (error) {
@@ -179,43 +164,18 @@ export function useDashboardData() {
     }
   }
 
-  // 加载实时监控数据
-  const loadLiveMonitors = async () => {
-    loading.liveMonitors = true
-    errors.liveMonitors = null
-    
-    try {
-      const rawData = await apiRequest('/dashboard/alert-history-data')
-
-      if (rawData && Array.isArray(rawData)) {
-        data.liveMonitors = rawData.slice(0, 4).map((event, index) => ({
-          id: event.event_id,
-          name: event.location || `监控点${index + 1}`,
-          image: event.normalized_data?.processed_images?.pic_data?.original_path,
-          status: event.status === 'new' ? 'danger' : 'success',
-          statusText: event.status === 'new' ? '告警' : '正常'
-        }))
-      }
-    } catch (error) {
-      errors.liveMonitors = error
-      console.error('加载实时监控数据失败:', error)
-    } finally {
-      loading.liveMonitors = false
-    }
-  }
-
-  // 加载历史统计数据
-  const loadHistoricalStats = async () => {
+  const get_dashboard_historical_data = async () => {
     loading.historicalStats = true
     errors.historicalStats = null
     
     try {
-      const rawData = await apiRequest('/dashboard/historical-stats-data')
-
+      const rawData = await apiRequest('/dashboard/historical-smart-data')
       if (rawData && Array.isArray(rawData)) {
         data.historicalStats = rawData.map(item => ({
           date: item.date,
-          value: item.count || 0
+          detection_value: item.detection_event_count || 0,
+          external_value: item.external_event_count || 0,
+          smart_value: item.smart_event_count || 0,
         }))
       }
     } catch (error) {
@@ -226,26 +186,55 @@ export function useDashboardData() {
     }
   }
 
+  const get_system_status = async () => {
+    loading.systemStatus = true
+    errors.systemStatus = null
+    try {
+      const rawData = await apiRequest('/dashboard/system-status')
+      if (rawData) {
+        data.systemStatus = rawData
+      }
+    } catch (error) {
+      errors.systemStatus = error
+      console.error('加载系统资源数据失败:', error)
+    } finally {
+      loading.systemStatus = false
+    }
+  }
+
+  const get_wait_time = async () => {
+    loading.waitTimeData = true;
+    errors.waitTimeData = null;
+    try {
+      const response = await getWaitTimeData();
+      data.waitTimeData = response;
+    } catch (error) {
+      errors.waitTimeData = error;
+      console.error('加载排队时长数据失败:', error);
+    } finally {
+      loading.waitTimeData = false;
+    }
+  };
+
   // 加载所有数据
   const loadAllData = async () => {
     await Promise.allSettled([
-      loadFactoryData(),
-      loadAlertData(),
+      get_dashboard_overview_data(),
+      get_dashboard_type_data(),
       loadStaffDistribution(),
-      loadAlertHistory(),
-      loadBehaviorStats(),
-      loadLiveMonitors(),
-      loadHistoricalStats()
+      get_dashboard_historical_data(),
+      get_system_status(), // 添加系统资源数据加载
+      get_wait_time() // 添加排队时长数据加载
     ])
   }
 
   // 刷新数据
   const refreshData = async () => {
-    await loadAllData()
+    // await loadAllData()
   }
 
   // 启动自动刷新
-  const startAutoRefresh = (interval = 30000) => {
+  const startAutoRefresh = (interval = 60000) => {
     if (refreshTimer) {
       clearInterval(refreshTimer)
     }
@@ -294,15 +283,6 @@ export function useDashboardData() {
     loadAllData,
     refreshData,
     startAutoRefresh,
-    stopAutoRefresh,
-    
-    // 单独加载方法
-    loadFactoryData,
-    loadAlertData,
-    loadStaffDistribution,
-    loadAlertHistory,
-    loadBehaviorStats,
-    loadLiveMonitors,
-    loadHistoricalStats
+    stopAutoRefresh
   }
 } 

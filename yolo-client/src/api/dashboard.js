@@ -62,6 +62,28 @@ export const dashboardMapApi = {
   getDashboardData: () => apiClient_v1.get('/heatmap/dashboard/data'),
 }
 
+export const getWaitTimeData = async () => {
+  try {
+    const response = await axios.get('http://10.55.4.26:5000/api/WaitTime');
+    return response.data;
+  } catch (error) {
+    console.error("Error fetching wait time data:", error);
+    throw error;
+  }
+};
+
+export const getWeatherData = async (lat, lon) => {
+  try {
+    const API_KEY = 'SztJHWcWUcNl_Dl8F'; // 您的心知天气API Key
+    const location = `${lat}:${lon}`;
+    const weatherApiUrl = `https://api.seniverse.com/v3/weather/now.json?key=${API_KEY}&location=${location}&language=zh-Hans&unit=c`;
+    const response = await axios.get(weatherApiUrl);
+    return response.data;
+  } catch (error) {
+    console.error("Error fetching weather data:", error);
+    throw error;
+  }
+};
 
 // 导出API和客户端
 export { apiClient_v1,apiClient_v2 }

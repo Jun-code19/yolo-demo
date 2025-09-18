@@ -21,6 +21,11 @@ const isDashboard = computed(() => {
   return route.path === '/dashboard'
 })
 
+// 是否显示数据大屏
+const isDashboard1 = computed(() => {
+  return route.path === '/dashboard1'
+})
+
 onMounted(async () => {
   // 从本地存储中获取用户信息
   const userInfo = localStorage.getItem('userInfo')
@@ -88,13 +93,14 @@ const openHelp = () => {
 
 // 打开数据大屏
 const openDashboard = () => {
-  window.open('/dashboard', '_blank')
+  window.open('/dashboard1', '_blank')
 }
 </script>
 
 <template>
   <!-- 数据大屏独立显示 -->
   <router-view v-if="isDashboard"></router-view>
+  <router-view v-if="isDashboard1"></router-view>
   
   <!-- 使用路由系统显示登录页或主应用界面 -->
   <router-view v-else-if="showLogin"></router-view>
@@ -216,10 +222,10 @@ const openDashboard = () => {
           <template #title>系统管理</template>
         </el-menu-item>
 
-        <!-- <el-menu-item @click="openDashboard">
+        <el-menu-item @click="openDashboard">
           <el-icon><DataLine /></el-icon>
           <template #title>数据大屏</template>
-        </el-menu-item> -->
+        </el-menu-item>
          
       </el-menu>
     </el-aside>

@@ -101,36 +101,7 @@ export const detectionEventApi = {
           )
       );
       return `data:image/jpeg;base64,${base64}`;
-        // if (!(response.data instanceof Blob)) {
-        //   throw new Error('无效的二进制数据');
-        // }
-
-        // return URL.createObjectURL(response.data);
-         // ========== 新增校验代码 ==========
-        //  const blob = response.data;
-        
-        //  // 校验1：检查基础属性
-        //  console.log('Blob校验 - 大小:', blob.size, '类型:', blob.type);
-        //  if (blob.size < 1024) throw new Error("数据量过小（可能为空文件）");
-        //  if (blob.type !== 'image/jpeg') throw new Error(`类型异常: ${blob.type}`);
- 
-        //  // 校验2：解码验证
-        //  const img = new Image();
-        //  await new Promise((resolve, reject) => {
-        //      img.onload = resolve;
-        //      img.onerror = (e) => reject(new Error(`解码失败: ${e.target.src}`));
-        //      img.src = URL.createObjectURL(blob);
-        //  });
- 
-        //  // 校验3：读取二进制头
-        //  const buffer = await blob.arrayBuffer();
-        //  const view = new DataView(buffer);
-        //  const header = view.getUint32(0, false).toString(16).toUpperCase();
-        //  console.log('文件头:', header);  // JPEG应为FFD8FFE0
-         
-        //  return img.src;  // 返回已验证的URL
     } catch (error) {
-        // console.error('获取缩略图失败:', error);
         throw error; // 抛出错误以便后续处理
     }
   },

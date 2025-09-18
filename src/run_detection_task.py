@@ -305,7 +305,7 @@ class DetectionTask:
             if self.area_coordinates and self.area_coordinates.get('alarm_interval'):
                 cooldown_period = self.area_coordinates.get('alarm_interval')
             else:
-                cooldown_period = 10  # 检测事件的冷却时间（秒）
+                cooldown_period = 15  # 检测事件的冷却时间（秒）
 
             # 动态调整参数
             skip_frame_count = self.skip_frame_count
@@ -594,8 +594,8 @@ class DetectionTask:
         if detections and (current_time - self.last_detection_time) > cooldown_period:
             self.last_detection_time = current_time
             self.push_detection_data(detections, img_result, speed)
-            if self.save_mode.value != 'none':
-                self.save_detection_event(img_result, detections)
+            # if self.save_mode.value != 'none':
+            self.save_detection_event(img_result, detections)
             
     def save_detection_event(self, frame, detections): # 保存检测事件到数据库并存储图像/视频
         """保存检测事件到数据库并存储图像/视频"""
@@ -629,16 +629,14 @@ class DetectionTask:
             # 保存事件元数据
             event.meta_data = {
                 "current_count": len(detections),
-                "target_class": self.target_class
+                "target_class": self.target_class,
+                "event_description": f"检测到{len(detections)}个目标"
             }
             
-            # 根据保存模式保存图像/视频
-            save_dir = Path(f"storage/events/{current_time.strftime('%Y-%m-%d')}/{self.device_id}")
-            save_dir.mkdir(parents=True, exist_ok=True)
-            
             if self.save_mode in [SaveMode.screenshot, SaveMode.both]:
-                # 绘制检测框和标签
-                # annotated_frame = self.draw_detections(frame, detections)    
+                # 根据保存模式保存图像/视频
+                save_dir = Path(f"storage/events/{current_time.strftime('%Y-%m-%d')}/{self.device_id}")
+                save_dir.mkdir(parents=True, exist_ok=True)   
                 # 保存带检测框的截图（原图）
                 thumbnail_path = save_dir / f"{event_id}.jpg"
                 if self.stream_type == 'sub':

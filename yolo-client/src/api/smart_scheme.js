@@ -3,7 +3,7 @@ import { ElMessage } from 'element-plus';
 
 // 创建 axios 实例
 const apiClient = axios.create({
-  baseURL: '/api/v2',
+  baseURL: '/api/v1',
   headers: {
     'Content-Type': 'application/json',
   },
@@ -46,6 +46,51 @@ apiClient.interceptors.response.use(
   }
 );
 
+// 创建 axios 实例
+const apiClient2 = axios.create({
+  baseURL: '/api/v2',
+  headers: {
+    'Content-Type': 'application/json',
+  },
+  timeout: 10000
+});
+
+// 添加请求拦截器，自动附加认证token
+apiClient2.interceptors.request.use(
+  config => {
+    const token = localStorage.getItem('token');
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+  },
+  error => {
+    return Promise.reject(error);
+  }
+);
+
+// 添加响应拦截器，处理token过期情况
+apiClient2.interceptors.response.use(
+  response => {
+    return response;
+  },
+  error => {
+    // 处理401错误（未授权，token过期）
+    if (error.response && error.response.status === 401) {
+      // 清除token和用户信息
+      localStorage.removeItem('token');
+      localStorage.removeItem('userInfo');
+      
+      // 显示提示信息
+      ElMessage.error('登录已过期，请重新登录');
+      
+      // 重定向到登录页面
+      window.location.href = '/login';
+    }
+    return Promise.reject(error);
+  }
+);
+
 export const smartSchemeApi = {
   // 事件订阅管理
   createScheme: (data) => apiClient.post('/smart-schemes/manager', data),
@@ -55,14 +100,14 @@ export const smartSchemeApi = {
   deleteScheme: (schemeId) => apiClient.delete(`/smart-schemes/manager/${schemeId}`),
 
   // 事件订阅控制
-  startScheme: (schemeId) => apiClient.post(`/smart-schemes/manager/${schemeId}/start`),
-  stopScheme: (schemeId) => apiClient.post(`/smart-schemes/manager/${schemeId}/stop`),
-  restartScheme: (schemeId) => apiClient.post(`/smart-schemes/manager/${schemeId}/restart`),
+  startScheme: (schemeId) => apiClient2.post(`/smart-schemes/manager/${schemeId}/start`),
+  stopScheme: (schemeId) => apiClient2.post(`/smart-schemes/manager/${schemeId}/stop`),
+  restartScheme: (schemeId) => apiClient2.post(`/smart-schemes/manager/${schemeId}/restart`),
 
   // 状态监控
   getAllStatus: () => apiClient.get('/smart-schemes/status'),
   getSchemeStatus: (schemeId) => apiClient.get(`/smart-schemes/${schemeId}/status`),
-  getSystemStatus: () => apiClient.get('/smart-schemes/system/status'),
+  getSystemStatus: () => apiClient2.get('/smart-schemes/system/status'),
 
   // 事件查询
   getSmartEvents: (params) => apiClient.get('/smart-schemes/events', { params }),

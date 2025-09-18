@@ -2510,6 +2510,70 @@ def clear_detection_logs(
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.get("/data_push/list")
+async def list_push_configs(
+    config_id: str = None, 
+    tag: str = None,
+    method: str = None,
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db)
+): # 获取推送配置列表，支持按配置ID、标签、推送方式筛选
+    """获取推送配置列表，支持按配置ID、标签、推送方式筛选（分页）"""
+    try:
+        query = db.query(DataPushConfig)
+        
+        # 根据配置ID筛选
+        if config_id:
+            query = query.filter(DataPushConfig.config_id == config_id)
+        
+        # 根据标签筛选
+        if tag:
+            query = query.filter(DataPushConfig.tags.any(tag))
+        
+        # 根据推送方式筛选
+        if method:
+            try:
+                push_method = PushMethod(method.lower())
+                query = query.filter(DataPushConfig.push_method == push_method)
+            except ValueError:
+                # 忽略无效的推送方式
+                pass
+        
+        # 获取总数
+        total_count = query.count()
+        
+        # 分页查询
+        configs = query.order_by(DataPushConfig.created_at.desc()).offset(skip).limit(limit).all()
+        return {
+            "status": "success",
+            "data": [
+                {
+                    "push_id": config.push_id,
+                    "push_name": config.push_name,
+                    "config_id": config.config_id,
+                    "tags": config.tags,  # 添加标签
+                    "push_method": config.push_method.value,
+                    "enabled": config.enabled,
+                    "http_url": config.http_url,
+                    "http_method": config.http_method,
+                    "tcp_host": config.tcp_host,
+                    "tcp_port": config.tcp_port,
+                    "mqtt_broker": config.mqtt_broker,
+                    "mqtt_port": config.mqtt_port,
+                    "mqtt_topic": config.mqtt_topic,
+                    "include_image": config.include_image,
+                    "created_at": config.created_at.isoformat() if config.created_at else None,
+                    "last_push_time": config.last_push_time.isoformat() if config.last_push_time else None
+                }
+                for config in configs
+            ],
+            "total": total_count
+        }
+    except Exception as e:
+        logger.error(f"获取推送配置列表失败: {e}")
+        raise HTTPException(status_code=500, detail=f"获取推送配置列表失败: {str(e)}")
+
 # 系统状态监控API
 @router.get("/system/status")
 def get_system_status(db: Session = Depends(get_db)):
@@ -2517,120 +2581,49 @@ def get_system_status(db: Session = Depends(get_db)):
     try:
         import psutil
         import os
-        import subprocess
         import json
+        import GPUtil # 导入GPUtil
         
-        # CPU使用率
+        # CPU信息
         cpu_percent = psutil.cpu_percent(interval=1)
+        cpu_max = psutil.cpu_count(logical=True) # 逻辑核心数
+        cpu_used = round(cpu_max * (cpu_percent / 100), 2) # 假设一个核心代表100%的使用率，这里只是一个概念性的已使用值
         
-        # 内存使用率
+        # 内存信息
         memory = psutil.virtual_memory()
         memory_percent = memory.percent
+        memory_total = round(memory.total / (1024 ** 3), 2)  # GB
+        memory_used = round(memory.used / (1024 ** 3), 2)    # GB
         
-        # 磁盘使用率
+        # 磁盘信息
         disk = psutil.disk_usage('/')
         disk_percent = disk.percent
-        
-        # 获取服务状态，与前端服务名称保持一致
-        services = [
-            {"name": "检测服务", "status": "stopped"},
-            {"name": "数据服务", "status": "stopped"},
-            {"name": "数据库服务", "status": "stopped"},
-            {"name": "网页服务", "status": "stopped"}
-        ]
-        
-        # 容器名称映射
-        container_patterns = [
-            'yolo-detect-server',    # 检测服务
-            'yolo-data-server',      # 数据服务  
-            'yolo-postgres',         # 数据库服务
-            'yolo-frontend'          # 网页服务
-        ]
-        
-        # 尝试从docker获取服务状态
-        try:
-            # 使用列表形式执行docker命令，避免引号问题，兼容Windows和Linux
-            docker_result = subprocess.run(
-                ['docker', 'ps', '--format', '{{.Names}}'], 
-                capture_output=True, 
-                text=True,
-                timeout=10
-            )
-            
-            print(f"Docker命令返回码: {docker_result.returncode}")
-            print(f"Docker输出: '{docker_result.stdout}'")
-            if docker_result.stderr:
-                print(f"Docker错误: {docker_result.stderr}")
-            
-            if docker_result.returncode == 0 and docker_result.stdout.strip():
-                docker_output = docker_result.stdout.strip()
-                running_containers = docker_output.split('\n')
-                
-                print(f"运行中的容器: {running_containers}")
-                
-                # 使用精确匹配检查每个服务的状态
-                for container_name in running_containers:
-                    container_name = container_name.strip()
-                    if container_name == 'yolo-detect-server':
-                        services[0]["status"] = "running"
-                        print("检测服务: running")
-                    elif container_name == 'yolo-data-server':
-                        services[1]["status"] = "running" 
-                        print("数据服务: running")
-                    elif container_name == 'yolo-postgres':
-                        services[2]["status"] = "running"
-                        print("数据库服务: running")
-                    elif container_name == 'yolo-frontend':
-                        services[3]["status"] = "running"
-                        print("网页服务: running")
-            else:
-                print("Docker命令执行失败或没有返回结果")
-                
-        except subprocess.TimeoutExpired:
-            print("Docker命令执行超时")
-        except Exception as e:
-            print(f"获取Docker服务状态失败: {str(e)}")
-        
-        # 尝试使用系统命令获取系统服务状态（作为备用，优先使用Docker状态）
-        try:
-            if os.name == 'posix':  # Linux 或 MacOS
-                for i, service_name in enumerate(["yolo-detect-server", "yolo-data-server", "yolo-postgres", "yolo-frontend"]):
-                    # 只有当前面的Docker检查没有将其标记为running时，才进行系统服务检查
-                    if services[i]["status"] != "running":
-                        service_cmd = f"systemctl is-active {service_name}"
-                        service_result = subprocess.run(service_cmd, shell=True, capture_output=True, text=True)
-                        
-                        if service_result.stdout.strip() == "active":
-                            services[i]["status"] = "running"
-            elif os.name == 'nt':  # Windows
-                for i, service_name in enumerate(["YoloDetectServer", "YoloDataServer", "YoloPostgres", "YoloFrontend"]):
-                    # 只有当前面的Docker检查没有将其标记为running时，才进行系统服务检查
-                    if services[i]["status"] != "running":
-                        service_cmd = f"sc query {service_name} | findstr RUNNING"
-                        service_result = subprocess.run(service_cmd, shell=True, capture_output=True, text=True)
-                        
-                        if "RUNNING" in service_result.stdout:
-                            services[i]["status"] = "running"
-        except Exception as e:
-            print(f"获取系统服务状态失败: {str(e)}")
-        
+        disk_total = round(disk.total / (1024 ** 3), 2) # GB
+        disk_used = round(disk.used / (1024 ** 3), 2)  # GB
+           
         # 尝试获取GPU信息
         gpu_percent = 0
+        gpu_total_memory = 0
+        gpu_used_memory = 0
+        
         try:
-            # 尝试使用nvidia-smi获取GPU信息
-            gpu_cmd = "nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits"
-            gpu_result = subprocess.run(gpu_cmd, shell=True, capture_output=True, text=True)
-            
-            if gpu_result.returncode == 0:
-                gpu_output = gpu_result.stdout.strip()
-                try:
-                    gpu_percent = float(gpu_output)
-                except ValueError:
-                    pass
-        except Exception:
-            # 如果nvidia-smi不可用，保持gpu_percent为0
+            # 获取所有GPU的信息
+            gpus = GPUtil.getGPUs()
+            if gpus:
+                # 假设只监控第一个GPU，你可以根据需求遍历所有GPU
+                gpu = gpus[0]
+                
+                gpu_percent = gpu.load * 100  # GPUtil的load是0-1之间的浮点数，转换为百分比
+                gpu_total_memory = round(gpu.memoryTotal / 1024, 2)  # 转换为GB
+                gpu_used_memory = round(gpu.memoryUsed / 1024, 2)    # 转换为GB
+            else:
+                # logger.info("No NVIDIA GPUs found on the system using GPUtil.")
+                pass
+        except Exception as e:
+            # logger.info(f"An error occurred while getting GPU info using GPUtil: {e}")
             pass
-            
+            # 如果发生错误，保持gpu信息为0
+        
         # 确定系统整体状态
         status = "normal"
         if cpu_percent > 90 or memory_percent > 90 or disk_percent > 90 or gpu_percent > 90:
@@ -2651,98 +2644,32 @@ def get_system_status(db: Session = Depends(get_db)):
         # 构建响应
         response = {
             "status": status,
-            "cpu": cpu_percent,
-            "memory": memory_percent,
-            "disk": disk_percent,
-            "gpu": gpu_percent,
-            "services": services,
+            "cpu": {
+                "percent": cpu_percent,
+                "total": cpu_max,
+                "used": cpu_used
+            },
+            "memory": {
+                "percent": memory_percent,
+                "total": memory_total,
+                "used": memory_used
+            },
+            "disk": {
+                "percent": disk_percent,
+                "total": disk_total,
+                "used": disk_used
+            },
+            "gpu": {
+                "percent": gpu_percent,
+                "total": gpu_total_memory,
+                "used": gpu_used_memory
+            },
             "logs": log_entries
         }
         
         return response
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取系统状态失败: {str(e)}")
-
-# 服务控制API
-@router.post("/system/services/{service_name}/{action}")
-def control_service(
-    service_name: str, 
-    action: str, 
-    db: Session = Depends(get_db), 
-    current_user: User = Depends(check_admin_permission)
-):
-    """控制系统服务（启动/停止）"""
-    if action not in ["start", "stop"]:
-        raise HTTPException(status_code=400, detail="不支持的操作，只能是start或stop")
-        
-    # 服务名称映射
-    service_map = {
-        "detect": {"docker": "detect-server", "system": "yolo-detect-server"},
-        "data": {"docker": "data-server", "system": "yolo-data-server"},
-        "database": {"docker": "postgres", "system": "yolo-postgres"},
-        "frontend": {"docker": "frontend", "system": "yolo-frontend"}
-    }
-    
-    if service_name not in service_map:
-        raise HTTPException(status_code=400, detail=f"不支持的服务: {service_name}")
-    
-    try:
-        import subprocess
-        import os
-        
-        success = False
-        message = ""
-        
-        # 首先尝试使用docker-compose控制服务
-        try:
-            docker_service = service_map[service_name]["docker"]
-            docker_cmd = f"docker-compose {action} {docker_service}"
-            
-            docker_result = subprocess.run(docker_cmd, shell=True, capture_output=True, text=True)
-            
-            if docker_result.returncode == 0:
-                success = True
-                message = f"Docker服务 {docker_service} {action}成功"
-        except Exception as e:
-            print(f"Docker控制失败: {str(e)}")
-        
-        # 如果Docker控制失败，尝试系统服务
-        if not success:
-            try:
-                system_service = service_map[service_name]["system"]
-                
-                if os.name == 'posix':  # Linux 或 MacOS
-                    service_cmd = f"systemctl {action} {system_service}"
-                elif os.name == 'nt':  # Windows
-                    if action == "start":
-                        service_cmd = f"sc start {system_service}"
-                    else:
-                        service_cmd = f"sc stop {system_service}"
-                else:
-                    raise Exception("不支持的操作系统")
-                
-                service_result = subprocess.run(service_cmd, shell=True, capture_output=True, text=True)
-                
-                if (os.name == 'posix' and service_result.returncode == 0) or \
-                   (os.name == 'nt' and "SUCCESS" in service_result.stdout):
-                    success = True
-                    message = f"系统服务 {system_service} {action}成功"
-                else:
-                    message = f"系统服务 {system_service} {action}失败: {service_result.stderr or service_result.stdout}"
-            except Exception as e:
-                message = f"系统服务控制失败: {str(e)}"
-        
-        # 记录操作日志
-        action_type = "start_service" if action == "start" else "stop_service"
-        log_action(db, current_user.user_id, action_type, service_name, message)
-        
-        if success:
-            return {"status": "success", "message": message}
-        else:
-            raise Exception(message)
-    
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"控制服务失败: {str(e)}")
 
 # 首页仪表盘API
 @router.get("/dashboard/comprehensive-overview")
@@ -3356,291 +3283,6 @@ async def get_edge_servers_by_status(
     except Exception as e:
         # logger.error(f"根据状态获取边缘服务器失败: {str(e)}")
         raise HTTPException(status_code=500, detail="根据状态获取边缘服务器失败") 
-    
-#数据大屏API
-@router.get("/dashboard/overview-data")
-def get_dashboard_data(db: Session = Depends(get_db)):
-    """获取数据大屏数据"""
-    try:
-        device_count = db.query(Device).count()
-        detection_event_count = db.query(DetectionEvent).count()
-        detection_config_count = db.query(DetectionConfig).count()
-        crowd_analysis_job_count = db.query(CrowdAnalysisJob).count()
-        edge_server_count = db.query(EdgeServer).count()
-        external_event_count = db.query(ExternalEvent).count()
-        return {
-            "data": {
-                "device_count": device_count,
-                "detection_event_count": detection_event_count,
-                "detection_config_count": detection_config_count,
-                "crowd_analysis_job_count": crowd_analysis_job_count, 
-                "edge_server_count": edge_server_count,
-                "external_event_count": external_event_count
-            }
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail="获取数据大屏数据失败")
-    
-@router.get("/dashboard/crowd-analysis-data")
-def get_dashboard_crowd_analysis_data(db: Session = Depends(get_db)):
-    """获取数据大屏人群分析数据"""
-    try:
-        # 方法1：获取每个任务的最新分析结果
-        # 使用子查询获取每个job_id的最新timestamp
-        from sqlalchemy import func
-        
-        subquery = db.query(
-            CrowdAnalysisResult.job_id,
-            func.max(CrowdAnalysisResult.timestamp).label('latest_timestamp')
-        ).group_by(CrowdAnalysisResult.job_id).subquery()
-        
-        # 主查询：关联获取最新结果
-        latest_results = db.query(
-            CrowdAnalysisJob.job_name,
-            CrowdAnalysisResult.total_person_count,
-            CrowdAnalysisResult.timestamp
-        ).join(
-            CrowdAnalysisResult, 
-            CrowdAnalysisJob.job_id == CrowdAnalysisResult.job_id
-        ).join(
-            subquery,
-            (CrowdAnalysisResult.job_id == subquery.c.job_id) & 
-            (CrowdAnalysisResult.timestamp == subquery.c.latest_timestamp)
-        ).all()
-        
-        result = []
-        for job_name, people_count, timestamp in latest_results:
-            result.append({
-                "job_name": job_name,
-                "people_count": people_count or 0,
-                "last_update": timestamp.isoformat() if timestamp else None
-            })
-        return {
-            "data": result
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail="获取数据大屏人群分析数据失败")
-    
-@router.get("/dashboard/alert-history-data")
-def get_dashboard_alert_history_data(db: Session = Depends(get_db)):
-    """获取数据大屏告警历史数据"""
-    try:
-        events = db.query(ExternalEvent).order_by(ExternalEvent.timestamp.desc()).limit(10).all()
-        return {
-            "data": events
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail="获取数据大屏告警历史数据失败")
-    
-# @router.get("/dashboard/project-queue-data")
-# def get_dashboard_project_queue_data(db: Session = Depends(get_db)):
-#     """获取数据大屏项目排队时长数据"""
-#     try:
-#         return {
-#             "data": []
-#         }
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail="获取数据大屏项目排队时长数据失败")
-    
-@router.get("/dashboard/historical-stats-data")
-def get_dashboard_historical_stats_data(db: Session = Depends(get_db)):
-    """获取数据大屏历史数据事件数据"""
-    try:
-        from sqlalchemy import func
-        
-        # 获取最近5天的每天的数据条数
-        events = db.query(
-            func.date(ExternalEvent.timestamp).label('date'), 
-            func.count(ExternalEvent.event_id).label('count')
-        ).filter(
-            ExternalEvent.timestamp >= datetime.now() - timedelta(days=5)
-        ).group_by(
-            func.date(ExternalEvent.timestamp)
-        ).all()
-        # 升序
-        events = sorted(events, key=lambda x: x.date)
-        # 转换为字典格式
-        result = []
-        for date, count in events:
-            result.append({
-                "date": date.isoformat() if date else None,
-                "count": count
-            })
-        
-        return {
-            "data": result
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail="获取数据大屏历史数据事件数据失败")
-    
-@router.get("/dashboard/detection-event-data")
-def get_dashboard_detection_event_data(db: Session = Depends(get_db)):
-    """获取数据大屏检测事件数据"""
-    try:
-        from sqlalchemy import func
-        
-        # 获取检测总数
-        detection_count = db.query(ExternalEvent).count()
-        
-        # 根据引擎名称统计检测数量
-        engine_count_query = db.query(
-            ExternalEvent.engine_name,
-            func.count(ExternalEvent.event_id).label('count')
-        ).filter(
-            ExternalEvent.engine_name.isnot(None)
-        ).group_by(
-            ExternalEvent.engine_name
-        ).all()
-        
-        # 转换为列表格式
-        engine_count = []
-        for engine_name, count in engine_count_query:
-            engine_count.append({
-                "engine_name": engine_name or "未知引擎",
-                "detection_count": count
-            })
-        
-        # engine_count只保留前5个
-        engine_count = engine_count[:5]
-        
-        engine_count.append({
-            "engine_name": "异常事件",
-            "detection_count": detection_count
-        })
-
-        return {
-            "data": engine_count
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail="获取数据大屏检测事件数据失败")
-    
-@router.get("/dashboard/detection-type-data")
-def get_dashboard_detection_type_data(db: Session = Depends(get_db)):
-    """获取数据大屏检测类型数据"""
-    try:
-        from sqlalchemy import func, and_
-        
-        # 计算时间范围
-        now = datetime.now()
-        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        yesterday_start = today_start - timedelta(days=1)
-        day_before_yesterday_start = today_start - timedelta(days=2)
-        
-        # 优化的查询：分别统计总数、昨天、前天的数据
-        # 总数统计
-        total_count_query = db.query(
-            ExternalEvent.engine_name,
-            func.count(ExternalEvent.event_id).label('total_count')
-        ).filter(
-            ExternalEvent.engine_name.isnot(None)
-        ).group_by(ExternalEvent.engine_name)
-        
-        # 昨天数据统计
-        yesterday_count_query = db.query(
-            ExternalEvent.engine_name,
-            func.count(ExternalEvent.event_id).label('yesterday_count')
-        ).filter(
-            and_(
-                ExternalEvent.engine_name.isnot(None),
-                ExternalEvent.timestamp >= yesterday_start,
-                ExternalEvent.timestamp < today_start
-            )
-        ).group_by(ExternalEvent.engine_name)
-        
-        # 前天数据统计
-        day_before_yesterday_count_query = db.query(
-            ExternalEvent.engine_name,
-            func.count(ExternalEvent.event_id).label('day_before_yesterday_count')
-        ).filter(
-            and_(
-                ExternalEvent.engine_name.isnot(None),
-                ExternalEvent.timestamp >= day_before_yesterday_start,
-                ExternalEvent.timestamp < yesterday_start
-            )
-        ).group_by(ExternalEvent.engine_name)
-        
-        # 执行查询
-        total_counts = {row.engine_name: row.total_count for row in total_count_query.all()}
-        yesterday_counts = {row.engine_name: row.yesterday_count for row in yesterday_count_query.all()}
-        day_before_yesterday_counts = {row.engine_name: row.day_before_yesterday_count for row in day_before_yesterday_count_query.all()}
-        
-        # 合并数据并计算同比率
-        detection_type_count = []
-        for engine_name in total_counts.keys():
-            total = total_counts.get(engine_name, 0)
-            yesterday = yesterday_counts.get(engine_name, 0)
-            day_before_yesterday = day_before_yesterday_counts.get(engine_name, 0)
-            
-            # 计算同比率（昨天相比前天的变化率）
-            if day_before_yesterday > 0:
-                rate = round((yesterday - day_before_yesterday) / day_before_yesterday * 100, 2)
-            else:
-                rate = 0 if yesterday == 0 else 100  # 如果前天没有数据，昨天有数据则为100%增长
-            
-            detection_type_count.append({
-                "engine_name": engine_name,
-                "count": total,
-                "count_yesterday": yesterday,
-                "count_day_before_yesterday": day_before_yesterday,
-                "count_yesterday_rate": rate
-            })
-        
-        # 按总数排序，取前6个（为本地引擎留一个位置）
-        detection_type_count.sort(key=lambda x: x["count"], reverse=True)
-        detection_type_count = detection_type_count[:6]
-        
-        # 添加本地检测引擎数据（从DetectionEvent表查询）
-        try:
-            local_total = db.query(DetectionEvent).count()
-            local_yesterday = db.query(DetectionEvent).filter(
-                and_(
-                    DetectionEvent.timestamp >= yesterday_start,
-                    DetectionEvent.timestamp < today_start
-                )
-            ).count()
-            local_day_before_yesterday = db.query(DetectionEvent).filter(
-                and_(
-                    DetectionEvent.timestamp >= day_before_yesterday_start,
-                    DetectionEvent.timestamp < yesterday_start
-                )
-            ).count()
-            
-            # 计算本地引擎同比率
-            if local_day_before_yesterday > 0:
-                local_rate = round((local_yesterday - local_day_before_yesterday) / local_day_before_yesterday * 100, 2)
-            else:
-                local_rate = 0 if local_yesterday == 0 else 100
-            
-            detection_type_count.append({
-                "engine_name": "本地引擎",
-                "count": local_total,
-                "count_yesterday": local_yesterday,
-                "count_day_before_yesterday": local_day_before_yesterday,
-                "count_yesterday_rate": local_rate
-            })
-        except Exception as local_error:
-            # 如果本地引擎数据查询失败，添加默认数据
-            detection_type_count.append({
-                "engine_name": "本地引擎",
-                "count": 0,
-                "count_yesterday": 0,
-                "count_day_before_yesterday": 0,
-                "count_yesterday_rate": 0
-            })
-        
-        return {
-            "data": detection_type_count,
-            "meta": {
-                "query_time": now.isoformat(),
-                "time_ranges": {
-                    "today_start": today_start.isoformat(),
-                    "yesterday_start": yesterday_start.isoformat(),
-                    "day_before_yesterday_start": day_before_yesterday_start.isoformat()
-                }
-            }
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail="获取数据大屏检测类型数据失败")
 
 # 设备抓图API
 class DeviceSnapshotRequest(BaseModel):

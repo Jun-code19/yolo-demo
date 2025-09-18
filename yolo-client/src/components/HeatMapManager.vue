@@ -305,7 +305,8 @@ const loadMapList = async () => {
 const loadCrowdJobs = async () => {
   try {
     const response = await crowdAnalysisApi.getAnalysisJobs()
-    crowdJobs.value = response.data || []
+    crowdJobs.value = response.data.data || []
+    console.log(crowdJobs.value)
   } catch (error) {
     console.error('加载人群分析任务失败:', error)
     crowdJobs.value = [

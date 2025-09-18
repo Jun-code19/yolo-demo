@@ -33,6 +33,15 @@ app.add_middleware(
 # 包含路由
 app.include_router(router, prefix="/api/v1")
 app.include_router(heatmap_router, prefix="/api/v1")
+# 添加事件订阅相关的API接口
+from api.base_smart_scheme import router as smart_scheme_router
+app.include_router(smart_scheme_router, prefix="/api/v1")
+# 添加数据监听相关的API接口
+from api.base_data_listener import router as data_listener_router
+app.include_router(data_listener_router, prefix="/api/v1")
+# 添加数据大屏相关的API接口
+from api.base_dashboard import router as dashboard_router
+app.include_router(dashboard_router, prefix="/api/v1")
 
 # 主函数
 if __name__ == "__main__":

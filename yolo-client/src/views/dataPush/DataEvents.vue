@@ -977,7 +977,7 @@ const hasOriginalImage = (image) => {
 // 获取图片URL
 const getImageUrl = (imagePath) => {
   // 使用后端提供的图片服务API
-  return `/api/v2/data-listeners/images/${encodeURIComponent(imagePath)}`
+  return `/api/v1/data-listeners/images/${encodeURIComponent(imagePath)}`
 }
 
 // 处理图片加载错误

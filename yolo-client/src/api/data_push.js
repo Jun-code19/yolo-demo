@@ -54,41 +54,48 @@ apiClient.interceptors.response.use(
 export const dataPushApi = {
     // 获取推送配置列表（分页）
     getPushConfigs(params = {}) {
-      return apiClient.get('/push/list', { params });
+      const token = localStorage.getItem('token');
+      return axios.get('/api/v1/data_push/list', {
+        params,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': token ? `Bearer ${token}` : ''
+        }
+      });
     },
     
     // 创建推送配置
     createPushConfig(configData) {
-      return apiClient.post('/push/create', configData);
+      return apiClient.post('/data_push/create', configData);
     },
     
     // 更新推送配置
     updatePushConfig(pushId, configData) {
-      return apiClient.put(`/push/${pushId}`, configData);
+      return apiClient.put(`/data_push/${pushId}`, configData);
     },
     
     // 删除推送配置
     deletePushConfig(pushId) {
-      return apiClient.delete(`/push/${pushId}`);
+      return apiClient.delete(`/data_push/${pushId}`);
     },
     
     // 测试推送配置
     testPushConfig(pushId) {
-      return apiClient.post(`/push/test/${pushId}`);
+      return apiClient.post(`/data_push/test/${pushId}`);
     },
     
     // 获取推送统计信息
     getPushStats() {
-      return apiClient.get('/push/stats');
+      return apiClient.get('/data_push/stats');
     },
 
     // 获取推送概览统计
     getPushOverview() {
-      return apiClient.get('/push/overview');
+      return apiClient.get('/data_push/overview');
     },
     
     // 重新加载推送配置
     reloadPushConfig(pushId) {
-      return apiClient.post(`/push/reload/${pushId}`);
+      return apiClient.post(`/data_push/reload/${pushId}`);
     }
   }; 

@@ -15,7 +15,7 @@ from src.data_pusher import data_pusher
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/push", tags=["数据推送"])
+router = APIRouter(prefix="/data_push", tags=["数据推送"])
 
 # 推送服务运行时状态
 push_configs = {}  # 存储所有活跃的推送配置
