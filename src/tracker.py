@@ -246,6 +246,7 @@ class ObjectTracker:
                 'track_id': track_id,
                 'event_type': event_type,
                 'position': position,
+                'current_count': 1,
                 'timestamp': self.frame_count
             }
             # 这里可以添加回调函数来处理事件

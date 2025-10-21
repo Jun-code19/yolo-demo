@@ -573,7 +573,7 @@ def get_scheme_status(scheme_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=str(e))
 
 # 查询事件列表
-@router.get("/events", response_model=Dict[str, Any], tags=["事件管理"])
+@router.get("/events", response_model=Dict[str, Any], tags=["订阅事件管理"])
 def get_events(
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(10, ge=1, le=100, description="每页数量"),
@@ -669,7 +669,7 @@ def get_events(
         raise HTTPException(status_code=500, detail=str(e))
 
 # 查询事件详情
-@router.get("/events/{event_id}", response_model=SmartEventResponse, tags=["事件管理"])
+@router.get("/events/{event_id}", response_model=SmartEventResponse, tags=["订阅事件管理"])
 def get_event(event_id: str, db: Session = Depends(get_db)):
     """获取事件详情"""
     try:
@@ -716,7 +716,7 @@ def get_event(event_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=str(e))
 
 # 更新事件
-@router.put("/events/{event_id}", response_model=SmartEventResponse, tags=["事件管理"])
+@router.put("/events/{event_id}", response_model=SmartEventResponse, tags=["订阅事件管理"])
 def update_event(
     event_id: str,
     event_update: SmartEventUpdate,
@@ -790,7 +790,7 @@ def update_event(
         raise HTTPException(status_code=500, detail=str(e))
 
 # 删除事件
-@router.delete("/events/{event_id}", tags=["事件管理"])
+@router.delete("/events/{event_id}", tags=["订阅事件管理"])
 def delete_event(
     event_id: str,
     db: Session = Depends(get_db),
@@ -817,7 +817,7 @@ def delete_event(
         raise HTTPException(status_code=500, detail=str(e))
 
 # 批量删除事件
-@router.post("/events/batch-delete", tags=["事件管理"])
+@router.post("/events/batch-delete", tags=["订阅事件管理"])
 def batch_delete_events(
     request_data: Dict[str, List[str]],
     db: Session = Depends(get_db),
@@ -848,7 +848,7 @@ def batch_delete_events(
         raise HTTPException(status_code=500, detail=str(e))
 
 # 批量处理事件
-@router.post("/events/batch-process", tags=["事件管理"])
+@router.post("/events/batch-process", tags=["订阅事件管理"])
 def batch_process_events(
     request_data: Dict[str, List[str]],
     db: Session = Depends(get_db),
@@ -889,7 +889,7 @@ def batch_process_events(
         raise HTTPException(status_code=500, detail=str(e))
 
 # 批量忽略事件
-@router.post("/events/batch-ignore", tags=["事件管理"])
+@router.post("/events/batch-ignore", tags=["订阅事件管理"])
 def batch_ignore_events(
     request_data: Dict[str, List[str]],
     db: Session = Depends(get_db),
@@ -961,7 +961,7 @@ def get_stats_summary(db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=str(e))
 
 # 获取事件统计概览
-@router.get("/stats/overview", tags=["事件管理"])
+@router.get("/stats/overview", tags=["订阅事件管理"])
 def get_events_stats_overview(db: Session = Depends(get_db)):
     """获取事件统计概览"""
     try:

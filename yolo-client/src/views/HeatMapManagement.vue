@@ -267,7 +267,7 @@ const confirmDisplayConfig = async () => {
       
       // 可选择返回Dashboard
       setTimeout(() => {
-        router.push('/dashboard')
+        router.push('/dashboard1')
       }, 1000)
     } else {
       throw new Error(response.data?.message || '保存配置失败')

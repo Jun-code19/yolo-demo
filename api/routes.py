@@ -77,7 +77,7 @@ class DeviceUpdate(BaseModel):
     area_coordinates:Optional[Coordinates] = None
 
 # 设备管理API
-@router.post("/devices/", response_model=DeviceResponse)
+@router.post("/devices/", response_model=DeviceResponse, tags=["设备管理"])
 def create_device(device: DeviceCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     # 处理IP地址，将IPv4Address转换为字符串
     device_data = device.dict()
@@ -161,14 +161,14 @@ def get_devices(
         }
     }
 
-@router.get("/devices/{device_id}", response_model=DeviceResponse)
+@router.get("/devices/{device_id}", response_model=DeviceResponse, tags=["设备管理"])
 def get_device(device_id: str, db: Session = Depends(get_db)):
     device = db.query(Device).filter(Device.device_id == device_id).first()
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
     return device
 
-@router.get("/alldevices/status")
+@router.get("/alldevices/status", tags=["设备管理"])
 def update_device_status(db: Session = Depends(get_db)):
     devices = db.query(Device).all()
     for device in devices:
@@ -208,7 +208,7 @@ def update_device_status(db: Session = Depends(get_db)):
     db.commit()
     return {"message": "Status updated successfully"}
 
-@router.put("/devices/{device_id}", response_model=DeviceResponse)
+@router.put("/devices/{device_id}", response_model=DeviceResponse, tags=["设备管理"])
 def update_device(device_id: str, device: DeviceUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     db_device = db.query(Device).filter(Device.device_id == device_id).first()
     if not db_device:
@@ -231,7 +231,7 @@ def update_device(device_id: str, device: DeviceUpdate, db: Session = Depends(ge
         db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
 
-@router.delete("/devices/{device_id}")
+@router.delete("/devices/{device_id}", tags=["设备管理"])
 def delete_device(device_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     device = db.query(Device).filter(Device.device_id == device_id).first()
     if not device:
@@ -345,7 +345,7 @@ class PasswordUpdate(BaseModel):
     new_password: str
 
 # 用户管理API
-@router.get("/users/", response_model=dict)
+@router.get("/users/", response_model=dict, tags=["用户管理"])
 def get_users(
     skip: int = 0, 
     limit: int = 100, 
@@ -391,7 +391,7 @@ def get_users(
         }
     }
 
-@router.post("/users/", response_model=dict)
+@router.post("/users/", response_model=dict, tags=["用户管理"])
 def create_user(user: UserCreate, db: Session = Depends(get_db), current_user: User = Depends(check_admin_permission)):
     # 检查用户ID是否已存在
     existing_user = db.query(User).filter(User.user_id == user.user_id).first()
@@ -428,7 +428,7 @@ def create_user(user: UserCreate, db: Session = Depends(get_db), current_user: U
         db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
 
-@router.put("/users/profile", response_model=dict)
+@router.put("/users/profile", response_model=dict, tags=["用户管理"])
 def update_user_profile(user_data: UserUpdate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """更新当前用户的个人信息"""
     try:
@@ -453,7 +453,7 @@ def update_user_profile(user_data: UserUpdate, current_user: User = Depends(get_
         db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
 
-@router.put("/users/password", response_model=dict)
+@router.put("/users/password", response_model=dict, tags=["用户管理"])
 def update_user_password(password_data: PasswordUpdate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """更新用户密码"""
     # 验证是当前用户或管理员在操作
@@ -484,7 +484,7 @@ def update_user_password(password_data: PasswordUpdate, current_user: User = Dep
         db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
 
-@router.delete("/users/{user_id}")
+@router.delete("/users/{user_id}", tags=["用户管理"])
 def delete_user(user_id: str, db: Session = Depends(get_db), current_user: User = Depends(check_admin_permission)):
     """删除用户"""
     # 不能删除自己
@@ -512,7 +512,7 @@ def delete_user(user_id: str, db: Session = Depends(get_db), current_user: User 
         raise HTTPException(status_code=400, detail=str(e))
 
 # 系统日志API
-@router.get("/syslogs/")
+@router.get("/syslogs/", tags=["系统管理"])
 def get_syslogs(
     skip: int = 0,
     limit: int = 100,
@@ -543,7 +543,7 @@ class Token(BaseModel):
     access_token: str
     token_type: str
 
-@router.post("/token", response_model=Token)
+@router.post("/token", response_model=Token, tags=["用户登录"])
 async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
        
     # 首先尝试使用标准认证
@@ -576,7 +576,7 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
     
     return {"access_token": access_token, "token_type": "bearer"}
 
-@router.get("/me", response_model=dict)
+@router.get("/me", response_model=dict, tags=["用户登录"])
 async def read_users_me(current_user: User = Depends(get_current_user)):
     """获取当前登录用户信息"""
     return {
@@ -586,18 +586,18 @@ async def read_users_me(current_user: User = Depends(get_current_user)):
         "allowed_devices": current_user.allowed_devices
     }
 
-@router.get("/token/validate")
+@router.get("/token/validate", tags=["用户登录"])
 async def validate_token(current_user: User = Depends(get_current_user)):
     """验证token是否有效"""
     return {"status": "success", "message": "Token is valid"}
 
-@router.get("/system/init-check")
+@router.get("/system/init-check", tags=["用户登录"])
 def check_system_initialization(db: Session = Depends(get_db)):
     """检查系统是否已初始化（是否存在用户）"""
     users_count = db.query(User).count()
     return {"initialized": users_count > 0}
 
-@router.post("/system/init")
+@router.post("/system/init", tags=["用户登录"])
 def initialize_system(admin_data: UserCreate, db: Session = Depends(get_db)):
     """初始化系统，创建管理员账户（仅当系统中没有用户时可用）"""
     users_count = db.query(User).count()
@@ -662,13 +662,13 @@ class ModelResponse(ModelBase):
         from_attributes = True
 
 # 模型管理API
-@router.get("/models/", response_model=List[ModelResponse])
+@router.get("/models/", response_model=List[ModelResponse], tags=["检测模型"])
 def get_models(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
     """获取所有检测模型列表"""
     models = db.query(DetectionModel).order_by(DetectionModel.upload_time.desc()).offset(skip).limit(limit).all()
     return models
 
-@router.get("/models/{models_id}", response_model=ModelResponse)
+@router.get("/models/{models_id}", response_model=ModelResponse, tags=["检测模型"])
 def get_model(models_id: str, db: Session = Depends(get_db)):
     """获取特定模型详情"""
     model = db.query(DetectionModel).filter(DetectionModel.models_id == models_id).first()
@@ -676,7 +676,7 @@ def get_model(models_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Model not found")
     return model
 
-@router.post("/models/", response_model=ModelResponse)
+@router.post("/models/", response_model=ModelResponse, tags=["检测模型"])
 async def upload_model(
     models_file: UploadFile = File(...),
     models_name: str = Form(...),
@@ -778,7 +778,7 @@ async def upload_model(
     
     return db_model
 
-@router.delete("/models/{models_id}")
+@router.delete("/models/{models_id}", tags=["检测模型"])
 def delete_model(models_id: str, db: Session = Depends(get_db),
                 current_user: User = Depends(get_current_user)):
     """删除模型"""
@@ -856,7 +856,7 @@ def delete_model(models_id: str, db: Session = Depends(get_db),
         db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
 
-@router.put("/models/{models_id}", response_model=ModelResponse)
+@router.put("/models/{models_id}", response_model=ModelResponse, tags=["检测模型"])
 def update_model(
     models_id: str, 
     model_update: ModelUpdate, 
@@ -888,7 +888,7 @@ def update_model(
         db.rollback()
         raise HTTPException(status_code=500, detail=f"更新模型失败: {str(e)}")
 
-@router.put("/models/{models_id}/toggle")
+@router.put("/models/{models_id}/toggle", tags=["检测模型"])
 def toggle_models_active(models_id: str, active: bool, db: Session = Depends(get_db),
                        current_user: User = Depends(get_current_user)):
     """切换模型激活状态"""
@@ -1281,7 +1281,7 @@ async def update_detection_config(
     
     return config_dict
 
-@router.put("/detection/configs/{config_id}/toggle")
+@router.put("/detection/configs/{config_id}/toggle", tags=["检测配置"])
 def toggle_detection_active(config_id: str, enabled: bool, db: Session = Depends(get_db),
                        current_user: User = Depends(get_current_user)):
     """切换检测配置启用状态"""
@@ -1500,7 +1500,7 @@ async def get_detection_event(
     
     return event_dict
 
-@router.get("/detection/events/{event_id}/thumbnail")
+@router.get("/detection/events/{event_id}/thumbnail", tags=["检测事件"])
 async def get_thumbnail(event_id: str, db: Session = Depends(get_db)):
     """获取缩略图数据"""
     event = db.query(DetectionEvent).filter(DetectionEvent.event_id == event_id).first() 
@@ -1929,7 +1929,7 @@ async def get_detection_events_overview(db: Session = Depends(get_db)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取检测事件统计失败: {str(e)}")
 
-@router.get("/files/{file_path:path}")
+@router.get("/files/{file_path:path}", tags=["检测事件"])
 async def get_file(file_path: str):
     # 构建完整的文件路径
     full_path = os.path.join(file_path)
@@ -1942,7 +1942,7 @@ async def get_file(file_path: str):
     return FileResponse(full_path)
 
 # 添加清除系统日志的API
-@router.delete("/system/logs/clear")
+@router.delete("/system/logs/clear", tags=["系统管理"])
 def clear_system_logs(
     days: int = Query(30, description="清除多少天前的日志"),
     db: Session = Depends(get_db),
@@ -1966,7 +1966,7 @@ def clear_system_logs(
         raise HTTPException(status_code=500, detail=str(e))
 
 # 添加导出系统日志的API
-@router.get("/system/logs/export")
+@router.get("/system/logs/export", tags=["系统管理"])
 def export_system_logs(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
@@ -2011,7 +2011,7 @@ def export_system_logs(
         raise HTTPException(status_code=500, detail=str(e))
 
 # 添加检测日志API
-@router.get("/detection/logs/")
+@router.get("/detection/logs/", tags=["系统管理"])
 def get_detection_logs(
     skip: int = 0,
     limit: int = 100,
@@ -2097,7 +2097,7 @@ def get_detection_logs(
     }
 
 # 设备数据导出模板
-@router.get("/devices/export/template")
+@router.get("/devices/export/template", tags=["设备管理"])
 def export_device_template(current_user: User = Depends(get_current_user)):
     """导出设备数据模板"""
     # 创建数据框架
@@ -2202,7 +2202,7 @@ def export_device_template(current_user: User = Depends(get_current_user)):
     )
 
 # 设备数据导出
-@router.get("/devices/export/data")
+@router.get("/devices/export/data", tags=["设备管理"])
 def export_devices(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """导出所有设备数据"""
     # 从数据库获取所有设备
@@ -2262,7 +2262,7 @@ def export_devices(db: Session = Depends(get_db), current_user: User = Depends(g
     )
 
 # 设备数据导入
-@router.post("/devices/import")
+@router.post("/devices/import", tags=["设备管理"])
 async def import_devices(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
@@ -2371,7 +2371,7 @@ async def import_devices(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"处理导入文件时出错: {str(e)}")
 
-@router.get("/detection/logs/export")
+@router.get("/detection/logs/export", tags=["系统管理"])
 def export_detection_logs(
     skip: int = 0,
     limit: int = 1000,
@@ -2487,7 +2487,7 @@ def export_detection_logs(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"导出日志失败: {str(e)}")
 
-@router.delete("/detection/logs/clear")
+@router.delete("/detection/logs/clear", tags=["系统管理"])
 def clear_detection_logs(
     days: int = Query(30, description="清除多少天前的日志"),
     db: Session = Depends(get_db),
@@ -2510,7 +2510,7 @@ def clear_detection_logs(
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/data_push/list")
+@router.get("/data_push/list", tags=["数据推送"])
 async def list_push_configs(
     config_id: str = None, 
     tag: str = None,
@@ -2575,7 +2575,7 @@ async def list_push_configs(
         raise HTTPException(status_code=500, detail=f"获取推送配置列表失败: {str(e)}")
 
 # 系统状态监控API
-@router.get("/system/status")
+@router.get("/system/status", tags=["系统管理"])
 def get_system_status(db: Session = Depends(get_db)):
     """获取系统状态信息（CPU、内存、磁盘、GPU等）"""
     try:
@@ -2672,7 +2672,7 @@ def get_system_status(db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"获取系统状态失败: {str(e)}")
 
 # 首页仪表盘API
-@router.get("/dashboard/comprehensive-overview")
+@router.get("/dashboard/comprehensive-overview", tags=["首页仪表盘"] )
 def get_comprehensive_dashboard_overview(db: Session = Depends(get_db)):
     """获取完整的首页数据概览，包含所有模块的统计数据"""
     try:
@@ -2818,44 +2818,64 @@ def get_comprehensive_dashboard_overview(db: Session = Depends(get_db)):
         # today_detection_logs = db.query(DetectionLog).filter(DetectionLog.created_at >= today).count()
         
         # 13. 近7天的数据趋势
-        seven_days_ago = today - timedelta(days=7)
-        daily_trends = []
-        
-        for i in range(7):
-            day_start = seven_days_ago + timedelta(days=i)
-            day_end = day_start + timedelta(days=1)
-            
-            # 检测事件数
-            detection_count = db.query(DetectionEvent).filter(
-                DetectionEvent.created_at >= day_start,
-                DetectionEvent.created_at < day_end
-            ).count()
-            
-            # 外部事件数
-            external_count = db.query(ExternalEvent).filter(
-                ExternalEvent.timestamp >= day_start,
-                ExternalEvent.timestamp < day_end
-            ).count()
+        # 获取最近5天的每天的数据条数
+        external_event_history = db.query(
+            func.date(ExternalEvent.timestamp).label('date'), 
+            func.count(ExternalEvent.event_id).label('count')
+        ).filter(
+            ExternalEvent.timestamp >= datetime.now() - timedelta(days=5)
+        ).group_by(
+            func.date(ExternalEvent.timestamp)
+        ).all()
 
-            #订阅事件数
-            scheme_count = db.query(SmartEvent).filter(
-                SmartEvent.created_at >= day_start,
-                SmartEvent.created_at < day_end
-            ).count()
-            
-            # 系统日志数
-            # system_log_count = db.query(SysLog).filter(
-            #     SysLog.log_time >= day_start,
-            #     SysLog.log_time < day_end
-            # ).count()
-            
-            daily_trends.append({
-                "date": day_start.strftime("%Y-%m-%d"),
-                "detection_events": detection_count,
-                "external_events": external_count,
-                "scheme_events":scheme_count
-                # "system_logs": system_log_count
-            })
+        detection_event_history = db.query(
+            func.date(DetectionEvent.created_at).label('date'), 
+            func.count(DetectionEvent.event_id).label('count')
+        ).filter(
+            DetectionEvent.created_at >= datetime.now() - timedelta(days=5)
+        ).group_by(
+            func.date(DetectionEvent.created_at)
+        ).all()
+
+        smart_event_history = db.query(
+            func.date(SmartEvent.timestamp).label('date'), 
+            func.count(SmartEvent.id).label('count')
+        ).filter(
+            SmartEvent.timestamp >= datetime.now() - timedelta(days=5)
+        ).group_by(
+            func.date(SmartEvent.timestamp)
+        ).all()
+
+        # 创建一个字典来存储所有数据，以日期为键
+        result_dict = {}
+        # 生成过去5天的所有日期，并初始化为0
+        today = datetime.now().date()
+        for i in range(7, -1, -1): # 包括今天和过去5天，共6天
+            date = today - timedelta(days=i)
+            result_dict[date] = {
+                "date": date.strftime("%Y-%m-%d"),
+                "external_events": 0,
+                "detection_events": 0,
+                "scheme_events": 0
+            }
+
+        # 处理外部事件数据
+        for date, count in external_event_history:
+            if date in result_dict: # 确保日期存在于初始化后的字典中
+                result_dict[date]["external_events"] = count
+
+        # 处理检测事件数据
+        for date, count in detection_event_history:
+            if date in result_dict:
+                result_dict[date]["detection_events"] = count
+
+        # 处理智能事件数据
+        for date, count in smart_event_history:
+            if date in result_dict:
+                result_dict[date]["scheme_events"] = count
+
+        # 转换为列表并按日期排序
+        daily_trends = sorted(result_dict.values(), key=lambda x: x["date"])       
         
         # 14. 最近活动（合并检测事件和外部事件）
         recent_detection_events = db.query(DetectionEvent).order_by(
@@ -3082,7 +3102,7 @@ class EdgeServerStatusUpdate(BaseModel):
     device_info: Optional[Dict[str, Any]] = Field(None, description="设备信息") 
 
 
-@router.post("/edge-servers", response_model=EdgeServerResponse, summary="创建边缘服务器")
+@router.post("/edge-servers", response_model=EdgeServerResponse, tags=["边缘服务"], summary="创建边缘服务器")
 async def create_edge_server(
     server_data: EdgeServerCreate,
     db: Session = Depends(get_db),
@@ -3121,7 +3141,7 @@ async def create_edge_server(
         db.rollback()
         raise
 
-@router.get("/edge-servers", response_model=EdgeServerListResponse, summary="获取边缘服务器列表")
+@router.get("/edge-servers", response_model=EdgeServerListResponse, tags=["边缘服务"], summary="获取边缘服务器列表")
 async def get_edge_servers(
     skip: int = Query(0, ge=0, description="跳过的记录数"),
     limit: int = Query(100, ge=1, le=1000, description="返回的记录数"),
@@ -3146,7 +3166,7 @@ async def get_edge_servers(
         # logger.error(f"获取边缘服务器列表失败: {str(e)}")
         raise HTTPException(status_code=500, detail="获取边缘服务器列表失败")
 
-@router.get("/edge-servers/{server_id}", response_model=EdgeServerResponse, summary="获取边缘服务器详情")
+@router.get("/edge-servers/{server_id}", response_model=EdgeServerResponse, tags=["边缘服务"], summary="获取边缘服务器详情")
 async def get_edge_server(
     server_id: int,
     db: Session = Depends(get_db)
@@ -3157,7 +3177,7 @@ async def get_edge_server(
         raise HTTPException(status_code=404, detail="边缘服务器不存在")
     return server
 
-@router.put("/edge-servers/{server_id}", response_model=EdgeServerResponse, summary="更新边缘服务器")
+@router.put("/edge-servers/{server_id}", response_model=EdgeServerResponse, tags=["边缘服务"], summary="更新边缘服务器")
 async def update_edge_server(
     server_id: int,
     server_data: EdgeServerUpdate,
@@ -3202,7 +3222,7 @@ async def update_edge_server(
         db.rollback()
         raise
 
-@router.patch("/edge-servers/{server_id}/status", response_model=EdgeServerResponse, summary="更新边缘服务器状态")
+@router.patch("/edge-servers/{server_id}/status", response_model=EdgeServerResponse, tags=["边缘服务"], summary="更新边缘服务器状态")
 async def update_edge_server_status(
     server_id: int,
     status_data: EdgeServerStatusUpdate,
@@ -3236,7 +3256,7 @@ async def update_edge_server_status(
         db.rollback()
         raise
 
-@router.delete("/edge-servers/{server_id}", summary="删除边缘服务器")
+@router.delete("/edge-servers/{server_id}", tags=["边缘服务"], summary="删除边缘服务器")
 async def delete_edge_server(
     server_id: int,
     db: Session = Depends(get_db),
@@ -3258,7 +3278,7 @@ async def delete_edge_server(
         db.rollback()
         raise
 
-@router.get("/edge-servers/online/list", response_model=List[EdgeServerResponse], summary="获取在线边缘服务器")
+@router.get("/edge-servers/online/list", response_model=List[EdgeServerResponse], tags=["边缘服务"], summary="获取在线边缘服务器")
 async def get_online_edge_servers(db: Session = Depends(get_db)):
     """获取所有在线的边缘服务器"""
     try:
@@ -3272,7 +3292,7 @@ async def get_online_edge_servers(db: Session = Depends(get_db)):
         # logger.error(f"获取在线边缘服务器失败: {str(e)}")
         raise HTTPException(status_code=500, detail="获取在线边缘服务器失败")
 
-@router.get("/edge-servers/status/{status}", response_model=List[EdgeServerResponse], summary="根据状态获取边缘服务器")
+@router.get("/edge-servers/status/{status}", response_model=List[EdgeServerResponse], tags=["边缘服务"], summary="根据状态获取边缘服务器")
 async def get_edge_servers_by_status(
     status: str,
     db: Session = Depends(get_db)
@@ -3293,7 +3313,7 @@ class DeviceSnapshotRequest(BaseModel):
     username: str
     password: str
 
-@router.post("/devices/snapshot", tags=["设备管理"])
+@router.post("/devices/snapshot", tags=["设备管理"], summary="获取设备抓图")
 async def get_device_snapshot(
     request: DeviceSnapshotRequest
 ):

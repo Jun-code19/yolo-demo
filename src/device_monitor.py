@@ -18,6 +18,9 @@ from src.data_pusher import data_pusher
 
 logger = logging.getLogger(__name__)
 
+OFFLINE_THRESHOLD = 3 # 连续离线超过3次才标记为离线
+PER_DEVICE_CHECK_DELAY_SECONDS = 0.2 # 每个设备检查之间的延迟，单位秒
+
 class DeviceMonitor:
     """设备状态监控器"""
     
@@ -94,16 +97,38 @@ class DeviceMonitor:
             for device in devices:
                 try:
                     # 检查设备连接状态
-                    is_online = await self._check_device_connection(device)
+                    is_online = False
+                    for _ in range(3):  # 最多重试3次（1次初始尝试 + 2次重试）
+                        is_online = await self._check_device_connection(device)
+                        if is_online:
+                            break
+                        await asyncio.sleep(1)  # 等待1秒后重试
                     
                     # 更新设备状态
-                    device.status = is_online
+                    # 如果设备在线，重置离线计数
                     if is_online:
-                        # 在线时更新心跳时间
-                        device.last_heartbeat = datetime.now()
+                        device.offline_count = 0
+                        device.last_online_time = datetime.now()
+                        device.status = True # 确保在线时状态为True
+                    else:
+                        if device.offline_count is None:
+                            device.offline_count = 0
+                        device.offline_count += 1
+                        # 只有当连续离线次数超过阈值，并且当前状态是在线时，才将设备状态标记为离线
+                        if device.offline_count >= OFFLINE_THRESHOLD and device.status:
+                            device.status = False
                     
+                    # 在线时更新心跳时间
+                    if is_online:
+                        device.last_heartbeat = datetime.now()
+                    # print(f"当前设备：{device.device_name}，设备状态：{device.status}，当前时间：{datetime.now()}")
                 except Exception as e:
                     device.status = False
+                    if device.offline_count is None:
+                        device.offline_count = 0
+                    device.offline_count += 1 # 异常也计为一次离线
+                
+                await asyncio.sleep(PER_DEVICE_CHECK_DELAY_SECONDS) # 每个设备检查后的延迟
             
             # 批量提交数据库更新
             db.commit()
@@ -143,14 +168,14 @@ class DeviceMonitor:
             
     async def _check_device_connection(self, device: Device) -> bool:
         """检查单个设备的连接状态"""
-        try:
+        try:  
             # 方法1: HTTP连接测试（适用于支持HTTP API的设备）
             if await self._test_http_connection(device):
                 return True
-                
+
             # 方法2: ICMP Ping测试
             if await self._test_ping_connection(device):
-                return True
+                return True    
                 
             return False
             
@@ -162,7 +187,7 @@ class DeviceMonitor:
         try:
             import aiohttp
             
-            # 尝试多种常见的API端点
+            # 大华官方的tcp测试的API端点
             test_urls = [
                 f"http://{device.ip_address}/cgi-bin/api/tcpConnect/tcpTest"
             ]

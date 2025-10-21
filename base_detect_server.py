@@ -1172,21 +1172,21 @@ app.add_middleware(
 )
 
 # 启动检测任务API
-@app.post("/api/v2/detection/{config_id}/start")
+@app.post("/api/v2/detection/{config_id}/start", tags=["检测任务"])
 async def start_detection_api(config_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """启动检测任务API"""
     log_action(db, current_user.user_id, 'start_detection', config_id, f"启动检测任务: {config_id}")
     return await detection_server.start_detection(config_id, db, current_user.user_id)
 
 # 停止检测任务API
-@app.post("/api/v2/detection/{config_id}/stop")
+@app.post("/api/v2/detection/{config_id}/stop", tags=["检测任务"])
 async def stop_detection_api(config_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """停止检测任务API"""
     log_action(db, current_user.user_id, 'stop_detection', config_id, f"停止检测任务: {config_id}")
     return await detection_server.stop_detection(config_id, db, remove_scheduled_jobs=True, user_id=current_user.user_id)
 
 # 获取所有检测任务的状态API
-@app.get("/api/v2/detection/status")
+@app.get("/api/v2/detection/status", tags=["检测任务"])
 async def get_detection_status():
     """获取所有检测任务的状态"""
     tasks_status = {}
@@ -1205,7 +1205,7 @@ async def get_detection_status():
     }
 
 # 手动清理过期事件API
-@app.post("/api/v2/detection/cleanup-expired-events")
+@app.post("/api/v2/detection/cleanup-expired-events", tags=["清理事件"])
 async def cleanup_expired_events_api(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """手动清理过期检测事件和外部事件"""
     try:
@@ -1226,7 +1226,7 @@ async def cleanup_expired_events_api(db: Session = Depends(get_db), current_user
         }
 
 # 手动清理外部事件API
-@app.post("/api/v2/detection/cleanup-external-events")
+@app.post("/api/v2/detection/cleanup-external-events", tags=["清理事件"])
 async def cleanup_external_events_api(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """手动清理外部数据事件"""
     try:
@@ -1247,7 +1247,7 @@ async def cleanup_external_events_api(db: Session = Depends(get_db), current_use
         }
 
 # 获取清理任务状态API
-@app.get("/api/v2/detection/cleanup-status")
+@app.get("/api/v2/detection/cleanup-status", tags=["清理事件"])
 async def get_cleanup_status_api(current_user: User = Depends(get_current_user)):
     """获取清理任务状态"""
     try:
@@ -1318,7 +1318,7 @@ async def get_cleanup_status_api(current_user: User = Depends(get_current_user))
         }
 
 # 获取系统资源状态API
-@app.get("/api/v2/detection/system-status")
+@app.get("/api/v2/detection/system-status", tags=["清理事件"])
 async def get_system_status_api(current_user: User = Depends(get_current_user)):
     """获取系统资源状态"""
     try:
@@ -1360,7 +1360,7 @@ async def get_system_status_api(current_user: User = Depends(get_current_user)):
         }
 
 # 加载模型API端点
-@app.post("/api/v2/model/load")
+@app.post("/api/v2/model/load", tags=["检测任务"])
 async def load_model_api(model_data: dict): # 加载模型API端点
     """加载模型API端点"""
     try:

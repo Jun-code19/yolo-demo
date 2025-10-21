@@ -57,6 +57,8 @@ class Device(Base):
     password = Column(String(256), nullable=False)
     channel = Column(Integer, default=1)  # 通道号，默认为1
     stream_type = Column(String(10), default="main")  # 码流类型，main或sub
+    offline_count = Column(Integer, default=0) # 记录设备连续离线的次数
+    last_online_time = Column(DateTime, default=datetime.now) # 记录设备最后一次在线的时间
     status = Column(Boolean, default=True)
     last_heartbeat = Column(DateTime)
     location = Column(String(255))
@@ -264,11 +266,11 @@ CrowdAnalysisJob.results = relationship("CrowdAnalysisResult", back_populates="j
 # dev_mode = os.getenv("DEV_MODE", "false").lower() == "true"
 # if dev_mode:
 #     # 开发环境使用localhost
-# DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:admin123@10.83.34.35:5432/eyris_core_db")
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:admin123@10.83.34.35:5432/eyris_core_db")
 # DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:admin123@10.55.4.26:5432/yolo")
 # else:
     # 生产环境使用Docker容器名
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:admin123@postgres:5432/yolo")
+# DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:admin123@postgres:5432/yolo")
 
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

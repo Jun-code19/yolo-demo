@@ -469,7 +469,7 @@ class SmartSchemer:
                         info = cast(pBuf, POINTER(NET_VIDEOSTAT_SUMMARY)).contents
                         
                         # 检查报警间隔时间
-                        if info.nInsidePeopleNum > 0 and device_conn.alarm_interval > 0:
+                        if info.szRuleName != b'NumberStat' and device_conn.alarm_interval > 0:
                             # 检查间隔时间
                             if device_conn.last_alarm_time is None:
                                 # 第一次报警，允许通过，并记录当前时间
@@ -479,8 +479,8 @@ class SmartSchemer:
                                 if time_diff.total_seconds() < device_conn.alarm_interval:
                                     return
                                 else:
-                                    device_conn.last_alarm_time = datetime.now()                                      
-                        
+                                    device_conn.last_alarm_time = datetime.now()                                                                                    
+                       
                         event_data={
                                 'cameraInfo': device_conn.device_name + ":" + device_conn.ip_address,
                                 'deviceId': device_conn.device_id,
@@ -489,7 +489,7 @@ class SmartSchemer:
                                 'stayingCount': info.nInsidePeopleNum,
                                 'passedCount': info.stuPassedSubtotal.nToday,
                                 'recordTime': datetime.now().isoformat() + '+08:00', #System.DateTimeOffset格式，明确指定北京时间时区
-                                'event_description': f'区域内人数={info.nInsidePeopleNum}, 今日进入={info.stuEnteredSubtotal.nToday}, 今日离开={info.stuExitedSubtotal.nToday}, 今日通过={info.stuPassedSubtotal.nToday}'
+                                'event_description': f'事件类型={info.szRuleName}, 区域内人数={info.nInsidePeopleNum}, 今日进入={info.stuEnteredSubtotal.nToday}, 今日离开={info.stuExitedSubtotal.nToday}, 今日通过={info.stuPassedSubtotal.nToday}'
                             }
 
                         # 调用现有的数据推送功能
@@ -506,7 +506,7 @@ class SmartSchemer:
                         self._create_smart_event(
                             scheme_id=scheme_id,
                             event_type='smart',
-                            title=f'客流统计(区域人数)' if info.nInsidePeopleNum > 0 else f'客流统计(人流统计)',
+                            title=f'客流统计(区域人数)' if info.szRuleName == b'ManNumDetection' else f'客流统计(人流统计)' if info.szRuleName == b'NumberStat' else "未知",
                             description=f'区域内人数={info.nInsidePeopleNum}, 今日进入={info.stuEnteredSubtotal.nToday}, 今日离开={info.stuExitedSubtotal.nToday}',
                             priority='normal',
                             event_data=event_data

@@ -300,6 +300,9 @@ class RTSPManager:
         stream_notified = False
         retry_count = 0
         max_retry = 50  # 最多等待5秒
+                
+        # 快照保存参数
+        snapshot_saved = False  # 标记是否已保存快照
         
         try:
             # 等待RTSP连接成功或失败
@@ -382,6 +385,21 @@ class RTSPManager:
                             current_width = processed_img.shape[1]
                             current_height = processed_img.shape[0]
                             
+                            # 保存设备快照（仅在首次获取帧时保存）
+                            if not snapshot_saved and connection_id in self.stream_urls:
+                                try:
+                                    stream_url = self.stream_urls[connection_id]
+                                    ip_address, channel = extract_ip_and_channel_from_rtsp_url(stream_url)
+                                    
+                                    # 保存原始大小的图片作为快照
+                                    save_success = save_device_snapshot(img, ip_address, channel)
+                                    if save_success:
+                                        snapshot_saved = True
+                                    else:
+                                        logger.warning(f"保存设备 {ip_address} 通道 {channel} 的快照失败")
+                                except Exception as e:
+                                    logger.error(f"保存设备快照时出错: {e}")
+                                                       
                             # 发送数据到WebSocket
                             websocket = active_connections.get(connection_id)
                             if websocket:

@@ -285,6 +285,13 @@
                     <li class="toc-sub-item"><a href="#system-issues" class="toc-sub-link">11.6 系统问题</a></li>
                 </ul>
             </li>
+            <li class="toc-item">
+                <a href="#appendix" class="toc-link">12. 附录</a>
+                <ul class="toc-sub-list">
+                    <li class="toc-sub-item"><a href="#glossary" class="toc-sub-link">12.1 词汇表</a></li>
+                    <li class="toc-sub-item"><a href="#document-info" class="toc-sub-link">12.2 文档信息</a></li>
+                </ul>
+            </li>
         </ul>
     </div>
 
@@ -332,6 +339,12 @@
                 <li><strong>存储节点：</strong>用于视频数据存储和回放</li>
             </ul>
         </div>
+        <div class="note">
+            <strong>ONVIF协议说明：</strong>
+            <ul>
+                <li>ONVIF（开放网络视频接口论坛）协议允许不同厂商的网络视频产品进行互操作。通过ONVIF协议，系统可以更方便地发现、连接和管理兼容的设备，简化设备集成过程。</li>
+            </ul>
+        </div>
 
         <div id="add-device">
             <h3>2.1 添加设备</h3>
@@ -351,6 +364,12 @@
                     <li><strong>用户名/密码：</strong>设备访问凭据</li>
                 </ul>
             </div>
+            <div class="note">
+                <strong>设备IP/端口查找提示：</strong>
+                <ul>
+                    <li>当您不清楚设备的IP地址和端口时，可以查阅设备说明书、使用设备厂商提供的管理工具，或在局域网内使用专业的IP扫描工具进行查找。确保设备与系统在同一网络环境下。</li>
+                </ul>
+            </div>
             <div class="screenshot">
                 <img src="./images/help/device-form.png" alt="设备信息表单">
                 <div class="screenshot-caption">图2.2 设备信息表单</div>
@@ -360,6 +379,13 @@
                     <li><strong>通道号：</strong>指定要接入的摄像头通道</li>
                     <li><strong>码流类型：</strong>主码流或子码流</li>
                     <li><strong>录像计划：</strong>设置录像时间段</li>
+                </ul>
+            </div>
+            <div class="note">
+                <strong>码流类型说明：</strong>
+                <ul>
+                    <li><strong>主码流：</strong>分辨率高、画质清晰，适用于视频存储、回放及需要高清画质的场景。但会占用更多带宽和存储空间。</li>
+                    <li><strong>子码流：</strong>分辨率较低、画质一般，适用于实时预览、远程监控及对带宽要求较低的场景。可以节省带宽和存储资源。</li>
                 </ul>
             </div>
             <div class="step">点击"测试连接"按钮验证设备连接状态</div>
@@ -473,6 +499,19 @@
                     <li>保存模式：选择检测结果的保存方式</li>
                 </ul>
             </div>
+            <div class="note">
+                <strong>检测参数影响说明：</strong>
+                <ul>
+                    <li><strong>灵敏度：</strong>影响目标检测的敏感程度。灵敏度越高，越容易检测到微小或不清晰的目标，但也可能增加误报。建议根据实际场景和需求进行调整。</li>
+                    <li><strong>置信度阈值：</strong>表示检测结果的可信度。只有当检测目标的置信度高于此阈值时，才会被认为是有效目标。提高阈值可以减少误报，但可能漏报一些真实目标。</li>
+                </ul>
+            </div>
+            <div class="note">
+                <strong>目标类别示例：</strong>
+                <ul>
+                    <li>系统支持检测多种预设目标类别，例如：**人、车辆、自行车、宠物**等。部分模型还支持更细致的分类，如不同类型的车辆。用户也可以根据实际应用场景，通过自定义模型来扩展或定制需要检测的目标类别。</li>
+                </ul>
+            </div>
             <div class="step">点击"保存"按钮完成配置</div>
         </div>
 
@@ -510,7 +549,12 @@
                 </ul>
             </div>
             <div class="step">点击"确认"按钮上传模型</div>
-        </div>
+            <div class="note">
+                <strong>模型类型说明：</strong>
+                <ul>
+                    <li>系统目前主要支持YOLO系列模型（如YOLOv5, YOLOv8等），以及ONNX、PyTorch（.pt, .pth）和Darknet（.weights）等常见格式的模型。YOLO系列模型以其在速度和精度上的良好平衡而闻名，适用于实时目标检测场景。选择合适的模型类型能够优化检测性能。</li>
+                </ul>
+            </div>
 
         <div id="model-list">
             <h3>4.2 模型列表</h3>
@@ -541,6 +585,14 @@
                     <li>推理参数</li>
                 </ul>
             </div>
+            <div class="note">
+                <strong>模型参数配置说明：</strong>
+                <ul>
+                    <li><strong>检测阈值 (Confidence Threshold)：</strong>与检测置信度阈值类似，用于过滤低置信度的检测结果。值越高，误报越少，但可能漏报。</li>
+                    <li><strong>NMS阈值 (Non-Maximum Suppression Threshold)：</strong>用于消除重复的检测框。当多个检测框重叠程度超过NMS阈值时，系统会保留置信度最高的那个，并移除其他重叠框。合理的NMS阈值可以有效减少冗余检测。</li>
+                    <li><strong>推理参数：</strong>包括模型推理的批量大小（Batch Size）、输入图像尺寸（Input Size）等。调整这些参数可以影响模型的推理速度和显存占用。</li>
+                </ul>
+            </div>
             <div class="step">点击"保存"按钮完成配置</div>
         </div>
     </div>
@@ -559,6 +611,13 @@
         <div class="step">设置分析参数，包括检测类别、时间间隔等</div>
             <div class="step">点击"确认"按钮创建任务</div>
         </div>
+        <div class="note">
+            <strong>分析参数详情：</strong>
+            <ul>
+                <li><strong>检测类别：</strong>选择需要进行人群分析的目标类型（如"人"）。系统将只对选定类别的目标进行计数和分析。</li>
+                <li><strong>时间间隔：</strong>设置数据统计和分析的时间粒度（如5秒、1分钟）。更短的时间间隔可以提供更实时的趋势数据，但可能增加系统负担；更长的时间间隔则提供更宏观的趋势。</li>
+            </ul>
+        </div>
 
         <div id="view-results">
             <h3>5.2 查看分析结果</h3>
@@ -572,6 +631,15 @@
         </div>
         <div class="success">
             <strong>提示：</strong>系统支持设置预警阈值，当人数超过阈值时将自动发送预警信息。
+        </div>
+        <div class="note">
+            <strong>典型应用场景：</strong>
+            <ul>
+                <li><strong>区域人流密度监控：</strong>实时监测特定区域（如商场出入口、公共广场）的人员密度，避免过度拥挤。</li>
+                <li><strong>滞留预警：</strong>对在特定区域长时间停留的人员进行预警，适用于安全监控。</li>
+                <li><strong>人员轨迹分析：</strong>分析人员在区域内的移动路径和热点区域，优化空间布局。</li>
+                <li><strong>客流量统计：</strong>统计不同时间段的客流量，为商业决策提供数据支持。</li>
+            </ul>
         </div>
     </div>
 
@@ -599,6 +667,19 @@
             <div class="step">选择要订阅的监听摄像头</div>
             <div class="step">设置事件订阅参数，包括订阅的事件类型、报警间隔时间、推送标签、备注信息等</div>
             <div class="step">点击"确认"按钮创建事件订阅</div>
+        </div>
+        <div class="note">
+            <strong>事件类型举例：</strong>
+            <ul>
+                <li>系统支持订阅多种事件类型，例如：**区域入侵、越界检测、人员徘徊、异常行为、人数超限**等。用户可以根据实际监控需求选择不同的事件类型进行订阅。</li>
+            </ul>
+        </div>
+        <div class="note">
+            <strong>推送标签用途：</strong>
+            <ul>
+                <li>**推送标签**：可以用于对事件进行分类或标记，方便后续的数据检索、过滤和与其他系统（如消息推送服务、数据分析平台）进行集成。例如，可以根据标签将不同类型的事件推送到不同的接收端或进行差异化处理。</li>
+                <li>**备注信息**：提供额外的文字说明，方便用户理解和管理事件订阅。</li>
+            </ul>
         </div>
         <div id="smart-scheme-list">
             <h3>6.3 订阅事件列表</h3>
@@ -647,6 +728,23 @@
                 <div class="step">点击"确认"按钮保存配置</div>
             </div>
         </div>
+        <div class="note">
+            <strong>数据格式示例：</strong>
+            <ul>
+                <li>系统推送的数据通常为JSON格式，包含以下关键信息：
+                    <pre><code>{
+    "deviceId": "BC04A20FACA3083",
+    "cameraInfo": "唐古拉入口:10.55.202.115",
+    "recordTime": "2025-09-22T10:27:17.214777+08:00",
+    "exitedCount": 2,
+    "passedCount": 1,
+    "enteredCount": 3,
+    "stayingCount": 0,
+    "event_description": "区域内人数=0, 今日进入=3, 今日离开=2, 今日通过=1"
+}</code></pre>
+                </li>
+            </ul>
+        </div>
         <div id="data-listeners">
             <h3>7.3 数据监听器</h3>
             <div class="step">进入"数据监听器"页面</div>
@@ -665,6 +763,13 @@
             <div class="step">配置数据过滤和处理规则</div>
         </div>
 
+        <div class="note">
+            <strong>数据映射与过滤规则作用：</strong>
+            <ul>
+                <li><strong>数据映射规则：</strong>允许用户将系统内部的标准数据格式转换成外部系统所需的特定格式。这对于系统与第三方平台（如企业内部系统、报警平台）进行无缝集成至关重要，确保数据能够被正确解析和利用。</li>
+                <li><strong>数据过滤和处理规则：</strong>使用户能够根据业务需求，对接收到的数据进行筛选（如只处理特定事件类型）、清洗和转换。例如，可以过滤掉不重要的事件，或者对数据进行聚合计算，以减少不必要的数据传输和存储。</li>
+            </ul>
+        </div>
         <div class="note">
             <strong>推送方式说明：</strong>
             <ul>
@@ -711,6 +816,18 @@
                 </ul>
             </div>
             <div class="step">支持对边缘服务器进行远程配置和管理</div>
+        </div>
+        <div class="note">
+            <strong>边缘服务器部署说明：</strong>
+            <ul>
+                <li>边缘服务器通常部署在靠近数据源的物理设备或虚拟机上。部署过程包括：安装边缘服务软件、配置网络连接、将边缘服务器注册到中央管理系统。具体的安装和注册步骤请参考《部署文档》或边缘服务器的详细安装指南。</li>
+            </ul>
+        </div>
+        <div class="note">
+            <strong>远程配置与管理示例：</strong>
+            <ul>
+                <li>系统支持对边缘服务器进行远程操作，例如：远程更新AI模型、调整检测任务参数、修改设备连接信息、远程重启边缘服务进程，以及查看边缘服务器的实时日志。这些功能有助于实现边缘设备的集中化高效管理。</li>
+            </ul>
         </div>
 
         <div id="edge-monitoring">
@@ -762,6 +879,12 @@
                     <li><strong>地图尺寸：</strong>实际物理尺寸</li>
                 </ul>
             </div>
+            <div class="note">
+                <strong>地图尺寸意义：</strong>
+                <ul>
+                    <li>"地图尺寸：实际物理尺寸"用于校准热力图的比例尺，确保热力图上的区域划分、人员密度计算与实际场景的物理尺寸相符，从而提供更精确的分析结果。例如，如果地图背景图代表一个10米x10米的区域，您应在此处填写对应的物理尺寸。</li>
+                </ul>
+            </div>
             <div class="step">保存热力图配置</div>
         </div>
 
@@ -777,6 +900,12 @@
                     <li>使用多边形工具绘制区域边界</li>
                     <li>设置区域名称和属性</li>
                     <li>配置区域颜色和样式</li>
+                </ul>
+            </div>
+            <div class="note">
+                <strong>绘制工具说明：</strong>
+                <ul>
+                    <li>在热力图编辑界面，您可以使用鼠标点击来添加多边形顶点，从而定义监控区域的边界。拖动现有顶点可以调整区域形状，点击选中顶点后按Delete键可以删除顶点。确保绘制的区域能够准确覆盖您需要进行人群分析的实际范围。</li>
                 </ul>
             </div>
             <div class="step">为每个区域绑定数据源：
@@ -859,6 +988,12 @@
             <div class="step">可以查看各个服务的运行状态和日志</div>
             <div class="step">支持手动启动/停止服务</div>
         </div>
+        <div class="note">
+            <strong>服务启停方式：</strong>
+            <ul>
+                <li>系统提供了直观的Web界面，您可以在"系统管理"->"系统状态"页面直接点击相应的按钮来手动启动或停止各项服务。对于更高级的操作或在无Web界面的环境下，也可以通过命令行工具（如`systemctl`或`docker compose`命令，具体取决于部署方式）进行服务的启停管理。</li>
+            </ul>
+        </div>
 
         <div id="system-logs">
             <h3>10.2 系统日志</h3>
@@ -873,6 +1008,12 @@
                     <li>设备连接日志</li>
                     <li>检测事件日志</li>
                     <li>错误日志</li>
+                </ul>
+            </div>
+            <div class="note">
+                <strong>日志细分：</strong>
+                <ul>
+                    <li>除了基本的系统、设备、事件和错误日志外，系统还提供更细致的日志分类，例如：**用户操作日志**（记录用户的登录、配置修改等行为）、**API调用日志**（记录系统对外接口的调用情况）、**数据同步日志**（记录数据在不同模块或服务间同步的状态）。这些细分日志有助于更精准地定位问题和进行审计。</li>
                 </ul>
             </div>
             <div class="step">支持按时间、类型、用户等条件筛选</div>
@@ -890,6 +1031,9 @@
             <div class="step">检查网络连接是否正常</div>
             <div class="step">确认设备是否支持RTSP协议</div>
             <div class="step">查看设备连接日志获取详细错误信息</div>
+            <div class="note">
+                <strong>参考：</strong>欲了解更多设备管理信息，请参阅<a href="#device-management">2. 设备管理</a>章节。
+            </div>
             <div class="warning">
                 <strong>常见错误：</strong>
                 <ul>
@@ -917,6 +1061,9 @@
                     <li>定期更新和优化模型</li>
                 </ul>
             </div>
+            <div class="note">
+                <strong>参考：</strong>欲了解更多目标检测信息，请参阅<a href="#detection">3. 目标检测</a>章节。
+            </div>
         </div>
 
         <div id="push-issues">
@@ -927,6 +1074,9 @@
             <div class="step">检查网络连接和防火墙设置</div>
             <div class="step">查看推送日志分析失败原因</div>
             <div class="step">测试推送连接是否正常</div>
+            <div class="note">
+                <strong>参考：</strong>欲了解更多数据推送信息，请参阅<a href="#data-push">7. 数据推送</a>章节。
+            </div>
         </div>
 
         <div id="heatmap-issues">
@@ -936,6 +1086,9 @@
             <div class="step">验证数据源绑定是否正确</div>
             <div class="step">检查人群分析任务是否正常运行</div>
             <div class="step">确认数据更新频率设置</div>
+            <div class="note">
+                <strong>参考：</strong>欲了解更多热力图管理信息，请参阅<a href="#heatmap-management">9. 热力图管理</a>章节。
+            </div>
         </div>
 
         <div id="performance-issues">
@@ -955,6 +1108,10 @@
                     <li>设置合理的检测区域</li>
                 </ul>
             </div>
+            <div class="step">重启相关服务或系统</div>
+            <div class="note">
+                <strong>参考：</strong>欲了解更多性能优化信息，请参阅<a href="#system-management">10. 系统管理</a>章节或<a href="#edge-servers">8. 边缘服务</a>章节。
+            </div>
         </div>
 
         <div id="system-issues">
@@ -972,9 +1129,36 @@
             <ul>
                 <li>📖 查看详细日志获取更多信息</li>
                 <li>🔧 使用系统诊断工具检查问题</li>
-                <li>📞 联系技术支持获取专业帮助</li>
-                <li>💬 访问在线文档和社区论坛</li>
+                <li>📞 联系技术支持获取专业帮助：电话：`+86-XXX-XXXX-XXXX`，邮箱：`support@yourcompany.com`</li>
+                <li>💬 访问在线文档和社区论坛：`http://docs.yourcompany.com`，`http://community.yourcompany.com`</li>
             </ul>
+        </div>
+    </div>
+
+    <div id="appendix" class="section">
+        <h2>附录</h2>
+        <div id="glossary">
+            <h3>词汇表</h3>
+            <dl>
+                <dt>NVR</dt>
+                <dd>网络硬盘录像机（Network Video Recorder），用于录制和存储IP摄像机视频流的设备。</dd>
+                <dt>RTSP</dt>
+                <dd>实时流协议（Real-Time Streaming Protocol），一种用于控制流媒体的协议。</dd>
+                <dt>ONVIF</dt>
+                <dd>开放网络视频接口论坛（Open Network Video Interface Forum），一个全球性的开放标准，旨在促进IP物理安全产品的标准化通信。</dd>
+                <dt>YOLO</dt>
+                <dd>You Only Look Once，一种流行的实时目标检测算法。</dd>
+                <dt>NMS</dt>
+                <dd>非极大值抑制（Non-Maximum Suppression），在目标检测中用于消除重复的检测框。</dd>
+                <dt>MQTT</dt>
+                <dd>消息队列遥测传输（Message Queuing Telemetry Transport），一种轻量级的消息协议，适用于物联网设备。</dd>
+                <!-- 更多术语可以根据需要添加 -->
+            </dl>
+        </div>
+        <div id="document-info">
+            <h3>文档信息</h3>
+            <p><strong>更新日期：</strong> 2025年9月22日</p>
+            <p><strong>适用系统版本：</strong> v1.0.0</p>
         </div>
     </div>
 

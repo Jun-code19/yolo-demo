@@ -336,7 +336,7 @@ class DetectionTask:
                         # img_result = frame_rgb.copy() 保留如果保存不带检测结果的帧，可以用于调试 _process_detection_events                 
                         # 使用 try-except 捕获模型推理过程中的错误
                         try:
-                            results = self.model(detect_frame, conf=self.confidence,iou=0.45,max_det=300,device=self.device)
+                            results = self.model(detect_frame, conf=self.confidence,iou=0.45,max_det=300,device=self.device, verbose=False)
                             # 获取速度
                             speed = results[0].speed
                             # 处理检测结果
