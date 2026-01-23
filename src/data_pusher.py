@@ -289,7 +289,7 @@ class DataPusher:
                 url=url,
                 json=post_data,
                 headers=headers,
-                timeout=10  # 设置超时
+                timeout=3 # 设置超时
             )
             
             # 检查响应状态

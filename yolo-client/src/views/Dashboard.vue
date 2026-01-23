@@ -464,10 +464,10 @@ const initCharts = () => {
 const updatewaitTimeChart = () => {
   if (!waitTimeChart) return
 
-  const projectNames = waitTimeData.value.map(item => item.projectName);
-  const waitingMinutes = waitTimeData.value.map(item => item.waitingMinutes);
-  const peopleCount = waitTimeData.value.map(item => item.peopleCount);
-  const projectInterval = waitTimeData.value.map(item => item.projectInterval);
+  const projectNames = waitTimeData.value.map(item => item.systemData.projectName);
+  const waitingMinutes = waitTimeData.value.map(item => item.systemData.waitingMinutes);
+  const peopleCount = waitTimeData.value.map(item => item.systemData.peopleCount);
+  const projectInterval = waitTimeData.value.map(item => item.systemData.projectInterval);
 
   waitTimeChart.setOption({
     backgroundColor: 'transparent',
@@ -1064,11 +1064,29 @@ const fetchWeather = () => {
           weatherData.text = '--';
         }
       },
-      (error) => {
+      async (error) => {
         console.error('获取地理位置失败:', error);
-        weatherData.city = '位置受阻';
-        weatherData.temperature = '--';
-        weatherData.text = '--';
+        // 如果获取地理位置失败，则使用默认城市（例如北京）的经纬度来获取天气
+        const defaultLat = 39.9042;
+        const defaultLon = 116.4074;
+        try {
+          const data = await getWeatherData(defaultLat, defaultLon);
+          if (data.results && data.results.length > 0) {
+            weatherData.city = data.results[0].location.name || '未知城市';
+            weatherData.temperature = `${data.results[0].now.temperature}°C`;
+            weatherData.text = data.results[0].now.text || '--';
+          } else {
+            console.error('心知天气API未返回有效数据 (默认城市)');
+            weatherData.city = '获取失败';
+            weatherData.temperature = '--';
+            weatherData.text = '--';
+          }
+        } catch (defaultError) {
+          console.error('获取默认城市天气数据失败:', defaultError);
+          weatherData.city = '获取失败';
+          weatherData.temperature = '--';
+          weatherData.text = '--';
+        }
       },
       { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
     );

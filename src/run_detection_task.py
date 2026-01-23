@@ -636,7 +636,7 @@ class DetectionTask:
             if self.save_mode in [SaveMode.screenshot, SaveMode.both]:
                 # 根据保存模式保存图像/视频
                 save_dir = Path(f"storage/events/{current_time.strftime('%Y-%m-%d')}/{self.device_id}")
-                save_dir.mkdir(parents=True, exist_ok=True)   
+                save_dir.mkdir(parents=True, exist_ok=True, mode=0o777)   
                 # 保存带检测框的截图（原图）
                 thumbnail_path = save_dir / f"{event_id}.jpg"
                 if self.stream_type == 'sub':
@@ -779,7 +779,7 @@ class DetectionTask:
             
             # 根据保存模式保存图像/视频
             save_dir = Path(f"storage/events/{current_time.strftime('%Y-%m-%d')}/{self.device_id}")
-            save_dir.mkdir(parents=True, exist_ok=True)
+            save_dir.mkdir(parents=True, exist_ok=True, mode=0o777)
             
             if self.save_mode in [SaveMode.screenshot, SaveMode.both]:   
                 # 保存带检测框的截图（原图）
@@ -847,7 +847,7 @@ class DetectionTask:
             
             # 根据保存模式保存图像/视频
             save_dir = Path(f"storage/events/{current_time.strftime('%Y-%m-%d')}/{self.device_id}")
-            save_dir.mkdir(parents=True, exist_ok=True)
+            save_dir.mkdir(parents=True, exist_ok=True, mode=0o777)
             
             if self.save_mode in [SaveMode.screenshot, SaveMode.both]:   
                 # 保存带检测框的截图（原图）
@@ -887,8 +887,8 @@ class DetectionTask:
                 "stayingCount": event_info['current_count'],
                 "passedCount":0,
                 "recordTime": datetime.now().isoformat() + '+08:00',
-                "event_description": self._get_event_description(event_info['event_type']),
-                "target_class": self.target_class
+                # "event_description": self._get_event_description(event_info['event_type']),
+                # "target_class": self.target_class
             }
             # 增加标签，使推送更灵活
             data_pusher.push_data(
@@ -899,25 +899,25 @@ class DetectionTask:
             )
         
             # 记录性能统计信息
-            db = SessionLocal()
-            try:
-                perf = DetectionPerformance(
-                    device_id=self.device_id,
-                    config_id=self.config_id,
-                    detection_time=speed['inference'],
-                    preprocessing_time=speed['preprocess'],
-                    postprocessing_time=speed['postprocess'],
-                    frame_width=frame.shape[1],
-                    frame_height=frame.shape[0],
-                    objects_detected=len(detections)
-                )
-                db.add(perf)
-                db.commit()
-            except Exception as e:
-                logger.error(f"保存性能数据失败: {e}")
-                db.rollback()
-            finally:
-                db.close()
+            # db = SessionLocal()
+            # try:
+            #     perf = DetectionPerformance(
+            #         device_id=self.device_id,
+            #         config_id=self.config_id,
+            #         detection_time=speed['inference'],
+            #         preprocessing_time=speed['preprocess'],
+            #         postprocessing_time=speed['postprocess'],
+            #         frame_width=frame.shape[1],
+            #         frame_height=frame.shape[0],
+            #         objects_detected=len(detections)
+            #     )
+            #     db.add(perf)
+            #     db.commit()
+            # except Exception as e:
+            #     logger.error(f"保存性能数据失败: {e}")
+            #     db.rollback()
+            # finally:
+            #     db.close()
 
     def push_counting_event(self, event_info, frame, detections, speed): # 推送人数统计事件
         """推送人数统计事件"""
@@ -935,8 +935,8 @@ class DetectionTask:
                 "stayingCount": event_info['current_count'],
                 "passedCount":0,
                 "recordTime": datetime.now().isoformat() + '+08:00',
-                "event_description": self._get_event_description(event_info['event_type']),
-                "target_class": self.target_class
+                # "event_description": self._get_event_description(event_info['event_type']),
+                # "target_class": self.target_class
             }
             # 增加标签，使推送更灵活
             data_pusher.push_data(
@@ -947,25 +947,25 @@ class DetectionTask:
             )
         
             # 记录性能统计信息
-            db = SessionLocal()
-            try:
-                perf = DetectionPerformance(
-                    device_id=self.device_id,
-                    config_id=self.config_id,
-                    detection_time=speed['inference'],
-                    preprocessing_time=speed['preprocess'],
-                    postprocessing_time=speed['postprocess'],
-                    frame_width=frame.shape[1],
-                    frame_height=frame.shape[0],
-                    objects_detected=len(detections)
-                )
-                db.add(perf)
-                db.commit()
-            except Exception as e:
-                logger.error(f"保存性能数据失败: {e}")
-                db.rollback()
-            finally:
-                db.close()
+            # db = SessionLocal()
+            # try:
+            #     perf = DetectionPerformance(
+            #         device_id=self.device_id,
+            #         config_id=self.config_id,
+            #         detection_time=speed['inference'],
+            #         preprocessing_time=speed['preprocess'],
+            #         postprocessing_time=speed['postprocess'],
+            #         frame_width=frame.shape[1],
+            #         frame_height=frame.shape[0],
+            #         objects_detected=len(detections)
+            #     )
+            #     db.add(perf)
+            #     db.commit()
+            # except Exception as e:
+            #     logger.error(f"保存性能数据失败: {e}")
+            #     db.rollback()
+            # finally:
+            #     db.close()
 
     def _check_alert(self, current_count):
         """检查人数是否超过预警阈值"""

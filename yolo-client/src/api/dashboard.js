@@ -64,7 +64,9 @@ export const dashboardMapApi = {
 
 export const getWaitTimeData = async () => {
   try {
-    const response = await axios.get('http://10.55.4.26:5000/api/WaitTime');
+    const token = 'qts_spZaDwGam43zPsYFGfXP62bFjH-9bfhv5vt3Ms0Efjc_1762824492';
+    const headers = token ? { Authorization: `Bearer ${token}` } : {};
+    const response = await axios.get('http://10.73.2.248:5000/api/WaitTime', { headers });
     return response.data;
   } catch (error) {
     console.error("Error fetching wait time data:", error);

@@ -703,11 +703,15 @@ export default defineComponent({
           const startDate = new Date(filterForm.dateRange[0]);
           const endDate = new Date(filterForm.dateRange[1]);
 
-          // 设置开始时间为选择日期的 0 点 0 分
+         // 设置开始时间为选择日期的 0 点 0 分
           startDate.setHours(0, 0, 0, 0);
+          // 假设是 UTC+8，为了获取 11 号 0 点，需要减去 8 小时
+          startDate.setHours(startDate.getHours() - startDate.getTimezoneOffset() / 60);
 
           // 设置结束时间为选择日期的 23 点 59 分
           endDate.setHours(23, 59, 59, 999);
+          // 假设是 UTC+8，为了获取 11 号 23 点 59 分 59 秒，需要减去 8 小时
+          endDate.setHours(endDate.getHours() - endDate.getTimezoneOffset() / 60);
 
           // 将日期转换为 ISO 字符串
           params.start_date = startDate.toISOString();

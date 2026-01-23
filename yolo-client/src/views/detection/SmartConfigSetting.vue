@@ -664,6 +664,11 @@ export default defineComponent({
       }, 100);
     };
 
+    const getDeviceImageUrl = (ipAddress, channel) => {
+      const imagePath = `storage/devices/${ipAddress}_ch${channel}.jpg`;
+      return `/api/v2/data-listeners/images/${encodeURIComponent(imagePath)}`;
+    };
+
     const loadDeviceImage = async () => {
       if (!deviceInfo.value) {
         imageError.value = '设备信息不完整';
@@ -693,6 +698,9 @@ export default defineComponent({
         imageLoading.value = true;
         imageError.value = null;
 
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000); // 5秒超时
+
         // 通过后端API获取设备抓图，避免CORS问题
         const response = await fetch('/api/v1/devices/snapshot', {
           method: 'POST',
@@ -706,8 +714,11 @@ export default defineComponent({
             channel: channel || 1,
             username: deviceInfo.value.username,
             password: deviceInfo.value.password
-          })
+          }),
+          signal: controller.signal // 添加 abort signal
         });
+
+        clearTimeout(timeoutId);
 
         if (response.ok) {
 
@@ -726,8 +737,28 @@ export default defineComponent({
           throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
         }
       } catch (error) {
-        imageError.value = `设备抓图失败: ${error.message}`;
-        imageLoading.value = false;
+
+        if (error.name === 'AbortError') {
+          ElMessage.warning('获取设备实时抓图超时，尝试加载本地快照');
+        } else {
+          ElMessage.error(`获取设备实时抓图失败: ${error.message}，尝试加载本地快照`);
+        }
+        // 尝试加载本地快照
+        const fallbackImageUrl = getDeviceImageUrl(ipAddress, channel);
+        const img = new Image();
+
+        img.onload = () => {
+          deviceImage.value = fallbackImageUrl;
+          imageLoading.value = false;
+          imageError.value = null; // 清除之前的错误信息
+        };
+
+        img.onerror = () => {
+          imageLoading.value = false;
+          imageError.value = '设备画面图片不存在，请先进行设备预览以生成画面快照';
+        };
+
+        img.src = `${fallbackImageUrl}?t=${Date.now()}`;
 
       } finally {
         isSnapshotLoading.value = false;

@@ -187,8 +187,12 @@ class ObjectTracker:
         
         if counting_type == 'occupancy':
             # 区域内人数统计 - 每帧重新统计区域内的实际人数
+            if self.date != datetime.now().strftime("%Y-%m-%d"):
+                self.today_in_count = 0
+                self.today_out_count = 0
+                self.date = datetime.now().strftime("%Y-%m-%d")
             # 不需要依赖进出事件，直接统计当前帧中所有在区域内的目标
-            pass  # 实际统计在update方法中进行
+            # pass  # 实际统计在update方法中进行
         
         elif counting_type == 'flow':
             
@@ -603,12 +607,14 @@ class ObjectTracker:
                     'track_id': 0,  # 区域统计事件不关联特定track
                     'event_type': f'occupancy_change_{change_type}',
                     'position': None,
-                    'old_count': old_count,
-                    'new_count': current_count_in_area,
-                    'change_amount': change_amount,
+                    # 'old_count': old_count,
+                    # 'new_count': current_count_in_area,
+                    # 'change_amount': change_amount,
+                    # 'count_in': self.today_in_count,
+                    # 'count_out': self.today_out_count,
                     'current_count': self.current_count,
-                    'today_in_count': self.today_in_count,
-                    'today_out_count': self.today_out_count,
+                    'today_in_count': 0,
+                    'today_out_count': 0,
                     'timestamp': self.frame_count
                 }
                 

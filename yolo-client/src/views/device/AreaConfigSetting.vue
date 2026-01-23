@@ -233,6 +233,11 @@ export default defineComponent({
       loadDeviceSnapshot(ipAddress, channel);
     };
 
+    const getDeviceImageUrl = (ipAddress, channel) => {
+      const imagePath = `storage/devices/${ipAddress}_ch${channel}.jpg`;
+      return `/api/v2/data-listeners/images/${encodeURIComponent(imagePath)}`;
+    };
+
     // 通过设备API实时抓图
     const loadDeviceSnapshot = async (ipAddress, channel) => {
       try {
