@@ -605,12 +605,16 @@ def get_model(models_name):
     return models_cache.get(models_name)
 # 处理单帧图像
 def process_frame(frame, models_info, frame_id, timestamp, total_frames=None, start_time=None):
-    """处理单帧图像"""
+    """处理单帧图像。成功返回 (result_dict, None)，失败返回 (None, error_message)。"""
     start_process_time = time.time()
     
     try:
         # 预处理图像
+        if frame is None or frame.ndim < 2:
+            return None, "Invalid frame array"
         orig_h, orig_w = frame.shape[:2]
+        if orig_h <= 0 or orig_w <= 0:
+            return None, f"Invalid frame size: {orig_w}x{orig_h}"
         scale = min(max_size / orig_h, max_size / orig_w)
         
         if scale < 1:
@@ -662,12 +666,22 @@ def process_frame(frame, models_info, frame_id, timestamp, total_frames=None, st
                         "y2": float(y2)
                     })
         else:
-            # 使用PyTorch模型
+            # 使用PyTorch模型（部署 CPU 环境无 GPU 时走此分支；无检测框时 boxes 可能为空，需防御）
             with torch.cuda.amp.autocast() if torch.cuda.is_available() else nullcontext():
                 results = models_info['model'](frame, conf=0.25)[0]
             
             detections = []
-            for r in results.boxes.data.tolist():
+            boxes = getattr(results, "boxes", None)
+            rows = []
+            if boxes is not None:
+                try:
+                    data = boxes.data
+                    if data is not None and data.numel() > 0:
+                        rows = data.tolist()
+                except Exception:
+                    rows = []
+            names = getattr(results, "names", None) or getattr(models_info.get("model"), "names", None) or {}
+            for r in rows:
                 x1, y1, x2, y2, conf, cls = r
                 
                 if scale < 1:
@@ -677,7 +691,11 @@ def process_frame(frame, models_info, frame_id, timestamp, total_frames=None, st
                 w = x2 - x1
                 h = y2 - y1
                 
-                class_name = results.names[int(cls)]
+                cls_i = int(cls)
+                if isinstance(names, dict):
+                    class_name = names.get(cls_i, str(cls_i))
+                else:
+                    class_name = names[cls_i] if cls_i < len(names) else str(cls_i)
                 
                 detections.append({
                     "class": class_name,
@@ -717,11 +735,11 @@ def process_frame(frame, models_info, frame_id, timestamp, total_frames=None, st
             "total_frames": total_frames,
             "image_width": orig_w,
             "image_height": orig_h
-        }
+        }, None
     
     except Exception as e:
-        logger.error(f"Error processing frame: {e}")
-        return None
+        logger.exception("Error processing frame")
+        return None, str(e)
 # 异步处理帧队列
 async def process_frame_queue(connection_id: str):
     """异步处理帧队列"""
@@ -763,7 +781,7 @@ async def process_frame_queue(connection_id: str):
                 if current_time - last_processed_time < 0.033:
                     continue
                 
-                result = await asyncio.get_event_loop().run_in_executor(
+                result, proc_err = await asyncio.get_event_loop().run_in_executor(
                     executor,
                     process_frame,
                     frame_data["frame"],
@@ -774,6 +792,8 @@ async def process_frame_queue(connection_id: str):
                     frame_data.get("start_time")
                 )
                 
+                if proc_err:
+                    logger.error(f"process_frame failed for {connection_id}: {proc_err}")
                 if result:
                     await manager.send_json(connection_id, result)
                     last_processed_time = current_time
@@ -996,7 +1016,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         detect_start_time = time.time()
                         
                         # 使用process_frame函数处理图片
-                        result = process_frame(
+                        result, proc_err = process_frame(
                             frame=target_frame,
                             models_info=models_info,
                             frame_id=image_id,
@@ -1006,8 +1026,8 @@ async def websocket_endpoint(websocket: WebSocket):
                         # 检测时间
                         detect_time = time.time() - detect_start_time
                         
-                        if not result:
-                            raise ValueError("Failed to process image")
+                        if proc_err or not result:
+                            raise ValueError(proc_err or "Failed to process image")
                         
                         # 处理缩放以匹配原始尺寸
                         if target_scale < 1.0:

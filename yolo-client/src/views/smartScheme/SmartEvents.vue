@@ -90,6 +90,7 @@
         <el-select v-model="filters.event_type" placeholder="事件类型" clearable style="width: 150px" @change="loadData">
           <el-option label="报警事件" value="alarm" />
           <el-option label="智能事件" value="smart" />
+          <el-option label="人数统计" value="number_stat" />
           <el-option label="设备日志" value="system_log" />
         </el-select>
 
@@ -157,7 +158,7 @@
           </template>
         </el-table-column>
 
-        <el-table-column prop="camera_ip" label="摄像机IP" width="120" sortable></el-table-column>
+        <el-table-column prop="camera_ip" label="摄像机IP" width="125" sortable></el-table-column>
 
         <el-table-column prop="title" label="事件标题" min-width="150">
           <template #default="{ row }">
@@ -521,6 +522,7 @@ const getEventTypeTagType = (type) => {
   const types = {
     alarm: 'danger',
     smart: 'primary',
+    number_stat: 'success',
     system_log: 'info'
   }
   return types[type] || 'info'
@@ -530,6 +532,7 @@ const getEventTypeText = (type) => {
   const texts = {
     alarm: '报警事件',
     smart: '智能事件',
+    number_stat: '人数统计',
     system_log: '设备日志'
   }
   return texts[type] || type

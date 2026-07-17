@@ -7,6 +7,13 @@ services:
       context: .
       dockerfile: Dockerfile.data-server
     container_name: yolo-data-server
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
     volumes:
       - ./models:/app/models
       - ./storage:/app/storage

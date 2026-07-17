@@ -82,6 +82,7 @@ class SmartEventResponse(SmartEventBase):
 EVENT_TYPES = {
     "alarm": "报警事件",
     "smart": "智能事件", 
+    "number_stat": "人数统计",
     "system_log": "设备日志"
 }
 
@@ -193,7 +194,7 @@ def create_scheme(
             raise HTTPException(status_code=400, detail="摄像头不存在")
         
         # 验证事件类型
-        valid_event_types = ['alarm', 'smart', 'system_log']
+        valid_event_types = ['alarm', 'smart', 'number_stat', 'system_log']
         for event_type in scheme.event_types:
             if event_type not in valid_event_types:
                 raise HTTPException(status_code=400, detail=f"无效的事件类型: {event_type}")
@@ -307,7 +308,7 @@ def update_scheme(
         
         # 验证事件类型
         if scheme_update.event_types:
-            valid_event_types = ['alarm', 'smart', 'system_log']
+            valid_event_types = ['alarm', 'smart', 'number_stat', 'system_log']
             for event_type in scheme_update.event_types:
                 if event_type not in valid_event_types:
                     raise HTTPException(status_code=400, detail=f"无效的事件类型: {event_type}")
@@ -918,6 +919,7 @@ def get_event_types():
         event_types = [
             {'type': 'alarm', 'name': '报警事件'},
             {'type': 'smart', 'name': '智能事件'},
+            {'type': 'number_stat', 'name': '人数统计'},
             {'type': 'system_log', 'name': '设备日志'}
         ]
         return event_types

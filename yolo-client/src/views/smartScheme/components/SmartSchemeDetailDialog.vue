@@ -228,6 +228,7 @@ const getEventTypeTagType = (type) => {
   const types = {
     alarm: 'danger',
     smart: 'primary',
+    number_stat: 'success',
     system_log: 'info'
   }
   return types[type] || 'info'
@@ -237,6 +238,7 @@ const getEventTypeText = (type) => {
   const texts = {
     alarm: '报警事件',
     smart: '智能事件',
+    number_stat: '人数统计',
     system_log: '设备日志'
   }
   return texts[type] || type

@@ -30,7 +30,7 @@ class DeviceMonitor:
         logging.getLogger('apscheduler').setLevel(logging.WARNING)
         self.running = False
         self.monitoring_config = {
-            'check_interval': 600,  # 10分钟检测一次设备状态
+            'check_interval': 300,  # 10分钟检测一次设备状态
             'push_interval': 10,    # 30秒推送一次状态数据
             'enable_notifications': True  # 是否启用通知
         }

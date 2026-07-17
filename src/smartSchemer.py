@@ -22,7 +22,7 @@ try:
     from NetSDK.NetSDK import NetClient
     from NetSDK.SDK_Struct import *
     from NetSDK.SDK_Enum import *
-    from NetSDK.SDK_Callback import fDisConnect, fHaveReConnect, fMessCallBackEx1, fVideoStatSumCallBack, CB_FUNCTYPE
+    from NetSDK.SDK_Callback import fDisConnect, fHaveReConnect, fMessCallBackEx1, fVideoStatSumCallBack, fAnalyzerDataCallBack, CB_FUNCTYPE
     # from ctypes import cast, POINTER, c_char, c_long, c_llong, c_dword, c_ldword
     NETSDK_AVAILABLE = True
 except ImportError:
@@ -37,6 +37,23 @@ from src.database import (
 
 logger = logging.getLogger(__name__)
 
+# 事件类型 -> (标题后缀, 描述动作短语, 描述前缀)
+# 新增类型时只需要在这里补一行映射即可
+SMART_TYPE_TEXT_MAP = {
+    EM_EVENT_IVS_TYPE.CROSSREGIONDETECTION: ("区域入侵", "触发区域入侵", ""),
+    EM_EVENT_IVS_TYPE.CROSSLINEDETECTION: ("绊线入侵", "触发绊线入侵", ""),
+    EM_EVENT_IVS_TYPE.HEAT_IMAGING_TEMPER: ("温度规则", "触发温度规则", ""),
+    EM_EVENT_IVS_TYPE.FIREDETECTION: ("火情报警", "触发火情报警", ""),
+    EM_EVENT_IVS_TYPE.SMOKEDETECTION: ("烟雾报警", "触发烟雾报警", ""),
+}
+
+ALARM_TYPE_TEXT_MAP = {
+    SDK_ALARM_TYPE.EVENT_CROSSREGION_DETECTION: ("区域入侵", "触发区域入侵", ""),
+    SDK_ALARM_TYPE.EVENT_CROSSLINE_DETECTION: ("绊线入侵", "触发绊线入侵", ""),
+    SDK_ALARM_TYPE.ALARM_FIREWARNING_INFO: ("火情报警", "触发火情报警", ""),
+    # 兜底：保持原逻辑（非上述类型默认为火情报警）
+}
+
 
 @dataclass
 class DeviceConnection:
@@ -49,6 +66,7 @@ class DeviceConnection:
     password: str  # 存储密码
     login_id: int = 0 # 登录ID
     attach_id: int = 0 # 视频统计摘要ID
+    smart_id: int = 0 #智能报警订阅ID
     is_connected: bool = False # 是否连接
     re_connected: bool = False # 是否重新连接成功
     schemes: List[str] = None  # 该设备上的订阅ID列表
@@ -78,6 +96,7 @@ class SmartSchemer:
             self.m_ReConnectCallBack = fHaveReConnect(self.ReConnectCallBack)
             self.m_MessCallBackEx1 = fMessCallBackEx1(self.MessCallBackEx1)
             self.m_VideoStatSumCallBack = fVideoStatSumCallBack(self.VideoStatSumCallBack)
+            self.m_AnalyzerDataCallBack = fAnalyzerDataCallBack(self.AnalyzerDataCallBack)
             # 获取NetSDK对象并初始化
             self.sdk = NetClient()
             self.sdk.InitEx(self.m_DisConnectCallBack)
@@ -86,6 +105,13 @@ class SmartSchemer:
             self.sdk.SetDVRMessCallBackEx1(self.m_MessCallBackEx1, 0)
         else:
             self.sdk = None
+
+    @staticmethod
+    def _build_title_description(prefix: str, type_value, text_map: Dict, default_text: tuple, device_conn: "DeviceConnection"):
+        label, action_text, desc_prefix = text_map.get(type_value, default_text)
+        title = f"{prefix}({label})"
+        description = f"{desc_prefix}{device_conn.device_name}_{device_conn.ip_address}_{action_text}"
+        return title, description
     
     async def initialize(self):
         """初始化管理器"""
@@ -158,6 +184,8 @@ class SmartSchemer:
                         await self._start_alarm_listen(device_conn, scheme)
                     elif event_type == 'smart':
                         await self._start_smart_listen(device_conn, scheme)
+                    elif event_type == 'number_stat':
+                        await self._start_number_stat_listen(device_conn, scheme)
                 
                 # 记录订阅关系 
                 device_conn.schemes.append(scheme.id)
@@ -218,6 +246,23 @@ class SmartSchemer:
             return False
     
     async def _start_smart_listen(self, device_conn: DeviceConnection, scheme: SmartScheme):
+        """启动智能事件订阅"""       
+        try:
+            nChannel = 0 # 默认通道
+            dwAlarmType = EM_EVENT_IVS_TYPE.ALL
+            bNeedPicFile = 0 # 是否订阅图片
+            cbAnalyzerData = self.m_AnalyzerDataCallBack
+            smartID = self.sdk.RealLoadPictureEx(device_conn.login_id, nChannel, dwAlarmType, bNeedPicFile, cbAnalyzerData)
+            if smartID != 0 :
+                device_conn.smart_id = smartID
+                return True
+            else:
+                return False
+        except Exception as e:
+            logger.error(f"启动智能事件订阅异常: {scheme.id}, 错误: {e}")
+            return False
+
+    async def _start_number_stat_listen(self, device_conn: DeviceConnection, scheme: SmartScheme):
         """启动智能事件订阅"""       
         try:
             # 启动视频统计摘要订阅
@@ -308,7 +353,10 @@ class SmartSchemer:
         """登出设备"""       
         try:
             if device_conn.login_id > 0:
-                # 停止事件订阅
+                # 停止智能事件
+                if device_conn.smart_id > 0:
+                    self.sdk.StopLoadPic(device_conn.smart_id)
+                # 停止人数统计订阅
                 if device_conn.attach_id > 0:
                     self.sdk.DetachVideoStatSummary(device_conn.attach_id)
                 self.sdk.StopListen(device_conn.login_id)
@@ -322,6 +370,7 @@ class SmartSchemer:
                 device_conn.is_connected = False
                 device_conn.login_id = 0
                 device_conn.attach_id = 0
+                device_conn.smart_id = 0
                 
         except Exception as e:
             logger.error(f"设备登出异常: {device_conn.device_name}, 错误: {e}")
@@ -388,6 +437,8 @@ class SmartSchemer:
                     await self._start_alarm_listen(device_conn, scheme)
                 elif event_type == 'smart':
                     await self._start_smart_listen(device_conn, scheme)
+                elif event_type == 'number_stat':
+                    await self._start_number_stat_listen(device_conn, scheme)
             
             # logger.info(f"事件监听重新启动成功: 订阅={scheme.id}")
             return True
@@ -429,7 +480,7 @@ class SmartSchemer:
     def _create_smart_event(self, scheme_id: str, event_type: str, title: str, 
                            description: str = None, priority: str = 'normal', 
                            event_data: Dict = None):
-        """创建智能事件记录"""
+        """创建智能统计事件"""
         try:
             db = SessionLocal()
             try:
@@ -457,6 +508,145 @@ class SmartSchemer:
             logger.error(f"创建智能事件失败: {e}")
             return None
     
+    def AnalyzerDataCallBack(self, lAnalyzerHandle, dwAlarmType, pAlarmInfo, pBuffer, dwBufSize, dwUser, nSequence, reserved):
+        try:
+            try:
+                smart_type = EM_EVENT_IVS_TYPE(dwAlarmType) # 报警类型
+                print(f"智能类型: {hex(smart_type)}")
+            except Exception as e:
+                logger.error(f"解析智能事件类型异常: {e}")
+                return
+
+            if smart_type == EM_EVENT_IVS_TYPE.CROSSREGIONDETECTION:  # 警戒区事件                
+                info = cast(pAlarmInfo, POINTER(DEV_EVENT_CROSSREGION_INFO)).contents
+                if info.bEventAction == 0 or info.bEventAction == 1 or info.bEventAction == 2:
+                    pass
+                else:
+                    return
+            elif smart_type == EM_EVENT_IVS_TYPE.CROSSLINEDETECTION:  # 警戒线事件
+                info = cast(pAlarmInfo, POINTER(DEV_EVENT_CROSSLINE_INFO)).contents
+                if info.bEventAction == 0 or info.bEventAction == 1 or info.bEventAction == 2:
+                    pass
+                else:
+                    return
+            elif smart_type == EM_EVENT_IVS_TYPE.HEAT_IMAGING_TEMPER: # 热成像测温点温度异常报警事件
+                info = cast(pAlarmInfo, POINTER(DEV_EVENT_HEAT_IMAGING_TEMPER_INFO)).contents
+                if info.nAction == 0 or info.nAction == 1 or info.nAction == 2:
+                    pass
+                else:
+                    return
+            elif smart_type == EM_EVENT_IVS_TYPE.FIREDETECTION: # 火情报警事件
+                info = cast(pAlarmInfo, POINTER(NET_A_DEV_EVENT_FIRE_INFO)).contents
+                if info.nAction == 0 or info.nAction == 1 or info.nAction == 2:
+                    pass
+                else:
+                    return
+            elif smart_type == EM_EVENT_IVS_TYPE.SMOKEDETECTION: # 烟雾报警事件
+                info = cast(pAlarmInfo, POINTER(NET_A_DEV_EVENT_SMOKE_INFO)).contents
+                if info.nAction == 0 or info.nAction == 1 or info.nAction == 2:
+                    pass
+                else:
+                    return
+            else:
+                return
+            
+            # 查找对应的订阅
+            for device_conn in self.device_connections.values():
+                if device_conn.smart_id == lAnalyzerHandle:
+                    for scheme_id in device_conn.schemes:
+                        event_data={}
+                        if smart_type == EM_EVENT_IVS_TYPE.CROSSREGIONDETECTION:  # 警戒区事件
+                            info = cast(pAlarmInfo, POINTER(DEV_EVENT_CROSSREGION_INFO)).contents
+                            if info.bEventAction == 0 or info.bEventAction == 1:
+                                event_data={
+                                    'cameraInfo': device_conn.device_name + "_" + device_conn.ip_address,
+                                    'deviceId': device_conn.device_id,
+                                    'direction': '0:进入' if info.bDirection == 0 else '1:离开' if info.bDirection == 1 else '2:出现' if info.bDirection == 2 else '3:消失',
+                                    'actionType': '0:出现' if info.bActionType == 0 else '1:消失' if info.bActionType == 1 else '2:在区域内' if info.bActionType == 2 else '3:穿越区域',
+                                    # 'occurrenceCount': f'累计触发{info.nOccurrenceCount}次',
+                                    'recordTime': datetime.now().isoformat() + '+08:00',
+                                    'event_description': f'{device_conn.device_name}_{device_conn.ip_address}_触发区域入侵',
+                                    'bEventAction': info.bEventAction,
+                                    'event_type': 'crossregion_alarm'
+                                }
+                        if smart_type == EM_EVENT_IVS_TYPE.CROSSLINEDETECTION:  # 警戒线事件
+                            info = cast(pAlarmInfo, POINTER(DEV_EVENT_CROSSLINE_INFO)).contents
+                            if info.bEventAction == 0 or info.bEventAction == 1:
+                                event_data={
+                                    'cameraInfo': device_conn.device_name + "_" + device_conn.ip_address,
+                                    'deviceId': device_conn.device_id,
+                                    'direction': '0:进入' if info.bDirection == 0 else '1:离开' if info.bDirection == 1 else '2:出现' if info.bDirection == 2 else '3:消失',
+                                    # 'occurrenceCount': f'累计触发{info.nOccurrenceCount}次',
+                                    'recordTime': datetime.now().isoformat() + '+08:00',
+                                    'event_description': f'{device_conn.device_name}_{device_conn.ip_address}_触发绊线入侵',
+                                    'bEventAction': info.bEventAction,
+                                    'event_type': 'crossline_alarm'
+                                }
+                        if smart_type == EM_EVENT_IVS_TYPE.HEAT_IMAGING_TEMPER:  # 测温规则报警事件
+                            info = cast(pAlarmInfo, POINTER(NET_A_DEV_EVENT_FIREWARNING_INFO)).contents
+                            if info.nAction == 0 or info.nAction == 1:
+                                event_data={
+                                    'cameraInfo': device_conn.device_name + "_" + device_conn.ip_address,
+                                    'deviceId': device_conn.device_id,
+                                    'recordTime': datetime.now().isoformat() + '+08:00',
+                                    'event_description': f'{device_conn.device_name}_{device_conn.ip_address}_出现温度规则事件',
+                                    'nAction': info.nAction,
+                                    'event_type': 'temp_alarm_start'
+                                } 
+                        if smart_type == EM_EVENT_IVS_TYPE.FIREDETECTION:  # 火情报警事件
+                            info = cast(pAlarmInfo, POINTER(NET_A_DEV_EVENT_FIRE_INFO)).contents
+                            if info.bEventAction == 0 or info.bEventAction == 1:
+                                event_data={
+                                    'cameraInfo': device_conn.device_name + "_" + device_conn.ip_address,
+                                    'deviceId': device_conn.device_id,
+                                    'recordTime': datetime.now().isoformat() + '+08:00',
+                                    'event_description': f'{device_conn.device_name}_{device_conn.ip_address}_出现火情事件',
+                                    'bEventAction': info.bEventAction,
+                                    'event_type': 'fire_alarm_start'
+                                } 
+                        if smart_type == EM_EVENT_IVS_TYPE.SMOKEDETECTION:  # 烟雾报警事件
+                            info = cast(pAlarmInfo, POINTER(NET_A_DEV_EVENT_SMOKE_INFO)).contents
+                            if info.bEventAction == 0 or info.bEventAction == 1:
+                                event_data={
+                                    'cameraInfo': device_conn.device_name + "_" + device_conn.ip_address,
+                                    'deviceId': device_conn.device_id,
+                                    'recordTime': datetime.now().isoformat() + '+08:00',
+                                    'event_description': f'{device_conn.device_name}_{device_conn.ip_address}_出现烟雾报警事件',
+                                    'bEventAction': info.bEventAction,
+                                    'event_type': 'smoke_alarm_start'
+                                }                               
+                        # 推送事件
+                        
+                        try:
+                            if data_pusher.push_configs:
+                                data_pusher.push_data(
+                                    data=event_data,
+                                    tags=device_conn.push_tags
+                            )
+                        except Exception as push_error:
+                            logger.error(f"数据推送失败: {push_error}")
+                        
+                        # 创建报警事件
+                        smart_title, smart_description = self._build_title_description(
+                            prefix="智能",
+                            type_value=smart_type,
+                            text_map=SMART_TYPE_TEXT_MAP,
+                            # 保持原先 else 分支行为：默认按“温度规则”展示
+                            default_text=("智能事件", "触发智能事件", ""),
+                            device_conn=device_conn,
+                        )
+                        self._create_smart_event(
+                            scheme_id=scheme_id,
+                            event_type='smart',
+                            title=smart_title,
+                            description=smart_description,
+                            priority='high',
+                            event_data=event_data
+                        )
+                    break
+        except Exception as e:
+                logger.error(f"处理智能事件回调异常: {e}")
+
     # NetSDK回调函数
     def VideoStatSumCallBack(self, lAttachHandle, pBuf, dwBufLen, dwUser):
         """视频统计摘要回调函数"""
@@ -505,8 +695,8 @@ class SmartSchemer:
                         # 创建智能事件
                         self._create_smart_event(
                             scheme_id=scheme_id,
-                            event_type='smart',
-                            title=f'客流统计(区域人数)' if info.szRuleName == b'ManNumDetection' else f'客流统计(人流统计)' if info.szRuleName == b'NumberStat' else "未知",
+                            event_type='number_stat',
+                            title=f'客流(区域人数)' if info.szRuleName == b'ManNumDetection' else f'客流(人流统计)' if info.szRuleName == b'NumberStat' else "未知",
                             description=f'区域内人数={info.nInsidePeopleNum}, 今日进入={info.stuEnteredSubtotal.nToday}, 今日离开={info.stuExitedSubtotal.nToday}',
                             priority='normal',
                             event_data=event_data
@@ -522,29 +712,11 @@ class SmartSchemer:
             # 报警类型转换
             try:
                 alarm_type = SDK_ALARM_TYPE(lCommand) # 报警类型
-                
+                #需要转换成16进制打印alarm_type
+                alarm_type_hex = hex(alarm_type)
+                print(f"报警类型: {alarm_type_hex}")
             except (ValueError, TypeError):
-                return
-
-            # if alarm_type == SDK_ALARM_TYPE.VIDEOLOST_ALARM_EX:  # 视频丢失报警
-            #     info = cast(pBuf, POINTER(NET_A_ALARM_VIDEO_LOSS_INFO)).contents
-            #     if info.nAction == 1:
-            #         logger.info(f"视频丢失报警开始: LoginID={lLoginID},通道={info.nChannelID},当前时间={datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-            #     elif info.nAction == 2:
-            #         logger.info(f"视频丢失报警结束: LoginID={lLoginID},通道={info.nChannelID},当前时间={datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-            #     else:
-            #         return
-            # elif alarm_type == SDK_ALARM_TYPE.SHELTER_ALARM_EX:  # 视频遮挡报警
-            #     info = cast(pBuf, POINTER(NET_A_DEV_EVENT_ALARM_VIDEOBLIND)).contents
-            #     logger.info(f"视频遮挡报警{info.szName}: LoginID={lLoginID},通道={info.nChannelID},当前时间={datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-            # elif alarm_type == SDK_ALARM_TYPE.EVENT_MOTIONDETECT:  # 视频移动侦测事件
-            #     info = cast(pBuf, POINTER(ALARM_MOTIONDETECT_INFO)).contents
-            #     if info.nEventAction == 1:
-            #         logger.info(f"视频移动侦测事件开始: LoginID={lLoginID},通道={info.nChannelID},当前时间={datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-            #     elif info.nEventAction == 2:
-            #         logger.info(f"视频移动侦测事件结束: LoginID={lLoginID},通道={info.nChannelID},当前时间={datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-            #     else:
-            #         return
+                return          
             
             if alarm_type == SDK_ALARM_TYPE.EVENT_CROSSREGION_DETECTION:  # 警戒区事件                
                 info = cast(pBuf, POINTER(DEV_EVENT_CROSSREGION_INFO)).contents
@@ -552,26 +724,14 @@ class SmartSchemer:
                     pass
                 else:
                     return
-                #     logger.info(f"警戒区事件开始{info.szName}: LoginID={lLoginID},通道={info.nChannelID},当前时间={datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-                #     logger.info(f"入侵方向:{info.bDirection},检测动作类型:{info.bActionType}，累计触发次数:{info.nOccurrenceCount},{info.nObjetcHumansNum}人")
-                # elif info.bEventAction == 2:
-                #     logger.info(f"警戒区事件结束{info.szName}: LoginID={lLoginID},通道={info.nChannelID},当前时间={datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-                #     logger.info(f"入侵方向:{info.bDirection},检测动作类型:{info.bActionType}，累计触发次数:{info.nOccurrenceCount},{info.nObjetcHumansNum}人")
-                # else:
-                #     return
+               
             elif alarm_type == SDK_ALARM_TYPE.EVENT_CROSSLINE_DETECTION:  # 警戒线事件
                 info = cast(pBuf, POINTER(DEV_EVENT_CROSSLINE_INFO)).contents
                 if info.bEventAction == 0 or info.bEventAction == 1 or info.bEventAction == 2:
                     pass
                 else:
                     return
-                #     logger.info(f"警戒线事件开始{info.szName}: LoginID={lLoginID},通道={info.nChannelID},当前时间={datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-                #     logger.info(f"入侵方向:{info.bDirection}，累计触发次数:{info.nOccurrenceCount},{info.nObjetcHumansNum}人")
-                # elif info.bEventAction == 2:
-                #     logger.info(f"警戒线事件结束{info.szName}: LoginID={lLoginID},通道={info.nChannelID},当前时间={datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-                #     logger.info(f"入侵方向:{info.bDirection}，累计触发次数:{info.nOccurrenceCount},{info.nObjetcHumansNum}人")
-                # else:
-                #     return
+              
             elif alarm_type == SDK_ALARM_TYPE.ALARM_FIREWARNING_INFO:  # 火情报警事件
                 info = cast(pBuf, POINTER(NET_A_DEV_EVENT_FIREWARNING_INFO)).contents
                 if info.nAction == 0 or info.nAction == 1 or info.nAction == 2:
@@ -594,9 +754,9 @@ class SmartSchemer:
                                     'deviceId': device_conn.device_id,
                                     'direction': '0:进入' if info.bDirection == 0 else '1:离开' if info.bDirection == 1 else '2:出现' if info.bDirection == 2 else '3:消失',
                                     'actionType': '0:出现' if info.bActionType == 0 else '1:消失' if info.bActionType == 1 else '2:在区域内' if info.bActionType == 2 else '3:穿越区域',
-                                    'occurrenceCount': f'累计触发{info.nOccurrenceCount}次',
+                                    # 'occurrenceCount': f'累计触发{info.nOccurrenceCount}次',
                                     'recordTime': datetime.now().isoformat() + '+08:00',
-                                    'event_description': f'设备_{device_conn.device_name}_{device_conn.ip_address}_触发区域入侵',
+                                    'event_description': f'{device_conn.device_name}_{device_conn.ip_address}_触发区域入侵',
                                     'bEventAction': info.bEventAction,
                                     'event_type': 'crossregion_alarm'
                                 }
@@ -607,9 +767,9 @@ class SmartSchemer:
                                     'cameraInfo': device_conn.device_name + "_" + device_conn.ip_address,
                                     'deviceId': device_conn.device_id,
                                     'direction': '0:进入' if info.bDirection == 0 else '1:离开' if info.bDirection == 1 else '2:出现' if info.bDirection == 2 else '3:消失',
-                                    'occurrenceCount': f'累计触发{info.nOccurrenceCount}次',
+                                    # 'occurrenceCount': f'累计触发{info.nOccurrenceCount}次',
                                     'recordTime': datetime.now().isoformat() + '+08:00',
-                                    'event_description': f'设备_{device_conn.device_name}_{device_conn.ip_address}_触发绊线入侵',
+                                    'event_description': f'{device_conn.device_name}_{device_conn.ip_address}_触发绊线入侵',
                                     'bEventAction': info.bEventAction,
                                     'event_type': 'crossline_alarm'
                                 }
@@ -621,7 +781,7 @@ class SmartSchemer:
                                     'cameraInfo': device_conn.device_name + "_" + device_conn.ip_address,
                                     'deviceId': device_conn.device_id,
                                     'recordTime': datetime.now().isoformat() + '+08:00',
-                                    'event_description': f'设备_{device_conn.device_name}_{device_conn.ip_address}_出现火情事件',
+                                    'event_description': f'{device_conn.device_name}_{device_conn.ip_address}_出现火情事件',
                                     'nAction': info.nAction,
                                     'event_type': 'fire_alarm_start'
                                 }
@@ -630,7 +790,7 @@ class SmartSchemer:
                                     'cameraInfo': device_conn.device_name + "_" + device_conn.ip_address,
                                     'deviceId': device_conn.device_id,
                                     'recordTime': datetime.now().isoformat() + '+08:00',
-                                    'event_description': f'设备_{device_conn.device_name}_{device_conn.ip_address}_火情消除',
+                                    'event_description': f'{device_conn.device_name}_{device_conn.ip_address}_火情消除',
                                     'nAction': info.nAction,
                                     'event_type': 'fire_alarm_end'
                                 }
@@ -646,11 +806,19 @@ class SmartSchemer:
                             logger.error(f"数据推送失败: {push_error}")
                         
                         # 创建报警事件
+                        alarm_title, alarm_description = self._build_title_description(
+                            prefix="报警",
+                            type_value=alarm_type,
+                            text_map=ALARM_TYPE_TEXT_MAP,
+                            # 保持原先 else 分支行为：默认按“火情报警”展示
+                            default_text=("报警事件", "触发报警事件", ""),
+                            device_conn=device_conn,
+                        )
                         self._create_smart_event(
                             scheme_id=scheme_id,
                             event_type='alarm',
-                            title=f'报警(区域入侵)'if alarm_type == SDK_ALARM_TYPE.EVENT_CROSSREGION_DETECTION else f'报警事件(绊线入侵)' if alarm_type == SDK_ALARM_TYPE.EVENT_CROSSLINE_DETECTION else f'报警事件(火情报警)',
-                            description=f'设备_{device_conn.device_name}_{device_conn.ip_address}_触发区域入侵'if alarm_type == SDK_ALARM_TYPE.EVENT_CROSSREGION_DETECTION else f'设备_{device_conn.device_name}_{device_conn.ip_address}_触发绊线入侵' if alarm_type == SDK_ALARM_TYPE.EVENT_CROSSLINE_DETECTION else f'设备_{device_conn.device_name}_{device_conn.ip_address}_触发火情报警',
+                            title=alarm_title,
+                            description=alarm_description,
                             priority='high',
                             event_data=event_data
                         )

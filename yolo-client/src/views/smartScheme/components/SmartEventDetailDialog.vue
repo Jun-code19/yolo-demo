@@ -201,6 +201,7 @@ const getEventTypeTagType = (type) => {
   const types = {
     alarm: 'danger',
     smart: 'primary',
+    number_stat: 'success',
     motion: 'warning',
     face: 'success',
     vehicle: 'info'
@@ -212,6 +213,7 @@ const getEventTypeText = (type) => {
   const texts = {
     alarm: '报警事件',
     smart: '智能事件',
+    number_stat: '人数统计',
     motion: '运动检测',
     face: '人脸识别',
     vehicle: '车辆检测'

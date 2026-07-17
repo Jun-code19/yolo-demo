@@ -27,6 +27,7 @@ event_type_map = {
     "other": "其他类型",
     "alarm": "订阅报警",
     "smart": "订阅智能",
+    "number_stat": "订阅人数统计",
     "system_log": "设备日志"
 }
 
