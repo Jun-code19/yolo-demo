@@ -13,7 +13,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.triggers.cron import CronTrigger
 
-from src.database import SessionLocal, Device
+from src.database import SessionLocal, Device, DetectionConfig
 from src.data_pusher import data_pusher
 
 logger = logging.getLogger(__name__)
@@ -137,30 +137,56 @@ class DeviceMonitor:
             logger.error(f"设备状态检查失败: {e}")
         finally:
             db.close()
-            
+
     async def push_device_status_data(self):
-        """推送设备状态数据 - 每10秒执行一次"""
         try:
             db = SessionLocal()
-            devices = db.query(Device).all()
-            
-            cameraStatuses = []
-            for device in devices:
-                cameraStatuses.append({
-                    'deviceId': device.device_id,
-                    'online': device.status,
+
+            # ✅ 一次 JOIN，避免 N+1
+            results = (
+                db.query(
+                    Device.device_id,
+                    Device.status,
+                    DetectionConfig.area_coordinates
+                )
+                .outerjoin(
+                    DetectionConfig,
+                    Device.device_id == DetectionConfig.device_id
+                )
+                .all()
+            )
+
+            camera_statuses = []
+
+            for device_id, status, area_coordinates in results:
+                # ✅ 主设备
+                camera_statuses.append({
+                    "deviceId": device_id,
+                    "online": status
                 })
-           
-            # 推送数据
+
+                if not area_coordinates:
+                    continue
+
+                occupancy_areas = area_coordinates.get("occupancyAreas")
+                if not occupancy_areas or len(occupancy_areas) <= 1:
+                    continue
+
+                for area in occupancy_areas:
+                    camera_statuses.append({
+                        "deviceId": area.get("name"),
+                        "online": status
+                    })
+
             try:
-                if data_pusher.push_configs:               
+                if data_pusher.push_configs:
                     data_pusher.push_data(
-                        data={'cameraStatuses': cameraStatuses},
+                        data={"cameraStatuses": camera_statuses},
                         tags=["device_online_status"]
                     )
             except Exception as push_error:
                 logger.error(f"推送设备状态数据失败: {push_error}")
-                
+
         except Exception as e:
             logger.error(f"构建设备状态数据失败: {e}")
         finally:

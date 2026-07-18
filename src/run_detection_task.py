@@ -931,7 +931,7 @@ class DetectionTask:
 
         area_counts = event_info.get('area_counts')
 
-        if not area_counts:
+        if not area_counts or len(area_counts) <= 1:
             push_data = {
                 "cameraInfo": self.device_name + ":" + self.device_ip,
                 "deviceId": self.device_id,
