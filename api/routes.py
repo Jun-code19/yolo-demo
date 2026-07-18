@@ -915,6 +915,11 @@ class Point(BaseModel):
     x: float
     y: float
 
+class occupancyArea(BaseModel):
+    points: Optional[List[Point]] = None # 使用 Point 模型来表示坐标点
+    name: Optional[str] = None # 区域名称
+    id: Optional[str] = None # 区域ID
+
 class AreaCoordinates(BaseModel):
     alertThreshold: Optional[int] = None # 报警阈值
     analysisType: Optional[str] = None # 分析类型 counting/behavior
@@ -926,6 +931,7 @@ class AreaCoordinates(BaseModel):
     flowPeriod: Optional[str] = None # 人流周期 10s/30s/60s/realtime
     maxCapacity: Optional[int] = None # 最大容量 100
     points: Optional[List[Point]] = None  # 使用 Point 模型来表示坐标点
+    occupancyAreas: Optional[List[occupancyArea]] = None # 使用 List[List[Point]] 模型来表示区域
     pushLabel: Optional[str] = None # 推送标签
     alarm_interval: Optional[int] = None # 报警推送间隔(秒)
     behaviorSubtype: Optional[str] = None  # 可选值：directional（方向检测）、simple（普通检测）

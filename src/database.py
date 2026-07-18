@@ -266,11 +266,11 @@ CrowdAnalysisJob.results = relationship("CrowdAnalysisResult", back_populates="j
 # dev_mode = os.getenv("DEV_MODE", "false").lower() == "true"
 # if dev_mode:
 #     # 开发环境使用localhost
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:admin123@10.108.34.48:5432/postgres")
+# DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:admin123@127.0.0.1:5432/postgres")
 # DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:admin123@10.55.4.26:5432/yolo")
 # else:
     # 生产环境使用Docker容器名
-# DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:admin123@postgres:5432/yolo")
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:admin123@postgres:5432/yolo")
 
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

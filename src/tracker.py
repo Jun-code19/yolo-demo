@@ -24,7 +24,10 @@ class ObjectTracker:
         
         # 智能分析相关
         self.area_coordinates = None
-        self.current_count = 0  # 区域内当前人数
+        self.area_points = None
+        self.area_polygons = []  # 多区域人数统计
+        self.area_counts = {}  # 各区域独立人数 {area_id: {name, count}}
+        self.current_count = 0  # 总人数（各区域之和，用于报警）
         self.today_in_count = 0  # 今日进入总数
         self.today_out_count = 0  # 今日离开总数
         self.triggered_events = {}  # 已触发的事件，避免重复触发
@@ -67,13 +70,41 @@ class ObjectTracker:
         """设置区域坐标"""
         self.area_coordinates = area_coordinates
         self.frame_shape = frame_shape
-        
-        # 将归一化坐标转换为像素坐标
-        if area_coordinates and area_coordinates.get('points'):
-            h, w = frame_shape[:2]
+        self.area_points = None
+        self.area_polygons = []
+        self.area_counts = {}
+
+        if not area_coordinates:
+            return
+
+        h, w = frame_shape[:2]
+
+        if area_coordinates.get('countingType') == 'occupancy':
+            occupancy_areas = area_coordinates.get('occupancyAreas') or []
+            if occupancy_areas:
+                for i, area in enumerate(occupancy_areas):
+                    area_points = area.get('points') or []
+                    if len(area_points) >= 3:
+                        pixel_points = [(int(p['x'] * w), int(p['y'] * h)) for p in area_points]
+                        self.area_polygons.append({
+                            'id': area.get('id', f'area-{i}'),
+                            'name': area.get('name', f'区域{i + 1}'),
+                            'points': pixel_points
+                        })
+            elif area_coordinates.get('points'):
+                pixel_points = [(int(p['x'] * w), int(p['y'] * h)) for p in area_coordinates['points']]
+                self.area_polygons = [{
+                    'id': 'area-0',
+                    'name': '区域1',
+                    'points': pixel_points
+                }]
+
+            if self.area_polygons:
+                self.area_points = self.area_polygons[0]['points']
+            return
+
+        if area_coordinates.get('points'):
             self.area_points = [(int(p['x'] * w), int(p['y'] * h)) for p in area_coordinates['points']]
-        else:
-            self.area_points = None
     
     def _point_in_polygon(self, point, polygon):
         """判断点是否在多边形内（Ray casting算法）"""
@@ -529,9 +560,19 @@ class ObjectTracker:
             counting_type = self.area_coordinates.get('countingType')
             
             if counting_type == 'occupancy':
-                # 区域人数统计 - 显示当前人数
-                info_text = f"当前人数: {self.current_count}"
-                self._draw_chinese_text(frame, info_text, (10, 10), 30, (0, 255, 0))  #分辨率太低，字体太大？
+                # 区域人数统计 - 显示各区域人数及总人数
+                y = 10
+                if self.area_counts and len(self.area_counts) > 1:
+                    self._draw_chinese_text(frame, f"总人数: {self.current_count}", (10, y), 30, (0, 255, 0))
+                    y += int(frame.shape[0] / 22)
+                    for info in self.area_counts.values():
+                        self._draw_chinese_text(frame, f"{info['name']}: {info['count']}", (10, y), 24, (0, 255, 0))
+                        y += int(frame.shape[0] / 28)
+                else:
+                    area_name = next(iter(self.area_counts.values()), {}).get('name', '当前人数')
+                    label = area_name if self.area_counts else '当前人数'
+                    info_text = f"{label}: {self.current_count}"
+                    self._draw_chinese_text(frame, info_text, (10, y), 30, (0, 255, 0))
                 
                 # 显示今日统计
                 # today_text = f"今日进入: {self.today_in_count} | 今日离开: {self.today_out_count}"
@@ -572,58 +613,66 @@ class ObjectTracker:
         """获取计数统计信息"""
         return {
             'current_count': self.current_count,
+            'area_counts': self.area_counts,
             'today_in_count': self.today_in_count,
             'today_out_count': self.today_out_count,
             'total_today': self.today_in_count + self.today_out_count
         }
 
     def _update_area_occupancy_count(self):
-        """更新区域内人数统计"""
+        """更新区域内人数统计（各区域独立计数，总人数为各区域之和）"""
         if not self.area_coordinates or self.area_coordinates.get('countingType') != 'occupancy':
             return
-        
-        # 统计当前帧中所有在区域内的活跃目标
-        current_count_in_area = 0
-        for track_id in self.active_tracks:
-            if track_id in self.trackers:
-                tracker = self.trackers[track_id]
-                center = tracker['center']
-                if self._point_in_polygon(center, self.area_points):
-                    current_count_in_area += 1
-        
-        # 检查人数是否发生变化
-        if current_count_in_area != self.current_count:
+
+        polygons = self.area_polygons or []
+        if not polygons and self.area_points and len(self.area_points) >= 3:
+            polygons = [{'id': 'area-0', 'name': '区域1', 'points': self.area_points}]
+
+        new_area_counts = {}
+        for area in polygons:
+            count = 0
+            for track_id in self.active_tracks:
+                if track_id in self.trackers:
+                    center = self.trackers[track_id]['center']
+                    if self._point_in_polygon(center, area['points']):
+                        count += 1
+            new_area_counts[area['id']] = {
+                'name': area['name'],
+                'count': count
+            }
+
+        current_total_count = sum(item['count'] for item in new_area_counts.values())
+
+        counts_changed = current_total_count != self.current_count
+        if not counts_changed:
+            for area_id, info in new_area_counts.items():
+                old_count = (self.area_counts or {}).get(area_id, {}).get('count')
+                if old_count != info['count']:
+                    counts_changed = True
+                    break
+
+        if counts_changed:
             old_count = self.current_count
-            self.current_count = current_count_in_area
-            
-            # 触发人数变化事件（使用帧数作为事件key的一部分避免重复）
-            change_type = 'increase' if current_count_in_area > old_count else 'decrease'
-            change_amount = abs(current_count_in_area - old_count)
-            
-            # 使用帧数和变化量创建唯一的事件key
+            self.current_count = current_total_count
+            self.area_counts = new_area_counts
+
+            change_type = 'increase' if current_total_count > old_count else 'decrease'
+            change_amount = abs(current_total_count - old_count)
+
             event_key = f"occupancy_{self.frame_count}_{change_type}_{change_amount}"
             if event_key not in self.triggered_events:
                 self.triggered_events[event_key] = {
-                    'track_id': 0,  # 区域统计事件不关联特定track
+                    'track_id': 0,
                     'event_type': f'occupancy_change_{change_type}',
                     'position': None,
-                    # 'old_count': old_count,
-                    # 'new_count': current_count_in_area,
-                    # 'change_amount': change_amount,
-                    # 'count_in': self.today_in_count,
-                    # 'count_out': self.today_out_count,
                     'current_count': self.current_count,
+                    'area_counts': self.area_counts,
                     'today_in_count': 0,
                     'today_out_count': 0,
                     'timestamp': self.frame_count
                 }
-                
-                # 输出事件信息
-                change_text = '增加' if current_count_in_area > old_count else '减少'
-                # print(f"区域人数{change_text} {change_amount}人: {old_count} -> {current_count_in_area}, 今日累计进入: {self.today_in_count}, 今日累计离开: {self.today_out_count}")
-            
-            # 更新今日统计（基于变化量）
-            change_amount = current_count_in_area - old_count
+
+            change_amount = current_total_count - old_count
             if change_amount > 0:
                 self.today_in_count += change_amount
             else:

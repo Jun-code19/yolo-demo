@@ -841,6 +841,7 @@ class DetectionTask:
                 "event_description": self._get_event_description(event_info['event_type']),
                 "target_class": self.target_class,
                 "current_count": event_info['current_count'],
+                "area_counts": event_info.get('area_counts'),
                 "today_in_count": event_info['today_in_count'],
                 "today_out_count": event_info['today_out_count']
             }
@@ -923,49 +924,54 @@ class DetectionTask:
         """推送人数统计事件"""
         if not data_pusher.push_configs:
             return
-        
-        if self.area_coordinates and self.area_coordinates.get('pushLabel'):
-            push_label = self.area_coordinates.get('pushLabel')
-       
+
+        push_label = self.area_coordinates.get('pushLabel') if self.area_coordinates else None
+
+        record_time = datetime.now().isoformat() + '+08:00'
+
+        area_counts = event_info.get('area_counts')
+
+        if not area_counts:
             push_data = {
                 "cameraInfo": self.device_name + ":" + self.device_ip,
                 "deviceId": self.device_id,
-                "enteredCount": event_info['today_in_count'],
-                "exitedCount": event_info['today_out_count'],
-                "stayingCount": event_info['current_count'],
-                "passedCount":0,
-                "recordTime": datetime.now().isoformat() + '+08:00',
-                # "event_description": self._get_event_description(event_info['event_type']),
-                # "target_class": self.target_class
+                "enteredCount": event_info.get('today_in_count', 0),
+                "exitedCount": event_info.get('today_out_count', 0),
+                "stayingCount": event_info.get('current_count', 0),
+                "areaCounts": event_info.get('area_counts', {}),
+                "passedCount": 0,
+                "recordTime": record_time,
             }
-            # 增加标签，使推送更灵活
             data_pusher.push_data(
-                data=push_data, 
-                image=frame, 
+                data=push_data,
+                image=frame,
                 tags=[push_label, f"device_{self.device_id}"],
-                config_id=self.config_id  # 为了兼容性保留
+                config_id=self.config_id
             )
-        
-            # 记录性能统计信息
-            # db = SessionLocal()
-            # try:
-            #     perf = DetectionPerformance(
-            #         device_id=self.device_id,
-            #         config_id=self.config_id,
-            #         detection_time=speed['inference'],
-            #         preprocessing_time=speed['preprocess'],
-            #         postprocessing_time=speed['postprocess'],
-            #         frame_width=frame.shape[1],
-            #         frame_height=frame.shape[0],
-            #         objects_detected=len(detections)
-            #     )
-            #     db.add(perf)
-            #     db.commit()
-            # except Exception as e:
-            #     logger.error(f"保存性能数据失败: {e}")
-            #     db.rollback()
-            # finally:
-            #     db.close()
+            return
+
+        push_data_list = []
+
+        for area_key, area_info in area_counts.items():
+            push_data = {
+                "cameraInfo": self.device_name + ":" + self.device_ip,
+                "deviceId": area_info.get("name"),          # ✅ 使用区域 name
+                "enteredCount": event_info.get('today_in_count', 0),
+                "exitedCount": event_info.get('today_out_count', 0),
+                "stayingCount": area_info.get("count", 0),  # ✅ 使用区域 count
+                "passedCount": 0,
+                "recordTime": record_time,
+            }
+            push_data_list.append(push_data)
+
+        # 逐条推送
+        for push_data in push_data_list:
+            data_pusher.push_data(
+                data=push_data,
+                image=frame,
+                tags=[push_label, f"device_{self.device_id}"],
+                config_id=self.config_id
+            )
 
     def _check_alert(self, current_count):
         """检查人数是否超过预警阈值"""
@@ -1075,6 +1081,18 @@ class DetectionTask:
 
         if roi_type not in ['line', 'area', 'occupancy', 'flow']:
             raise ValueError("Invalid ROI type. Must be 'line' or 'area' or 'occupancy' or 'flow'")
+
+        if roi_type == 'occupancy' and self.area_coordinates.get('occupancyAreas'):
+            for area in self.area_coordinates['occupancyAreas']:
+                area_points = area.get('points') or []
+                if len(area_points) < 3:
+                    continue
+                line = self.normalize_points(area_points, frame.shape)
+                roi_array = np.array(line, np.int32)
+                cv2.polylines(frame, [roi_array], True, line_color, thickness, line_type)
+                if fill_color[3] != 0:
+                    cv2.fillPoly(frame, [roi_array], fill_color[:3])
+            return
         
         line = self.normalize_points(roi_points, frame.shape)
 

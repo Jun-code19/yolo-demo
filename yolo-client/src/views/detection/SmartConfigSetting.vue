@@ -77,16 +77,27 @@
               <div class="drawing-controls">
                 <el-button type="primary" @click="startDrawing"
                   :disabled="!configForm.analysisType || configForm.analysisType === 'none'">
-                  开始绘制
+                  {{ isMultiAreaOccupancy() ? '绘制区域' : '开始绘制' }}
                 </el-button>
-                <el-button @click="clearDrawing" :disabled="configForm.analysisType === 'none'">清除</el-button>
+                <el-button v-if="isMultiAreaOccupancy() && isDrawing" @click="finishDrawingAll">
+                  完成全部
+                </el-button>
+                <el-button @click="clearDrawing" :disabled="configForm.analysisType === 'none'">
+                  {{ isMultiAreaOccupancy() ? '清除全部' : '清除' }}
+                </el-button>
               </div>
             </div>
           </div>
 
           <div class="drawing-hints">
             <el-alert title="绘制提示" type="info" :closable="false"
-              v-if="configForm.analysisType && configForm.analysisType !== 'none'">
+              v-if="configForm.analysisType && configForm.analysisType !== 'none' && isMultiAreaOccupancy()">
+              <p>• 左键点击添加顶点，右键完成当前区域</p>
+              <p>• 可连续绘制多个区域，完成后点击「完成全部」</p>
+              <p>• 各区域独立计数，报警阈值按总人数生效</p>
+            </el-alert>
+            <el-alert title="绘制提示" type="info" :closable="false"
+              v-else-if="configForm.analysisType && configForm.analysisType !== 'none'">
               <p>• 左键点击添加顶点</p>
               <p>• 右键点击完成绘制</p>
               <p>• 请先在右侧选择智能方案类型</p>
@@ -288,6 +299,25 @@
                   </el-form-item>
                 </el-col>
               </el-row>
+
+              <div v-if="configForm.coordinates.occupancyAreas?.length" class="occupancy-area-list">
+                <div class="area-list-title">已绘制区域（{{ configForm.coordinates.occupancyAreas.length }}）</div>
+                <div
+                  v-for="(area, index) in configForm.coordinates.occupancyAreas"
+                  :key="area.id"
+                  class="occupancy-area-item"
+                >
+                  <span class="area-color-dot" :style="{ backgroundColor: getAreaColor(index).stroke }"></span>
+                  <el-input
+                    v-model="area.name"
+                    size="small"
+                    :placeholder="`区域${index + 1}`"
+                    class="area-name-input"
+                  />
+                  <span class="area-point-count">{{ area.points.length }} 个顶点</span>
+                  <el-button type="danger" link size="small" @click="removeOccupancyArea(index)">删除</el-button>
+                </div>
+              </div>
             </div>
 
             <!-- 人流统计配置 -->
@@ -420,6 +450,7 @@ export default defineComponent({
         behaviorSubtype: "simple",
         behaviorDirection: "in",
         countingType: null,
+        occupancyAreas: [],
         countingInterval: 5,
         maxCapacity: 100,
         flowDirection: 'bidirectional',
@@ -442,6 +473,46 @@ export default defineComponent({
     const isDrawing = ref(false);
     const points = ref([]);
 
+    const AREA_COLORS = [
+      { stroke: '#00ff00', fill: 'rgba(0, 255, 0, 0.15)' },
+      { stroke: '#00aaff', fill: 'rgba(0, 170, 255, 0.15)' },
+      { stroke: '#ff9900', fill: 'rgba(255, 153, 0, 0.15)' },
+      { stroke: '#ff44aa', fill: 'rgba(255, 68, 170, 0.15)' },
+      { stroke: '#aa44ff', fill: 'rgba(170, 68, 255, 0.15)' },
+    ];
+
+    const isMultiAreaOccupancy = () => {
+      return configForm.analysisType === 'counting' && configForm.coordinates.countingType === 'occupancy';
+    };
+
+    const createAreaId = () => `area-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+
+    const getAreaColor = (index) => AREA_COLORS[index % AREA_COLORS.length];
+
+    const normalizeOccupancyAreas = (coordinates) => {
+      if (!coordinates || coordinates.countingType !== 'occupancy') return;
+      if (Array.isArray(coordinates.occupancyAreas) && coordinates.occupancyAreas.length > 0) {
+        return;
+      }
+      if (coordinates.points && coordinates.points.length >= 3) {
+        coordinates.occupancyAreas = [{
+          id: createAreaId(),
+          name: '区域1',
+          points: [...coordinates.points]
+        }];
+      } else if (!coordinates.occupancyAreas) {
+        coordinates.occupancyAreas = [];
+      }
+    };
+
+    const syncOccupancyPoints = () => {
+      if (!isMultiAreaOccupancy()) return;
+      const areas = configForm.coordinates.occupancyAreas || [];
+      configForm.coordinates.points = areas.length > 0 ? [...areas[0].points] : [];
+    };
+
+    const getOccupancyAreaCount = () => (configForm.coordinates.occupancyAreas || []).length;
+
     // 设备抓图相关
     const isSnapshotLoading = ref(false);
 
@@ -458,6 +529,7 @@ export default defineComponent({
         behaviorSubtype: "simple",
         behaviorDirection: "in",
         countingType: null,
+        occupancyAreas: [],
         countingInterval: 5,
         maxCapacity: 100,
         flowDirection: 'bidirectional',
@@ -506,7 +578,19 @@ export default defineComponent({
         }
 
         // 智能方案的验证逻辑
-        if (!configForm.coordinates.points || configForm.coordinates.points.length === 0) {
+        if (isMultiAreaOccupancy()) {
+          normalizeOccupancyAreas(configForm.coordinates);
+          const areas = configForm.coordinates.occupancyAreas || [];
+          if (areas.length === 0) {
+            throw new Error('请至少绘制一个统计区域');
+          }
+          for (let i = 0; i < areas.length; i++) {
+            if (!areas[i].points || areas[i].points.length < 3) {
+              throw new Error(`${areas[i].name || `区域${i + 1}`}无效（至少需要3个点）`);
+            }
+          }
+          syncOccupancyPoints();
+        } else if (!configForm.coordinates.points || configForm.coordinates.points.length === 0) {
           throw new Error('请绘制有效的区域或拌线');
         }
 
@@ -520,11 +604,13 @@ export default defineComponent({
           }
         }
 
-        const shouldClose = getShouldCloseArea();
-        const minPoints = shouldClose ? 3 : 2;
-        if (configForm.coordinates.points.length < minPoints) {
-          const typeLabel = shouldClose ? '区域' : '拌线';
-          throw new Error(`请绘制有效的${typeLabel}（至少需要${minPoints}个点）`);
+        if (!isMultiAreaOccupancy()) {
+          const shouldClose = getShouldCloseArea();
+          const minPoints = shouldClose ? 3 : 2;
+          if (configForm.coordinates.points.length < minPoints) {
+            const typeLabel = shouldClose ? '区域' : '拌线';
+            throw new Error(`请绘制有效的${typeLabel}（至少需要${minPoints}个点）`);
+          }
         }
 
         saveLoading.value = true;
@@ -558,7 +644,11 @@ export default defineComponent({
       if (configForm.analysisType === 'behavior') {
         return configForm.coordinates.behaviorType && configForm.coordinates.points.length > 0;
       } else if (configForm.analysisType === 'counting') {
-        return configForm.coordinates.countingType && configForm.coordinates.points.length > 0;
+        if (!configForm.coordinates.countingType) return false;
+        if (configForm.coordinates.countingType === 'occupancy') {
+          return getOccupancyAreaCount() > 0;
+        }
+        return configForm.coordinates.points.length > 0;
       }
 
       return false;
@@ -589,7 +679,7 @@ export default defineComponent({
 
     const getCountingDrawingTypeHint = () => {
       if (configForm.coordinates.countingType === 'occupancy') {
-        return '区域人数统计需要绘制封闭区域，用于统计区域内的人数';
+        return '区域人数统计可绘制多个封闭区域，各区域独立计数，报警阈值按总人数生效';
       } else if (configForm.coordinates.countingType === 'flow') {
         return '人流统计需要绘制拌线，用于统计穿越该线的人数';
       }
@@ -601,6 +691,7 @@ export default defineComponent({
       clearDrawing();
       configForm.coordinates.behaviorType = null;
       configForm.coordinates.countingType = null;
+      configForm.coordinates.occupancyAreas = [];
       configForm.coordinates.behaviorSubtype = 'simple';
       configForm.coordinates.behaviorDirection = 'in';
       configForm.coordinates.enableAlert = false;
@@ -611,6 +702,7 @@ export default defineComponent({
       } else if (type === 'none') {
         // 清空所有智能分析相关设置
         configForm.coordinates.points = [];
+        configForm.coordinates.occupancyAreas = [];
         // configForm.coordinates.pushLabel = '';
         // configForm.coordinates.alarm_interval = 0;
         configForm.coordinates.alertThreshold = 50;
@@ -625,6 +717,7 @@ export default defineComponent({
 
     const handleCountingTypeChange = (type) => {
       clearDrawing();
+      configForm.coordinates.occupancyAreas = [];
       if (type === 'occupancy') {
         configForm.coordinates.behaviorType = 'area';
       } else if (type === 'flow') {
@@ -658,9 +751,7 @@ export default defineComponent({
     const onImageLoaded = () => {
       setTimeout(() => {
         initCanvas();
-        if (configForm.coordinates.points && configForm.coordinates.points.length > 0) {
-          drawPolygon(configForm.coordinates.points);
-        }
+        redrawCanvas();
       }, 100);
     };
 
@@ -765,48 +856,50 @@ export default defineComponent({
       }
     };
 
-    const drawPolygon = (points) => {
-      if (!drawingCanvas.value || !points || points.length === 0) return;
+    const drawPolygonShape = (ctx, polygonPoints, displayWidth, displayHeight, options = {}) => {
+      const {
+        strokeStyle = '#00ff00',
+        fillStyle = 'rgba(0, 255, 0, 0.15)',
+        shouldClose = false,
+        showVertices = true,
+        isPreview = false
+      } = options;
 
-      const canvas = drawingCanvas.value;
-      const ctx = canvas.getContext('2d');
-      const displayWidth = canvas.clientWidth;
-      const displayHeight = canvas.clientHeight;
+      if (!polygonPoints || polygonPoints.length === 0) return;
 
-      ctx.clearRect(0, 0, displayWidth, displayHeight);
+      ctx.save();
+      ctx.strokeStyle = strokeStyle;
+      ctx.lineWidth = isPreview ? 1 : 2;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
 
-      if (points.length > 0) {
-        ctx.save();
-        ctx.strokeStyle = '#00ff00';
-        ctx.lineWidth = 2;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-
+      if (polygonPoints.length > 1) {
         ctx.beginPath();
-        const firstPoint = points[0];
-        const startX = Math.round(firstPoint.x * displayWidth) + 0.5;
-        const startY = Math.round(firstPoint.y * displayHeight) + 0.5;
-        ctx.moveTo(startX, startY);
+        const firstPoint = polygonPoints[0];
+        ctx.moveTo(
+          Math.round(firstPoint.x * displayWidth) + 0.5,
+          Math.round(firstPoint.y * displayHeight) + 0.5
+        );
 
-        points.forEach((point, index) => {
-          if (index > 0) {
-            const x = Math.round(point.x * displayWidth) + 0.5;
-            const y = Math.round(point.y * displayHeight) + 0.5;
-            ctx.lineTo(x, y);
-          }
-        });
+        for (let i = 1; i < polygonPoints.length; i++) {
+          const point = polygonPoints[i];
+          ctx.lineTo(
+            Math.round(point.x * displayWidth) + 0.5,
+            Math.round(point.y * displayHeight) + 0.5
+          );
+        }
 
-        // 判断是否需要闭合区域
-        const shouldClose = getShouldCloseArea();
-        if (shouldClose) {
+        if (shouldClose && polygonPoints.length >= 3) {
           ctx.closePath();
-          ctx.fillStyle = 'rgba(0, 255, 0, 0.15)';
+          ctx.fillStyle = fillStyle;
           ctx.fill();
         }
 
         ctx.stroke();
+      }
 
-        points.forEach(point => {
+      if (showVertices) {
+        polygonPoints.forEach(point => {
           const x = Math.round(point.x * displayWidth);
           const y = Math.round(point.y * displayHeight);
 
@@ -818,19 +911,58 @@ export default defineComponent({
           ctx.lineWidth = 1;
           ctx.stroke();
         });
-
-        ctx.restore();
       }
+
+      ctx.restore();
+    };
+
+    const drawPolygon = (polygonPoints) => {
+      if (!drawingCanvas.value || !polygonPoints || polygonPoints.length === 0) return;
+
+      const canvas = drawingCanvas.value;
+      const ctx = canvas.getContext('2d');
+      const displayWidth = canvas.clientWidth;
+      const displayHeight = canvas.clientHeight;
+
+      ctx.clearRect(0, 0, displayWidth, displayHeight);
+      drawPolygonShape(ctx, polygonPoints, displayWidth, displayHeight, {
+        shouldClose: getShouldCloseArea()
+      });
     };
 
     const startDrawing = () => {
       if (configForm.coordinates.behaviorType || configForm.coordinates.countingType) {
         isDrawing.value = true;
         points.value = [];
-        configForm.coordinates.points = [];
+        if (!isMultiAreaOccupancy()) {
+          configForm.coordinates.points = [];
+        }
       } else {
         ElMessage.info('请选择检测类型');
       }
+    };
+
+    const finishDrawingAll = () => {
+      if (!isMultiAreaOccupancy()) {
+        isDrawing.value = false;
+        return;
+      }
+
+      points.value = [];
+      isDrawing.value = false;
+      redrawCanvas();
+
+      if (getOccupancyAreaCount() === 0) {
+        ElMessage.warning('请至少绘制一个区域');
+      } else {
+        ElMessage.success(`已完成 ${getOccupancyAreaCount()} 个区域的绘制`);
+      }
+    };
+
+    const removeOccupancyArea = (index) => {
+      configForm.coordinates.occupancyAreas.splice(index, 1);
+      syncOccupancyPoints();
+      redrawCanvas();
     };
 
     const clearDrawing = () => {
@@ -842,6 +974,9 @@ export default defineComponent({
         ctx.clearRect(0, 0, displayWidth, displayHeight);
       }
       points.value = [];
+      if (isMultiAreaOccupancy()) {
+        configForm.coordinates.occupancyAreas = [];
+      }
       configForm.coordinates.points = [];
       isDrawing.value = false;
     };
@@ -881,6 +1016,23 @@ export default defineComponent({
 
       if (!isDrawing.value || points.value.length < minPoints) return;
 
+      if (isMultiAreaOccupancy()) {
+        const areaIndex = getOccupancyAreaCount() + 1;
+        if (!configForm.coordinates.occupancyAreas) {
+          configForm.coordinates.occupancyAreas = [];
+        }
+        configForm.coordinates.occupancyAreas.push({
+          id: createAreaId(),
+          name: `区域${areaIndex}`,
+          points: [...points.value]
+        });
+        syncOccupancyPoints();
+        points.value = [];
+        redrawCanvas();
+        ElMessage.success(`区域${areaIndex}绘制完成，可继续绘制下一个区域`);
+        return;
+      }
+
       configForm.coordinates.points = [...points.value];
       drawPolygon(points.value);
       isDrawing.value = false;
@@ -899,60 +1051,37 @@ export default defineComponent({
 
       ctx.clearRect(0, 0, displayWidth, displayHeight);
 
-      if (points.value.length === 0 && !previewPoint) return;
-
-      ctx.save();
+      if (isMultiAreaOccupancy()) {
+        (configForm.coordinates.occupancyAreas || []).forEach((area, index) => {
+          const color = getAreaColor(index);
+          drawPolygonShape(ctx, area.points, displayWidth, displayHeight, {
+            strokeStyle: color.stroke,
+            fillStyle: color.fill,
+            shouldClose: true
+          });
+        });
+      } else if (configForm.coordinates.points?.length > 0 && !isDrawing.value) {
+        drawPolygonShape(ctx, configForm.coordinates.points, displayWidth, displayHeight, {
+          shouldClose: getShouldCloseArea()
+        });
+      }
 
       if (points.value.length > 0) {
-        points.value.forEach(point => {
-          const x = Math.round(point.x * displayWidth);
-          const y = Math.round(point.y * displayHeight);
+        const currentColor = isMultiAreaOccupancy()
+          ? getAreaColor(getOccupancyAreaCount())
+          : getAreaColor(0);
 
-          ctx.beginPath();
-          ctx.arc(x, y, 4, 0, Math.PI * 2);
-          ctx.fillStyle = '#ff4444';
-          ctx.fill();
-          ctx.strokeStyle = '#ffffff';
-          ctx.lineWidth = 1;
-          ctx.stroke();
+        drawPolygonShape(ctx, points.value, displayWidth, displayHeight, {
+          strokeStyle: currentColor.stroke,
+          fillStyle: currentColor.fill,
+          shouldClose: false
         });
 
-        if (points.value.length > 1) {
+        if (previewPoint) {
+          ctx.save();
           ctx.beginPath();
-          ctx.strokeStyle = '#00ff00';
-          ctx.lineWidth = 2;
-          ctx.lineCap = 'round';
-          ctx.lineJoin = 'round';
-
-          const firstPoint = points.value[0];
-          ctx.moveTo(
-            Math.round(firstPoint.x * displayWidth) + 0.5,
-            Math.round(firstPoint.y * displayHeight) + 0.5
-          );
-
-          for (let i = 1; i < points.value.length; i++) {
-            const point = points.value[i];
-            ctx.lineTo(
-              Math.round(point.x * displayWidth) + 0.5,
-              Math.round(point.y * displayHeight) + 0.5
-            );
-          }
-
-          const shouldClose = getShouldCloseArea();
-          if (shouldClose && !isDrawing.value && points.value.length >= 3) {
-            ctx.closePath();
-            ctx.fillStyle = 'rgba(0, 255, 0, 0.15)';
-            ctx.fill();
-          }
-
-          ctx.stroke();
-        }
-
-        if (previewPoint && points.value.length > 0) {
-          ctx.beginPath();
-          ctx.strokeStyle = '#00ff00';
+          ctx.strokeStyle = currentColor.stroke;
           ctx.lineWidth = 1;
-
           const lastPoint = points.value[points.value.length - 1];
           ctx.moveTo(
             Math.round(lastPoint.x * displayWidth) + 0.5,
@@ -963,10 +1092,9 @@ export default defineComponent({
             Math.round(previewPoint.y * displayHeight) + 0.5
           );
           ctx.stroke();
+          ctx.restore();
         }
       }
-
-      ctx.restore();
     };
 
     // 数据加载方法
@@ -996,6 +1124,8 @@ export default defineComponent({
             configForm.analysisType = coordinates.analysisType || 'none';
 
             Object.assign(configForm.coordinates, coordinates);
+            normalizeOccupancyAreas(configForm.coordinates);
+            syncOccupancyPoints();
           } else {
             // 如果没有配置数据，默认选择"无智能方案"
             configForm.analysisType = 'none';
@@ -1026,7 +1156,12 @@ export default defineComponent({
       deviceImage,
       deviceImageRef,
       drawingCanvas,
+      isDrawing,
       isSnapshotLoading,
+      isMultiAreaOccupancy,
+      getAreaColor,
+      finishDrawingAll,
+      removeOccupancyArea,
       goBack,
       resetConfig,
       saveConfig,
@@ -1402,6 +1537,42 @@ export default defineComponent({
   border-radius: 6px;
   margin-top: 15px;
   border: 1px solid #e9ecef;
+}
+
+.occupancy-area-list {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed #dcdfe6;
+}
+
+.area-list-title {
+  font-size: 13px;
+  color: #606266;
+  margin-bottom: 8px;
+}
+
+.occupancy-area-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+}
+
+.area-color-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.area-name-input {
+  width: 120px;
+}
+
+.area-point-count {
+  font-size: 12px;
+  color: #909399;
+  flex: 1;
 }
 
 .auto-draw-type {
