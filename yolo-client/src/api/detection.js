@@ -44,10 +44,19 @@ apiClient.interceptors.response.use(
 export const detectionConfigApi = {
   // 获取检测配置列表
   getConfigs(params = { skip: 0, limit: 100 }, frequency) {
+    const queryParams = { ...(params || { skip: 0, limit: 100 }) };
     if (frequency) {
-      params = { ...params, frequency };
+      queryParams.frequency = frequency;
     }
-    return apiClient.get('/detection/configs', { params });
+    const filteredParams = Object.fromEntries(
+      Object.entries(queryParams).filter(([_, value]) => value !== null && value !== undefined && value !== '')
+    );
+    return apiClient.get('/detection/configs', { params: filteredParams });
+  },
+
+  // 获取检测配置统计概览
+  getConfigsStatsOverview() {
+    return apiClient.get('/detection/configs/stats');
   },
   
   // 获取单个检测配置

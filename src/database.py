@@ -554,6 +554,14 @@ class HeatmapDashboardConfig(Base):
     # 关系
     map = relationship("HeatmapMap", back_populates="dashboard_configs")
 
+class PlatformSetting(Base):
+    """平台级键值配置（如大屏外部接口）"""
+    __tablename__ = "platform_settings"
+
+    setting_key = Column(String(128), primary_key=True, comment="配置键")
+    setting_value = Column(JSONB, nullable=False, default=dict, comment="配置值(JSON)")
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, comment="更新时间")
+
 class HeatmapHistory(Base):
     """热力图历史数据表 (可选，用于存储历史统计)"""
     __tablename__ = "heatmap_history"

@@ -3,7 +3,7 @@
 """
 import cv2
 import numpy as np
-from collections import defaultdict
+from collections import deque
 import colorsys
 from PIL import Image, ImageDraw, ImageFont
 from datetime import datetime
@@ -33,6 +33,9 @@ class ObjectTracker:
         self.triggered_events = {}  # 已触发的事件，避免重复触发
         self.line_crossed_tracks = {}  # 记录已过线的轨迹
         self.date = datetime.now().strftime("%Y-%m-%d")  # 记录当前日期
+        self._occupancy_history = {}  # 各区域原始人数历史 {area_id: deque}
+        self._display_total = 0
+        self._decrease_hold = 0
 
         # 尝试加载中文字体，如果失败则使用默认字体
         try:
@@ -73,6 +76,9 @@ class ObjectTracker:
         self.area_points = None
         self.area_polygons = []
         self.area_counts = {}
+        self._occupancy_history = {}
+        self._display_total = 0
+        self._decrease_hold = 0
 
         if not area_coordinates:
             return
@@ -320,77 +326,216 @@ class ObjectTracker:
         iou = intersection_area / union_area if union_area > 0 else 0
         return iou
 
+    def _center_distance(self, bbox1, bbox2):
+        c1 = self._get_center(bbox1)
+        c2 = self._get_center(bbox2)
+        return float(np.hypot(c1[0] - c2[0], c1[1] - c2[1]))
+
+    def _bbox_size(self, bbox):
+        x1, y1, x2, y2 = bbox
+        return max(x2 - x1, y2 - y1, 1.0)
+
+    def _get_reassociate_threshold(self, tracker, detection):
+        """跳帧检测时 IoU 容易失效，用中心距离兜底关联"""
+        base_size = max(
+            self._bbox_size(tracker['box']),
+            self._bbox_size(detection['bbox']),
+        )
+        age_factor = 1 + tracker.get('age', 0) * 0.6
+        return max(base_size * 2.0 * age_factor, 100.0)
+
+    def _match_detections_to_tracks(self, detections):
+        """两阶段匹配：IoU 优先，中心距离兜底，减少移动时 ID 切换"""
+        matched_detections = set()
+        matched_trackers = set()
+        matches = []
+
+        iou_candidates = []
+        for det_idx, det in enumerate(detections):
+            for track_id, tracker in self.trackers.items():
+                iou = self._calculate_iou(tracker['box'], det['bbox'])
+                if iou >= self.iou_threshold:
+                    iou_candidates.append((iou, track_id, det_idx))
+
+        for _, track_id, det_idx in sorted(iou_candidates, reverse=True):
+            if track_id in matched_trackers or det_idx in matched_detections:
+                continue
+            matches.append((track_id, det_idx))
+            matched_trackers.add(track_id)
+            matched_detections.add(det_idx)
+
+        dist_candidates = []
+        for det_idx, det in enumerate(detections):
+            if det_idx in matched_detections:
+                continue
+            for track_id, tracker in self.trackers.items():
+                if track_id in matched_trackers:
+                    continue
+                if tracker.get('class') != det.get('class_id'):
+                    continue
+                dist = self._center_distance(tracker['box'], det['bbox'])
+                threshold = self._get_reassociate_threshold(tracker, det)
+                if dist <= threshold:
+                    dist_candidates.append((dist, track_id, det_idx))
+
+        for _, track_id, det_idx in sorted(dist_candidates):
+            if track_id in matched_trackers or det_idx in matched_detections:
+                continue
+            matches.append((track_id, det_idx))
+            matched_trackers.add(track_id)
+            matched_detections.add(det_idx)
+
+        return matches, matched_detections, matched_trackers
+
     def _get_center(self, bbox):
         x1, y1, x2, y2 = bbox
         return ((x1 + x2) / 2, (y1 + y2) / 2)
 
-    def update(self, detections):
-        self.frame_count += 1
-        current_active_tracks = set()  # 用于存储当前帧的活跃轨迹
-        
-        # 如果没有检测结果，清空所有跟踪器
-        if not detections:
-            # 保持短暂的轨迹持续性
-            for track_id in list(self.active_tracks):
-                if self.frame_count - self.trackers[track_id].get('last_update', 0) > 5:
-                    self.trackers.pop(track_id)
+    def _get_foot_point(self, bbox):
+        """底边中点，适用于监控俯拍/区域人数统计"""
+        x1, y1, x2, y2 = bbox
+        return ((x1 + x2) / 2, y2)
+
+    def _get_occupancy_settings(self):
+        """读取区域人数统计相关配置"""
+        coords = self.area_coordinates or {}
+        smooth_window = max(1, int(coords.get('smoothWindow', 3)))
+        return {
+            'count_min_hits': int(coords.get('countMinHits', self.min_hits)),
+            'count_point_mode': coords.get('countPointMode', 'foot'),
+            'smooth_window': smooth_window,
+            'decrease_hold_frames': max(0, int(coords.get('decreaseHoldFrames', 2))),
+            'count_bias': float(coords.get('countBias', 0)),
+            'count_scale': float(coords.get('countScale', 1.0)),
+        }
+
+    def _track_counts_for_occupancy(self, track):
+        """判断轨迹是否应参与区域人数统计（仅本帧有真实检测的目标）"""
+        if track.get('age', 0) > 0:
+            return False
+        settings = self._get_occupancy_settings()
+        hits = track.get('hits', 0)
+        if hits >= settings['count_min_hits']:
+            track['confirmed'] = True
+        return track.get('confirmed', False)
+
+    def _track_in_area(self, track, polygon):
+        """判断轨迹是否在区域内（默认脚点，可配置）"""
+        settings = self._get_occupancy_settings()
+        bbox = track['box']
+        mode = settings['count_point_mode']
+
+        if mode == 'center':
+            return self._point_in_polygon(track['center'], polygon)
+
+        if mode == 'bottom_edge':
+            x1, y1, x2, y2 = bbox
+            points = [((x1 + x2) / 2, y2), (x1, y2), (x2, y2)]
+            return any(self._point_in_polygon(point, polygon) for point in points)
+
+        return self._point_in_polygon(self._get_foot_point(bbox), polygon)
+
+    def _predict_tracker_position(self, track_id, steps=1):
+        """漏检帧用最近速度外推位置，延续轨迹"""
+        tracker = self.trackers[track_id]
+        trajectory = tracker.get('trajectory', [])
+        if len(trajectory) < 2:
             return
-        
-        # 如果是第一帧或没有现有跟踪器
+
+        vx = trajectory[-1][0] - trajectory[-2][0]
+        vy = trajectory[-1][1] - trajectory[-2][1]
+        x1, y1, x2, y2 = tracker['box']
+        box_w = x2 - x1
+        box_h = y2 - y1
+
+        for _ in range(max(1, int(steps))):
+            new_center = (tracker['center'][0] + vx, tracker['center'][1] + vy)
+            tracker['center'] = new_center
+            trajectory.append(new_center)
+            tracker['box'] = [
+                new_center[0] - box_w / 2,
+                new_center[1] - box_h / 2,
+                new_center[0] + box_w / 2,
+                new_center[1] + box_h / 2,
+            ]
+
+    def _smooth_count(self, area_id, raw_count, window_size):
+        """滑动窗口中位数平滑"""
+        if area_id not in self._occupancy_history:
+            self._occupancy_history[area_id] = deque(maxlen=max(window_size, 1))
+
+        history = self._occupancy_history[area_id]
+        history.append(raw_count)
+        return int(round(float(np.median(history))))
+
+    def _apply_count_calibration(self, count):
+        """应用现场校正系数"""
+        settings = self._get_occupancy_settings()
+        calibrated = round(settings['count_scale'] * count + settings['count_bias'])
+        max_capacity = (self.area_coordinates or {}).get('maxCapacity')
+        if max_capacity:
+            calibrated = min(calibrated, int(max_capacity))
+        return max(0, calibrated)
+
+    def _apply_decrease_hysteresis(self, smoothed_total):
+        """人数下降时延迟更新，避免单帧漏检导致数字骤降"""
+        settings = self._get_occupancy_settings()
+        hold_frames = settings['decrease_hold_frames']
+
+        if smoothed_total >= self._display_total:
+            self._display_total = smoothed_total
+            self._decrease_hold = hold_frames
+            return self._display_total
+
+        if hold_frames <= 0:
+            self._display_total = smoothed_total
+            return self._display_total
+
+        if self._decrease_hold > 0:
+            self._decrease_hold -= 1
+            return self._display_total
+
+        self._display_total = smoothed_total
+        return self._display_total
+
+    def update(self, detections, frame_gap=1):
+        self.frame_count += max(1, int(frame_gap))
+        detections = detections or []
+        frame_gap = max(1, int(frame_gap))
+        current_active_tracks = set()
+        matched_detections = set()
+        matched_trackers = set()
+
         if not self.trackers:
             for det in detections:
                 track_id = self._init_new_tracker(det)
                 current_active_tracks.add(track_id)
             self.active_tracks = current_active_tracks
+            self._update_area_occupancy_count()
             return
 
-        # 构建代价矩阵
-        cost_matrix = np.zeros((len(detections), len(self.trackers)))
-        detection_indices = []
-        tracker_indices = []
+        matches, matched_detections, matched_trackers = self._match_detections_to_tracks(detections)
 
-        for i, det in enumerate(detections):
-            for j, (track_id, tracker) in enumerate(self.trackers.items()):
-                iou = self._calculate_iou(tracker['box'], det['bbox'])
-                cost_matrix[i, j] = 1 - iou  # 转换为代价（1 - IOU）
-                detection_indices.append(i)
-                tracker_indices.append(track_id)
+        for track_id, det_idx in matches:
+            self._update_tracker(track_id, detections[det_idx])
+            current_active_tracks.add(track_id)
 
-        # 使用匈牙利算法进行匹配
-        matched_detections = set()
-        matched_trackers = set()
-
-        # 对每个检测结果找到最佳匹配
-        for det_idx, det in enumerate(detections):
-            best_iou = 0
-            best_track_id = None
-            
-            for track_id, tracker in self.trackers.items():
-                if track_id in matched_trackers:
-                    continue
-                    
-                iou = self._calculate_iou(tracker['box'], det['bbox'])
-                if iou > best_iou and iou >= self.iou_threshold:
-                    best_iou = iou
-                    best_track_id = track_id
-            
-            if best_track_id is not None:
-                self._update_tracker(best_track_id, det)
-                matched_detections.add(det_idx)
-                matched_trackers.add(best_track_id)
-                current_active_tracks.add(best_track_id)
-
-        # 处理未匹配的检测结果
         for det_idx, det in enumerate(detections):
             if det_idx not in matched_detections:
                 track_id = self._init_new_tracker(det)
                 current_active_tracks.add(track_id)
 
-        # 立即移除未匹配的跟踪器
+        for track_id, tracker in self.trackers.items():
+            if track_id in matched_trackers:
+                continue
+
+            tracker['age'] = tracker.get('age', 0) + frame_gap
+            if tracker['age'] <= self.max_age:
+                self._predict_tracker_position(track_id, steps=frame_gap)
+                current_active_tracks.add(track_id)
+
         self.trackers = {k: v for k, v in self.trackers.items() if k in current_active_tracks}
         self.active_tracks = current_active_tracks
-
-        # 更新区域内人数统计
         self._update_area_occupancy_count()
 
     def _init_new_tracker(self, detection):
@@ -404,7 +549,8 @@ class ObjectTracker:
             'age': 0,
             'class': detection['class_id'],
             'trajectory': [center],
-            'confidence': detection['confidence'] if len(detection) > 5 else 1.0,
+            'confidence': detection.get('confidence', 1.0),
+            'confirmed': False,
             'last_update': self.frame_count
         }
         self.next_id += 1
@@ -441,9 +587,14 @@ class ObjectTracker:
             'hits': self.trackers[track_id]['hits'] + 1,
             'age': 0,
             'class': detection['class_id'],
-            'confidence': detection['confidence'] if len(detection) > 5 else 1.0,
+            'confidence': detection.get('confidence', 1.0),
             'last_update': self.frame_count
         })
+        if self.trackers[track_id]['hits'] >= self.min_hits:
+            self.trackers[track_id]['confirmed'] = True
+        if self.area_coordinates and self.area_coordinates.get('countingType') == 'occupancy':
+            if self.trackers[track_id]['hits'] >= self._get_occupancy_settings()['count_min_hits']:
+                self.trackers[track_id]['confirmed'] = True
 
     def _interpolate_points(self, start_point, end_point):
         """在两点之间进行线性插值"""
@@ -619,6 +770,23 @@ class ObjectTracker:
             'total_today': self.today_in_count + self.today_out_count
         }
 
+    def _count_unique_tracks_in_area(self, area_polygon):
+        """区域内人数：去重高度重叠的轨迹，避免同一人被重复计数"""
+        candidates = []
+        for track_id in self.active_tracks:
+            track = self.trackers.get(track_id)
+            if not track or not self._track_counts_for_occupancy(track):
+                continue
+            if self._track_in_area(track, area_polygon):
+                candidates.append(track)
+
+        unique_tracks = []
+        for track in candidates:
+            if any(self._calculate_iou(track['box'], kept['box']) > 0.45 for kept in unique_tracks):
+                continue
+            unique_tracks.append(track)
+        return len(unique_tracks)
+
     def _update_area_occupancy_count(self):
         """更新区域内人数统计（各区域独立计数，总人数为各区域之和）"""
         if not self.area_coordinates or self.area_coordinates.get('countingType') != 'occupancy':
@@ -628,20 +796,54 @@ class ObjectTracker:
         if not polygons and self.area_points and len(self.area_points) >= 3:
             polygons = [{'id': 'area-0', 'name': '区域1', 'points': self.area_points}]
 
-        new_area_counts = {}
+        settings = self._get_occupancy_settings()
+        smoothed_area_counts = {}
+
         for area in polygons:
-            count = 0
-            for track_id in self.active_tracks:
-                if track_id in self.trackers:
-                    center = self.trackers[track_id]['center']
-                    if self._point_in_polygon(center, area['points']):
-                        count += 1
-            new_area_counts[area['id']] = {
+            raw_count = self._count_unique_tracks_in_area(area['points'])
+            smoothed_count = self._smooth_count(area['id'], raw_count, settings['smooth_window'])
+            smoothed_area_counts[area['id']] = {
                 'name': area['name'],
-                'count': count
+                'smoothed_count': smoothed_count,
+                'raw_count': raw_count,
             }
 
-        current_total_count = sum(item['count'] for item in new_area_counts.values())
+        smoothed_total = sum(item['smoothed_count'] for item in smoothed_area_counts.values())
+        hysteresis_total = self._apply_decrease_hysteresis(smoothed_total)
+        current_total_count = self._apply_count_calibration(hysteresis_total)
+
+        new_area_counts = {}
+        area_items = list(smoothed_area_counts.items())
+        if not area_items:
+            return
+
+        if len(area_items) == 1:
+            area_id, info = area_items[0]
+            new_area_counts[area_id] = {
+                'name': info['name'],
+                'count': current_total_count,
+                'raw_count': info['raw_count'],
+            }
+        elif smoothed_total > 0:
+            allocated = 0
+            for index, (area_id, info) in enumerate(area_items):
+                if index == len(area_items) - 1:
+                    area_display = max(0, current_total_count - allocated)
+                else:
+                    area_display = max(0, round(current_total_count * info['smoothed_count'] / smoothed_total))
+                    allocated += area_display
+                new_area_counts[area_id] = {
+                    'name': info['name'],
+                    'count': area_display,
+                    'raw_count': info['raw_count'],
+                }
+        else:
+            for area_id, info in area_items:
+                new_area_counts[area_id] = {
+                    'name': info['name'],
+                    'count': 0,
+                    'raw_count': info['raw_count'],
+                }
 
         counts_changed = current_total_count != self.current_count
         if not counts_changed:

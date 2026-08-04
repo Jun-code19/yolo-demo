@@ -151,9 +151,14 @@ export default {
     return apiClient.put(`/devices/${deviceId}`,deviceData);
   },
   
-  // 删除设备 (这个接口在后端可能需要添加)
+  // 删除设备
   deleteDevice(deviceId) {
     return apiClient.delete(`/devices/${deviceId}`);
+  },
+
+  // 批量删除设备
+  batchDeleteDevices(deviceIds) {
+    return apiClient.post('/devices/batch-delete', { device_ids: deviceIds });
   },
   
   // 模型管理相关API

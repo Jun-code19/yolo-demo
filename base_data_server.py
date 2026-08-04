@@ -41,7 +41,9 @@ from api.base_data_listener import router as data_listener_router
 app.include_router(data_listener_router, prefix="/api/v1")
 # 添加数据大屏相关的API接口
 from api.base_dashboard import router as dashboard_router
+from api.dashboard_integrations import router as dashboard_integrations_router
 app.include_router(dashboard_router, prefix="/api/v1")
+app.include_router(dashboard_integrations_router, prefix="/api/v1")
 
 # 主函数
 if __name__ == "__main__":

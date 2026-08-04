@@ -62,27 +62,29 @@ export const dashboardMapApi = {
   getDashboardData: () => apiClient_v1.get('/heatmap/dashboard/data'),
 }
 
+export const dashboardIntegrationApi = {
+  getConfig: () => apiClient_v1.get('/settings/dashboard-integrations'),
+  saveConfig: (data) => apiClient_v1.put('/settings/dashboard-integrations', data),
+}
+
 export const getWaitTimeData = async () => {
   try {
-    const token = 'qts_spZaDwGam43zPsYFGfXP62bFjH-9bfhv5vt3Ms0Efjc_1762824492';
-    const headers = token ? { Authorization: `Bearer ${token}` } : {};
-    const response = await axios.get('http://10.73.2.248:5000/api/WaitTime', { headers });
-    return response.data;
+    const response = await apiClient_v1.get('/dashboard/wait-time');
+    return response.data?.data ?? response.data;
   } catch (error) {
-    console.error("Error fetching wait time data:", error);
+    console.error('Error fetching wait time data:', error);
     throw error;
   }
 };
 
 export const getWeatherData = async (lat, lon) => {
   try {
-    const API_KEY = 'SztJHWcWUcNl_Dl8F'; // 您的心知天气API Key
-    const location = `${lat}:${lon}`;
-    const weatherApiUrl = `https://api.seniverse.com/v3/weather/now.json?key=${API_KEY}&location=${location}&language=zh-Hans&unit=c`;
-    const response = await axios.get(weatherApiUrl);
-    return response.data;
+    const response = await apiClient_v1.get('/dashboard/weather', {
+      params: { lat, lon },
+    });
+    return response.data?.data ?? response.data;
   } catch (error) {
-    console.error("Error fetching weather data:", error);
+    console.error('Error fetching weather data:', error);
     throw error;
   }
 };

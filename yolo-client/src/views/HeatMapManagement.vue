@@ -18,6 +18,7 @@
       </div>
       <div class="header-actions">
         <el-button @click="refreshData" icon="Refresh">刷新数据</el-button>
+        <el-button @click="openIntegrationConfig" icon="Setting">外部数据配置</el-button>
         <el-button @click="$router.back()" icon="ArrowLeft">返回</el-button>
         <el-button type="primary" @click="saveToDisplay" :loading="saving">
           <el-icon><Select /></el-icon>
@@ -80,6 +81,66 @@
         </span>
       </template>
     </el-dialog>
+
+    <!-- 大屏外部数据接口配置 -->
+    <el-dialog v-model="showIntegrationConfig" title="大屏外部数据配置" width="640px">
+      <el-form :model="integrationConfig" label-width="140px">
+        <el-divider content-position="left">排队时长</el-divider>
+        <el-form-item label="启用">
+          <el-switch v-model="integrationConfig.wait_time_enabled" />
+        </el-form-item>
+        <el-form-item label="接口地址">
+          <el-input
+            v-model="integrationConfig.wait_time_url"
+            placeholder="例如 http://10.73.2.248:5000/api/WaitTime"
+            clearable
+          />
+        </el-form-item>
+        <el-form-item label="Bearer Token">
+          <el-input
+            v-model="integrationConfig.wait_time_token"
+            type="password"
+            show-password
+            :placeholder="integrationConfig.wait_time_token_configured ? '留空则不修改已保存的 Token' : '请输入 Token'"
+            clearable
+          />
+        </el-form-item>
+
+        <el-divider content-position="left">天气</el-divider>
+        <el-form-item label="启用">
+          <el-switch v-model="integrationConfig.weather_enabled" />
+        </el-form-item>
+        <el-form-item label="API 地址">
+          <el-input
+            v-model="integrationConfig.weather_api_url"
+            placeholder="https://api.seniverse.com/v3/weather/now.json"
+            clearable
+          />
+        </el-form-item>
+        <el-form-item label="API Key">
+          <el-input
+            v-model="integrationConfig.weather_api_key"
+            type="password"
+            show-password
+            :placeholder="integrationConfig.weather_api_key_configured ? '留空则不修改已保存的 Key' : '请输入心知天气 API Key'"
+            clearable
+          />
+        </el-form-item>
+        <el-form-item label="默认纬度">
+          <el-input-number v-model="integrationConfig.weather_default_lat" :step="0.0001" :precision="4" />
+        </el-form-item>
+        <el-form-item label="默认经度">
+          <el-input-number v-model="integrationConfig.weather_default_lon" :step="0.0001" :precision="4" />
+        </el-form-item>
+        <div class="integration-hint">
+          密钥保存在服务端，大屏通过本平台 API 代理请求，不会暴露在前端代码中。
+        </div>
+      </el-form>
+      <template #footer>
+        <el-button @click="showIntegrationConfig = false">取消</el-button>
+        <el-button type="primary" @click="saveIntegrationConfig" :loading="integrationSaving">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -89,14 +150,16 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { ArrowLeft, Select, Refresh } from '@element-plus/icons-vue'
 import HeatMapManager from '@/components/HeatMapManager.vue'
-import { dashboardMapApi } from '@/api/dashboard'
+import { dashboardMapApi, dashboardIntegrationApi } from '@/api/dashboard'
 
 const router = useRouter()
 const heatMapManagerRef = ref(null)
 const displayFormRef = ref(null)
 
 const saving = ref(false)
+const integrationSaving = ref(false)
 const showDisplayConfig = ref(false)
+const showIntegrationConfig = ref(false)
 const availableMaps = ref([])
 const currentMapId = ref(null)
 const currentAreas = ref([])
@@ -107,6 +170,19 @@ const displayConfig = reactive({
   displayMode: 'preview',
   refreshInterval: 30,
   maxAreas: 6
+})
+
+const integrationConfig = reactive({
+  wait_time_enabled: true,
+  wait_time_url: '',
+  wait_time_token: '',
+  wait_time_token_configured: false,
+  weather_enabled: true,
+  weather_api_url: 'https://api.seniverse.com/v3/weather/now.json',
+  weather_api_key: '',
+  weather_api_key_configured: false,
+  weather_default_lat: 39.9042,
+  weather_default_lon: 116.4074,
 })
 
 // 表单验证规则
@@ -291,6 +367,68 @@ const getMapName = (mapId) => {
 const getBoundAreasCount = () => {
   return currentAreas.value.filter(area => area.jobId && area.jobId !== '').length
 }
+
+const loadIntegrationConfig = async () => {
+  try {
+    const response = await dashboardIntegrationApi.getConfig()
+    const payload = response.data?.data
+    if (payload) {
+      Object.assign(integrationConfig, {
+        wait_time_enabled: payload.wait_time_enabled ?? true,
+        wait_time_url: payload.wait_time_url || '',
+        wait_time_token: '',
+        wait_time_token_configured: !!payload.wait_time_token_configured,
+        weather_enabled: payload.weather_enabled ?? true,
+        weather_api_url: payload.weather_api_url || 'https://api.seniverse.com/v3/weather/now.json',
+        weather_api_key: '',
+        weather_api_key_configured: !!payload.weather_api_key_configured,
+        weather_default_lat: payload.weather_default_lat ?? 39.9042,
+        weather_default_lon: payload.weather_default_lon ?? 116.4074,
+      })
+    }
+  } catch (error) {
+    console.error('加载外部数据配置失败:', error)
+    ElMessage.error('加载外部数据配置失败')
+  }
+}
+
+const openIntegrationConfig = async () => {
+  await loadIntegrationConfig()
+  showIntegrationConfig.value = true
+}
+
+const saveIntegrationConfig = async () => {
+  integrationSaving.value = true
+  try {
+    const body = {
+      wait_time_enabled: integrationConfig.wait_time_enabled,
+      wait_time_url: integrationConfig.wait_time_url?.trim() || '',
+      weather_enabled: integrationConfig.weather_enabled,
+      weather_api_url: integrationConfig.weather_api_url?.trim() || 'https://api.seniverse.com/v3/weather/now.json',
+      weather_default_lat: integrationConfig.weather_default_lat,
+      weather_default_lon: integrationConfig.weather_default_lon,
+    }
+    if (integrationConfig.wait_time_token?.trim()) {
+      body.wait_time_token = integrationConfig.wait_time_token.trim()
+    }
+    if (integrationConfig.weather_api_key?.trim()) {
+      body.weather_api_key = integrationConfig.weather_api_key.trim()
+    }
+
+    const response = await dashboardIntegrationApi.saveConfig(body)
+    if (response.data?.success) {
+      ElMessage.success('外部数据配置已保存')
+      showIntegrationConfig.value = false
+    } else {
+      throw new Error(response.data?.message || '保存失败')
+    }
+  } catch (error) {
+    console.error('保存外部数据配置失败:', error)
+    ElMessage.error(error.response?.data?.detail || error.message || '保存失败')
+  } finally {
+    integrationSaving.value = false
+  }
+}
 </script>
 
 <style scoped>
@@ -345,5 +483,12 @@ const getBoundAreasCount = () => {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.integration-hint {
+  margin-top: 8px;
+  font-size: 13px;
+  color: #909399;
+  line-height: 1.5;
 }
 </style> 

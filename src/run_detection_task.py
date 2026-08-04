@@ -350,27 +350,23 @@ class DetectionTask:
                             # 绘制区域框提示
                             self.draw_roi(detect_frame)
 
-                            if detections:
+                            if self.area_coordinates and self.area_coordinates.get('analysisType'):
+                                if self.models_type == 'pose' and detections:
+                                    detect_frame = self.display_pose_results(detect_frame, results[0])
+                                # 智能分析：即使本帧无检测也更新 tracker，保留 ghost track
+                                self.object_tracker.update(detections, frame_gap=skip_frame_count)
+                                detect_frame = self.object_tracker.draw_tracks(
+                                    detect_frame,
+                                    max_trajectory_length=self.max_trajectory_length,
+                                    show_boxes=True,
+                                )
+                                self._process_smart_analysis_events(detect_frame, detections, speed, cooldown_period)
+                            elif detections:
                                 if self.models_type == 'pose':
-                                    # 姿态检测结果
                                     detect_frame = self.display_pose_results(detect_frame, results[0])
                                 else:
-                                    # 智能分析处理
-                                    if self.area_coordinates and self.area_coordinates.get('analysisType'):
-                                        # 开启目标追踪功能进行智能分析
-                                        self.object_tracker.update(detections)
-                                        detect_frame = self.object_tracker.draw_tracks(
-                                            detect_frame, 
-                                            max_trajectory_length=self.max_trajectory_length,
-                                            show_boxes=True,
-                                        )
-                                        # 处理智能分析事件
-                                        self._process_smart_analysis_events(detect_frame, detections, speed, cooldown_period)
-                                    else:
-                                        # 普通检测：仅显示检测结果，没有智能分析
-                                        detect_frame = self.display_detection_results(detect_frame, results[0],show_boxes=True)
-                                        # 处理检测事件
-                                        self._process_detection_events(detect_frame, detections, speed, cooldown_period)                            
+                                    detect_frame = self.display_detection_results(detect_frame, results[0], show_boxes=True)
+                                    self._process_detection_events(detect_frame, detections, speed, cooldown_period)
 
                             if not self.clients:
                                 continue  # 没有客户端连接，跳过下面步骤

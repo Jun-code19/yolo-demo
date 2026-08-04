@@ -85,8 +85,27 @@
 
     <!-- 设备列表 -->
     <el-card class="device-list">
+      <div class="table-toolbar">
+        <span v-if="selectedDevices.length > 0" class="selection-tip">
+          已选择 {{ selectedDevices.length }} 项
+        </span>
+        <el-button
+          size="small"
+          type="danger"
+          :disabled="selectedDevices.length === 0"
+          @click="handleBatchDelete"
+        >
+          批量删除
+        </el-button>
+      </div>
       <!-- 设备表格 -->
-      <el-table :data="devices" style="width: 100%" v-loading="loading">
+      <el-table
+        :data="devices"
+        style="width: 100%"
+        v-loading="loading"
+        @selection-change="handleSelectionChange"
+      >
+        <el-table-column type="selection" width="55" />
         <el-table-column prop="device_id" label="设备ID" sortable min-width="120" />
         <el-table-column prop="device_name" label="设备名称" sortable min-width="150" />
         <el-table-column prop="device_type" label="设备类型" sortable min-width="120">
@@ -305,7 +324,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, h } from 'vue'
 import { Plus, VideoCamera, CircleClose, Camera, Download, ArrowDown, Upload, UploadFilled, Search, Refresh, FullScreen } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import deviceApi from '@/api/device'
@@ -317,6 +336,7 @@ const devices = ref([])
 const currentPage = ref(1)
 const pageSize = ref(20)
 const total = ref(0)
+const selectedDevices = ref([])
 
 // 对话框控制
 const dialogVisible = ref(false)
@@ -387,6 +407,14 @@ const filterForm = reactive({
 // 跟踪当前是否在筛选状态
 const isFiltering = ref(false)
 
+const hasActiveFilter = () => {
+  return Object.entries(filterForm).some(([_, value]) => value !== '' && value !== null && value !== undefined)
+}
+
+const reloadDevices = () => {
+  loadData(isFiltering.value || hasActiveFilter())
+}
+
 // 加载设备数据
 const loadData = async (useFilter = false) => {
   loading.value = true
@@ -418,7 +446,7 @@ const refreshStatus = async () => {
     // 获取设备在线状态
     const response = await deviceApi.getDevicesStatus()
     if (response.status === 200) {
-      loadData()  // 刷新数据
+      reloadDevices()
     } else {
       ElMessage.error('获取设备在线状态失败')
     }
@@ -558,7 +586,7 @@ const handleSubmit = async () => {
         ElMessage.success('设备更新成功')
       }
       dialogVisible.value = false
-      loadData()
+      reloadDevices()
     } catch (error) {
       // console.error('操作失败:', error)
       ElMessage.error(`操作失败: ${error.response?.data?.detail || error.message}`)
@@ -569,23 +597,77 @@ const handleSubmit = async () => {
 }
 
 // 删除设备
-const handleDelete = (row) => {
-  ElMessageBox.confirm(
-    `确认删除设备 "${row.device_name}" 吗？`,
-    '删除确认',
+const buildDeleteConfirmMessage = (deviceNames) => {
+  const count = deviceNames.length
+  const namesText = deviceNames.join('、')
+  const actionText = count > 1
+    ? `确认批量删除以下 ${count} 个设备及其关联数据吗？`
+    : '确认删除以下设备及其关联数据吗？'
+
+  return h('div', { class: 'delete-confirm-message' }, [
+    h('p', { class: 'delete-confirm-line' }, actionText),
+    h('p', { class: 'delete-confirm-line delete-confirm-tip' }, '关联数据包括：检测配置、检测事件、性能记录、设备快照等。'),
+    h('p', { class: 'delete-confirm-line delete-confirm-devices' }, [
+      h('span', { class: 'delete-confirm-label' }, '设备：'),
+      h('span', namesText)
+    ])
+  ])
+}
+
+const showDeleteConfirm = (title, deviceNames) => {
+  return ElMessageBox.confirm(
+    buildDeleteConfirmMessage(deviceNames),
+    title,
     {
       confirmButtonText: '确认',
       cancelButtonText: '取消',
-      type: 'warning'
+      type: 'warning',
+      customClass: 'device-delete-messagebox'
     }
-  ).then(async () => {
+  )
+}
+
+const handleDelete = (row) => {
+  showDeleteConfirm('删除确认', [row.device_name]).then(async () => {
     try {
       await deviceApi.deleteDevice(row.device_id)
       ElMessage.success('删除成功')
-      loadData()
+      reloadDevices()
     } catch (error) {
       // console.error('删除失败:', error)
       ElMessage.error(`删除失败: ${error.response?.data?.detail || error.message}`)
+    }
+  }).catch(() => { })
+}
+
+const handleSelectionChange = (selection) => {
+  selectedDevices.value = selection
+}
+
+const handleBatchDelete = () => {
+  if (selectedDevices.value.length === 0) {
+    ElMessage.warning('请先选择要删除的设备')
+    return
+  }
+
+  const deviceNames = selectedDevices.value.map(item => item.device_name)
+  showDeleteConfirm('批量删除确认', deviceNames).then(async () => {
+    try {
+      const deviceIds = selectedDevices.value.map(item => item.device_id)
+      const response = await deviceApi.batchDeleteDevices(deviceIds)
+      const deletedCount = response.data?.deleted_count ?? deviceIds.length
+      const errors = response.data?.errors || []
+
+      if (errors.length > 0) {
+        ElMessage.warning(`已删除 ${deletedCount} 个设备，部分失败：${errors.join('；')}`)
+      } else {
+        ElMessage.success(`成功删除 ${deletedCount} 个设备`)
+      }
+
+      selectedDevices.value = []
+      reloadDevices()
+    } catch (error) {
+      ElMessage.error(`批量删除失败: ${error.response?.data?.detail || error.message}`)
     }
   }).catch(() => { })
 }
@@ -1290,7 +1372,7 @@ const submitImport = async () => {
     if (response.status === 200) {
       ElMessage.success('导入成功')
       importDialogVisible.value = false
-      loadData() // 刷新列表
+      reloadDevices()
     } else {
       ElMessage.error(`导入失败: ${response.data.detail || '未知错误'}`)
     }
@@ -1342,9 +1424,9 @@ const handleExport = async (command) => {
 
 // 筛选功能
 const handleFilter = () => {
-  currentPage.value = 1 // 重置到第一页
-  isFiltering.value = true
-  loadData(true)
+  currentPage.value = 1
+  isFiltering.value = hasActiveFilter()
+  loadData(isFiltering.value)
 }
 
 const handleResetFilter = () => {
@@ -1376,6 +1458,19 @@ const handleResetFilter = () => {
 
 .device-list {
   margin-bottom: 20px;
+}
+
+.table-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.selection-tip {
+  color: #606266;
+  font-size: 13px;
 }
 
 .pagination {
@@ -1548,4 +1643,29 @@ const handleResetFilter = () => {
   -moz-user-select: none;
   -ms-user-select: none;
 }
-</style> 
+</style>
+
+<style>
+.device-delete-messagebox .delete-confirm-message {
+  line-height: 1.6;
+  color: #606266;
+}
+
+.device-delete-messagebox .delete-confirm-line {
+  margin: 0 0 10px 0;
+}
+
+.device-delete-messagebox .delete-confirm-line:last-child {
+  margin-bottom: 0;
+}
+
+.device-delete-messagebox .delete-confirm-tip {
+  color: #909399;
+  font-size: 13px;
+}
+
+.device-delete-messagebox .delete-confirm-label {
+  color: #303133;
+  font-weight: 500;
+}
+</style>

@@ -1,16 +1,142 @@
 <template>
   <div class="detection-config-page">
-    <div class="card-header">
-      <h2>检测配置管理</h2>
-      <div class="header-right">
+    <div class="page-header">
+      <div class="header-content">
+        <h2>检测配置管理</h2>
+        <p>管理设备检测任务配置，支持筛选与状态统计</p>
+      </div>
+      <div class="header-actions">
+        <el-button @click="reloadConfigList" :loading="loading">
+          <el-icon>
+            <Refresh />
+          </el-icon>
+          刷新
+        </el-button>
         <el-button type="primary" @click="showAddModal">
           <el-icon>
-            <plus />
-          </el-icon>创建配置
+            <Plus />
+          </el-icon>
+          创建配置
         </el-button>
       </div>
     </div>
-    <el-card>
+
+    <!-- 配置统计 -->
+    <div class="stats-cards">
+      <el-row :gutter="16">
+        <el-col :span="6">
+          <div class="stat-item">
+            <div class="stat-icon">
+              <el-icon color="#409EFF">
+                <Setting />
+              </el-icon>
+            </div>
+            <div class="stat-info">
+              <div class="stat-value">{{ configStats.total_configs || 0 }}</div>
+              <div class="stat-label">配置总数</div>
+            </div>
+          </div>
+        </el-col>
+        <el-col :span="6">
+          <div class="stat-item">
+            <div class="stat-icon">
+              <el-icon color="#67C23A">
+                <VideoPlay />
+              </el-icon>
+            </div>
+            <div class="stat-info">
+              <div class="stat-value">{{ configStats.enabled_configs || 0 }}</div>
+              <div class="stat-label">已启用</div>
+            </div>
+          </div>
+        </el-col>
+        <el-col :span="6">
+          <div class="stat-item">
+            <div class="stat-icon">
+              <el-icon color="#909399">
+                <VideoPause />
+              </el-icon>
+            </div>
+            <div class="stat-info">
+              <div class="stat-value">{{ configStats.disabled_configs || 0 }}</div>
+              <div class="stat-label">已禁用</div>
+            </div>
+          </div>
+        </el-col>
+        <el-col :span="6">
+          <div class="stat-item">
+            <div class="stat-icon">
+              <el-icon color="#E6A23C">
+                <Clock />
+              </el-icon>
+            </div>
+            <div class="stat-info">
+              <div class="stat-value">{{ configStats.scheduled_configs || 0 }}</div>
+              <div class="stat-label">定时检测</div>
+            </div>
+          </div>
+        </el-col>
+      </el-row>
+    </div>
+
+    <el-card class="filter-section">
+      <el-form :model="filterForm" inline>
+        <el-form-item label="设备名称">
+          <el-input
+            v-model="filterForm.device_name"
+            placeholder="请输入设备名称"
+            clearable
+            style="width: 180px"
+            @keyup.enter="handleSearch"
+          />
+        </el-form-item>
+
+        <el-form-item label="模型">
+          <el-select v-model="filterForm.models_id" placeholder="选择模型" style="width: 220px" filterable clearable>
+            <el-option
+              v-for="model in filterModelList"
+              :key="model.models_id"
+              :label="`${model.models_name} (${getModelTypeName(model.models_type)})`"
+              :value="model.models_id"
+            />
+          </el-select>
+        </el-form-item>
+
+        <el-form-item label="状态">
+          <el-select v-model="filterForm.enabled" placeholder="选择状态" style="width: 120px" clearable>
+            <el-option :value="true" label="启用" />
+            <el-option :value="false" label="禁用" />
+          </el-select>
+        </el-form-item>
+
+        <el-form-item label="检测频率">
+          <el-select v-model="filterForm.frequency" placeholder="选择频率" style="width: 140px" clearable>
+            <el-option value="realtime" label="实时检测" />
+            <el-option value="scheduled" label="定时检测" />
+            <el-option value="manual" label="手动检测" />
+          </el-select>
+        </el-form-item>
+
+        <el-form-item>
+          <el-space>
+            <el-button type="primary" @click="handleSearch">
+              <el-icon>
+                <Search />
+              </el-icon>
+              搜索
+            </el-button>
+            <el-button @click="handleResetFilter">
+              <el-icon>
+                <Refresh />
+              </el-icon>
+              重置
+            </el-button>
+          </el-space>
+        </el-form-item>
+      </el-form>
+    </el-card>
+
+    <el-card class="main-card">
       <!-- 配置列表 -->
       <el-table :data="configList" v-loading="loading" style="width: 100%">
         <!-- 设备名称列 -->
@@ -97,13 +223,9 @@
                 @click="toggleEnabled(scope.row)">
                 {{ scope.row.enabled ? '禁用' : '启用' }}
               </el-button>
-              <el-popconfirm title="确定要删除这个配置吗?" @confirm="deleteConfig(scope.row.config_id)">
-                <template #reference>
-                  <el-button type="danger" size="small">
-                    删除
-                  </el-button>
-                </template>
-              </el-popconfirm>
+              <el-button type="danger" size="small" @click="handleDeleteConfig(scope.row)">
+                删除
+              </el-button>
             </el-button-group>
           </template>
         </el-table-column>
@@ -127,7 +249,7 @@
     <el-dialog 
       v-model="modalVisible" 
       :title="isEdit ? '编辑检测配置' : '创建检测配置'" 
-      width="50%"
+      width="720px"
       top="5vh" 
       destroy-on-close
       :z-index="999999"
@@ -135,173 +257,111 @@
       class="config-dialog high-priority-dialog"
       :modal-append-to-body="false"
     >
-      <div class="config-steps">
-        <div class="step" :class="{ active: currentStep >= 1 }">
-          <div class="step-number">1</div>
-          <div class="step-label">基本设置</div>
-        </div>
-        <div class="step-divider"></div>
-        <div class="step" :class="{ active: currentStep >= 2 }">
-          <div class="step-number">2</div>
-          <div class="step-label">定时设置</div>
-        </div>
-        <div class="step-divider"></div>
-        <div class="step" :class="{ active: currentStep >= 3 }">
-          <div class="step-number">3</div>
-          <div class="step-label">保存设置</div>
-        </div>
-      </div>
-
       <el-form ref="formRef" :model="formState" :rules="rules" label-position="top" class="config-form">
-        <!-- 基本设置部分 -->
-        <div class="section-container" v-show="currentStep === 1">
-          <el-divider content-position="left">
-            <span class="divider-title">基本设置</span>
-          </el-divider>
+        <el-tabs v-model="activeConfigTab" class="config-tabs">
+          <el-tab-pane label="基本设置" name="basic">
+            <div class="section-container">
+              <div class="form-section">
+                <div class="form-grid">
+                  <el-form-item label="设备" prop="device_id" class="grid-item full-width">
+                    <el-select v-model="formState.device_id" placeholder="请选择设备" :disabled="isEdit" filterable popper-append-to-body>
+                      <el-option v-for="device in deviceList" :key="device.device_id"
+                        :label="`${device.device_name} (${device.device_id})`" :value="device.device_id">
+                        <div class="device-option">
+                          <el-icon>
+                            <VideoCamera />
+                          </el-icon>
+                          <span>{{ device.device_name }}</span>
+                          <span class="device-id">({{ device.device_id }})</span>
+                        </div>
+                      </el-option>
+                    </el-select>
+                  </el-form-item>
 
-          <div class="form-section">
-            <div class="form-grid">
-              <!-- 设备选择 -->
-              <el-form-item label="设备" prop="device_id" class="grid-item full-width">
-                <el-select v-model="formState.device_id" placeholder="请选择设备" :disabled="isEdit" filterable popper-append-to-body>
-                  <el-option v-for="device in deviceList" :key="device.device_id"
-                    :label="`${device.device_name} (${device.device_id})`" :value="device.device_id">
-                    <div class="device-option">
-                      <el-icon>
-                        <VideoCamera />
-                      </el-icon>
-                      <span>{{ device.device_name }}</span>
-                      <span class="device-id">({{ device.device_id }})</span>
+                  <el-form-item label="检测模型" prop="models_id" class="grid-item full-width">
+                    <el-select v-model="formState.models_id" placeholder="请选择检测模型" @change="updateTargetClasses" filterable popper-append-to-body>
+                      <el-option v-for="model in modelList" :key="model.models_id"
+                        :label="`${model.models_name} (${getModelTypeName(model.models_type)})`" :value="model.models_id">
+                        <div class="model-option">
+                          <span>{{ model.models_name }}</span>
+                          <el-tag size="small" effect="plain">{{ getModelTypeName(model.models_type) }}</el-tag>
+                        </div>
+                      </el-option>
+                    </el-select>
+                  </el-form-item>
+
+                  <el-form-item label="检测频率" prop="frequency" class="grid-item full-width">
+                    <el-radio-group v-model="formState.frequency" @change="handleFrequencyChange">
+                      <el-radio-button value="realtime">实时检测</el-radio-button>
+                      <el-radio-button value="scheduled">定时检测</el-radio-button>
+                      <el-radio-button value="manual">手动触发</el-radio-button>
+                    </el-radio-group>
+                    <div class="field-hint">
+                      实时检测最常用；选择「定时检测」后可在「运行计划」中配置时间
                     </div>
-                  </el-option>
-                </el-select>
-              </el-form-item>
+                  </el-form-item>
 
-              <!-- 模型选择 -->
-              <el-form-item label="检测模型" prop="models_id" class="grid-item full-width">
-                <el-select v-model="formState.models_id" placeholder="请选择检测模型" @change="updateTargetClasses" filterable popper-append-to-body>
-                  <el-option v-for="model in modelList" :key="model.models_id"
-                    :label="`${model.models_name} (${getModelTypeName(model.models_type)})`" :value="model.models_id">
-                    <div class="model-option">
-                      <span>{{ model.models_name }}</span>
-                      <el-tag size="small" effect="plain">{{ getModelTypeName(model.models_type) }}</el-tag>
-                    </div>
-                  </el-option>
-                </el-select>
-              </el-form-item>
-
-              <!-- 状态和灵敏度 -->
-              <div class="form-row">
-                <!-- 是否启用 -->
-                <!-- <el-form-item label="状态" prop="enabled" class="form-item-small">
-                  <el-switch v-model="formState.enabled" active-text="启用" inactive-text="禁用" :active-value="true"
-                    :inactive-value="false" />
-                </el-form-item> -->
-
-                <!-- 检测灵敏度 -->
-                <el-form-item label="检测灵敏度" prop="sensitivity" class="form-item-large">
-                  <div class="sensitivity-container">
-                    <el-slider v-model="formState.sensitivity" :min="0.1" :max="0.9" :step="0.05"
-                      :format-tooltip="value => `${Math.round(value * 100)}%`" :marks="{
-                        0.1: '低',
-                        0.5: '中',
-                        0.9: '高'
-                      }" />
-                  </div>
-                </el-form-item>
-              </div>
-
-              <!-- 目标类别 -->
-              <el-form-item label="目标类别" prop="target_classes" class="grid-item full-width">
-                <el-select v-model="formState.target_classes" multiple placeholder="请选择要检测的目标类别" collapse-tags
-                  collapse-tags-tooltip :max-collapse-tags="4" filterable popper-append-to-body>
-                  <el-option v-for="(classItem, index) in targetClasses" :key="classItem.value" :label="classItem.label"
-                    :value="classItem.value">
-                    <div class="class-option">
-                      <span>{{ classItem.label }}</span>
-                      <span class="class-id">{{ classItem.value }}</span>
-                    </div>
-                  </el-option>
-                </el-select>
-                <div class="select-hint">
-                  <div class="hint-buttons">
-                    <el-button link size="small" @click="selectAllClasses" v-if="targetClasses.length > 0">
-                      <el-icon>
-                        <CircleCheckFilled />
-                      </el-icon> 全选
-                    </el-button>
-                    <el-button link size="small" @click="clearAllClasses" v-if="formState.target_classes.length > 0">
-                      <el-icon>
-                        <CircleCloseFilled />
-                      </el-icon> 清空
-                    </el-button>
-                  </div>
-                  <span class="selected-count" v-if="targetClasses.length > 0">
-                    已选择 {{ formState.target_classes.length }}/{{ targetClasses.length }}
-                  </span>
-                </div>
-              </el-form-item>
-            </div>
-          </div>
-        </div>
-
-        <!-- 定时设置部分 -->
-        <div class="section-container" v-show="currentStep === 2">
-          <el-divider content-position="left">
-            <span class="divider-title">定时设置</span>
-          </el-divider>
-
-          <div class="form-section schedule-section">
-            <!-- 检测频率设置 -->
-            <div class="schedule-card">
-              <div class="card-title">
-                <el-icon>
-                  <Calendar />
-                </el-icon>
-                <span>检测频率</span>
-              </div>
-              <div class="card-content">
-                <div class="frequency-content">
-                  <el-radio-group v-model="formState.frequency">
-                    <div class="frequency-options">
-                      <div class="radio-card" :class="{ active: formState.frequency === 'realtime' }">
-                        <el-radio value="realtime">
-                          <div class="radio-card-content">
-                            <div>
-                              <div class="radio-title">实时检测</div>
-                              <div class="radio-desc">设备连接后立即开始检测</div>
-                            </div>
-                          </div>
-                        </el-radio>
+                  <el-form-item label="检测灵敏度" prop="sensitivity" class="grid-item full-width sensitivity-item">
+                    <div class="sensitivity-container slider-with-value">
+                      <div class="sensitivity-header">
+                        <span class="sensitivity-current">当前 {{ formatSensitivity(formState.sensitivity) }}</span>
                       </div>
-                      <div class="radio-card" :class="{ active: formState.frequency === 'scheduled' }">
-                        <el-radio value="scheduled">
-                          <div class="radio-card-content">
-                            <div>
-                              <div class="radio-title">定时检测</div>
-                              <div class="radio-desc">按照预定的时间计划执行检测</div>
-                            </div>
-                          </div>
-                        </el-radio>
-                      </div>
-                      <div class="radio-card" :class="{ active: formState.frequency === 'manual' }">
-                        <el-radio value="manual">
-                          <div class="radio-card-content">
-                            <div>
-                              <div class="radio-title">手动触发</div>
-                              <div class="radio-desc">仅在手动启动时执行检测</div>
-                            </div>
-                          </div>
-                        </el-radio>
-                      </div>
+                      <el-slider
+                        v-model="formState.sensitivity"
+                        :min="0.1"
+                        :max="0.9"
+                        :step="0.05"
+                        :format-tooltip="formatSensitivity"
+                        :marks="sensitivityMarks"
+                      />
                     </div>
-                  </el-radio-group>
+                  </el-form-item>
+
+                  <el-form-item label="目标类别" prop="target_classes" class="grid-item full-width">
+                    <el-select v-model="formState.target_classes" multiple placeholder="请选择要检测的目标类别" collapse-tags
+                      collapse-tags-tooltip :max-collapse-tags="4" filterable popper-append-to-body>
+                      <el-option v-for="classItem in targetClasses" :key="classItem.value" :label="classItem.label"
+                        :value="classItem.value">
+                        <div class="class-option">
+                          <span>{{ classItem.label }}</span>
+                          <span class="class-id">{{ classItem.value }}</span>
+                        </div>
+                      </el-option>
+                    </el-select>
+                    <div class="select-hint">
+                      <div class="hint-buttons">
+                        <el-button link size="small" @click="selectAllClasses" v-if="targetClasses.length > 0">
+                          <el-icon>
+                            <CircleCheckFilled />
+                          </el-icon> 全选
+                        </el-button>
+                        <el-button link size="small" @click="clearAllClasses" v-if="formState.target_classes.length > 0">
+                          <el-icon>
+                            <CircleCloseFilled />
+                          </el-icon> 清空
+                        </el-button>
+                      </div>
+                      <span class="selected-count" v-if="targetClasses.length > 0">
+                        已选择 {{ formState.target_classes.length }}/{{ targetClasses.length }}
+                      </span>
+                    </div>
+                  </el-form-item>
                 </div>
               </div>
             </div>
+          </el-tab-pane>
 
-            <!-- 定时详细设置 -->
-            <template v-if="formState.frequency === 'scheduled'">
+          <el-tab-pane label="运行计划" name="schedule" :disabled="formState.frequency !== 'scheduled'">
+            <div class="section-container">
+              <el-alert
+                v-if="formState.frequency !== 'scheduled'"
+                title="请先在「基本设置」中选择「定时检测」"
+                type="info"
+                :closable="false"
+                show-icon
+                class="schedule-tab-alert"
+              />
+              <div v-else class="form-section schedule-section">
               <!-- 模式选择 -->
               <div class="section-header" style="margin-top: 20px;">
                 <div class="section-title">配置模式</div>
@@ -522,120 +582,53 @@
                   </div>
                 </div>
               </div>
-            </template>
-            <template v-else>
-              <div class="empty-step-placeholder">
-                <el-empty description="选择定时检测以启用此设置" :image-size="80"></el-empty>
               </div>
-            </template>
-          </div>
-        </div>
+            </div>
+          </el-tab-pane>
 
-        <!-- 保存设置部分 -->
-        <div class="section-container" v-show="currentStep === 3">
-          <el-divider content-position="left">
-            <span class="divider-title">保存设置</span>
-          </el-divider>
-
-          <div class="form-section save-section">
-            <!-- 保存模式 -->
-            <!-- <el-form-item label="保存模式" prop="save_mode"> -->
-            <div class="schedule-card">
-              <div class="card-title">
-                <el-icon>
-                  <Edit />
-                </el-icon>
-                <span>保存模式</span>
-              </div>
-              <div class="card-content">
-                <div class="save-mode-content">
+          <el-tab-pane label="保存设置" name="save">
+            <div class="section-container">
+              <div class="form-section save-section">
+                <el-form-item label="保存模式" prop="save_mode" class="grid-item full-width">
                   <el-radio-group v-model="formState.save_mode">
-                    <div class="save-mode-options">
-                      <div class="radio-card" :class="{ active: formState.save_mode === 'none' }">
-                        <el-radio value="none">
-                          <div class="radio-card-content">
-                            <div>
-                              <div class="radio-title">不保存</div>
-                              <div class="radio-desc">仅显示检测结果</div>
-                            </div>
-                          </div>
-                        </el-radio>
-                      </div>
-                      <div class="radio-card" :class="{ active: formState.save_mode === 'screenshot' }">
-                        <el-radio value="screenshot">
-                          <div class="radio-card-content">
-                            <div>
-                              <div class="radio-title">保存截图</div>
-                              <div class="radio-desc">保存当前画面截图</div>
-                            </div>
-                          </div>
-                        </el-radio>
-                      </div>
-                      <div class="radio-card" :class="{ active: formState.save_mode === 'video' }">
-                        <el-radio value="video">
-                          <div class="radio-card-content">
-                            <div>
-                              <div class="radio-title">保存视频</div>
-                              <div class="radio-desc">保存视频片段</div>
-                            </div>
-                          </div>
-                        </el-radio>
-                      </div>
-                      <div class="radio-card" :class="{ active: formState.save_mode === 'both' }">
-                        <el-radio value="both">
-                          <div class="radio-card-content">
-                            <div>
-                              <div class="radio-title">截图和视频</div>
-                              <div class="radio-desc">同时保存两种格式</div>
-                            </div>
-                          </div>
-                        </el-radio>
-                      </div>
-                    </div>
+                    <el-radio-button value="none">不保存</el-radio-button>
+                    <el-radio-button value="screenshot">截图</el-radio-button>
+                    <el-radio-button value="video">视频</el-radio-button>
+                    <el-radio-button value="both">截图+视频</el-radio-button>
                   </el-radio-group>
+                </el-form-item>
+
+                <div v-if="formState.save_mode !== 'none'" class="save-card">
+                  <div class="card-content save-options-grid">
+                    <el-form-item label="视频片段时长" prop="save_duration" v-if="formState.save_mode !== 'screenshot'">
+                      <div class="input-with-unit">
+                        <el-input-number v-model="formState.save_duration" :min="5" :max="60" :step="5"
+                          controls-position="right"></el-input-number>
+                        <span class="unit-label">秒</span>
+                      </div>
+                    </el-form-item>
+
+                    <el-form-item label="事件保留天数" prop="max_storage_days">
+                      <div class="input-with-unit">
+                        <el-input-number v-model="formState.max_storage_days" :min="1" :max="90" :step="1"
+                          controls-position="right"></el-input-number>
+                        <span class="unit-label">天</span>
+                      </div>
+                    </el-form-item>
+                  </div>
                 </div>
               </div>
             </div>
-            <!-- </el-form-item> -->
-
-            <!-- 高级配置 -->
-            <div v-if="formState.save_mode !== 'none'" class="save-card">
-              <div class="card-title">
-                <!-- <el-icon><Setting /></el-icon> -->
-                <span>存储配置</span>
-              </div>
-              <div class="card-content">
-                <el-form-item label="视频片段时长" prop="save_duration" v-if="formState.save_mode !== 'screenshot'">
-                  <div class="input-with-unit">
-                    <el-input-number v-model="formState.save_duration" :min="5" :max="60" :step="5"
-                      controls-position="right"></el-input-number>
-                    <span class="unit-label">秒</span>
-                  </div>
-                </el-form-item>
-
-                <el-form-item label="事件保留天数" prop="max_storage_days">
-                  <div class="input-with-unit">
-                    <el-input-number v-model="formState.max_storage_days" :min="1" :max="90" :step="1"
-                      controls-position="right"></el-input-number>
-                    <span class="unit-label">天</span>
-                  </div>
-                </el-form-item>
-              </div>
-            </div>
-          </div>
-        </div>
+          </el-tab-pane>
+        </el-tabs>
       </el-form>
 
       <template #footer>
-        <div class="dialog-footer">
-          <div class="step-buttons">
-            <el-button @click="prevStep" :disabled="currentStep === 1 || submitLoading">上一步</el-button>
-            <el-button type="primary" v-if="currentStep < 3" @click="nextStep">下一步</el-button>
-            <el-button type="primary" v-else @click="submitForm" :loading="submitLoading">
-              {{ isEdit ? '保存修改' : '创建配置' }}
-            </el-button>
-          </div>
+        <div class="dialog-footer-simple">
           <el-button @click="cancelModal" :disabled="submitLoading">取消</el-button>
+          <el-button type="primary" @click="submitForm" :loading="submitLoading">
+            {{ isEdit ? '保存修改' : '创建配置' }}
+          </el-button>
         </div>
       </template>
     </el-dialog>
@@ -645,10 +638,10 @@
 </template>
 
 <script>
-import { defineComponent, ref, reactive, onMounted } from 'vue';
+import { defineComponent, ref, reactive, onMounted, h } from 'vue';
 import { useRouter } from 'vue-router';
-import { ElMessage } from 'element-plus';
-import { Plus, Delete, Edit, VideoPause, VideoPlay, InfoFilled, Calendar, Operation, CircleCloseFilled, Files, VideoCamera, CircleCheckFilled, Clock, Setting, CircleClose } from '@element-plus/icons-vue';
+import { ElMessage, ElMessageBox } from 'element-plus';
+import { Plus, Delete, Edit, VideoPause, VideoPlay, InfoFilled, Calendar, Operation, CircleCloseFilled, Files, VideoCamera, CircleCheckFilled, Clock, Setting, CircleClose, Search, Refresh } from '@element-plus/icons-vue';
 import deviceApi from '@/api/device'
 import dayjs from 'dayjs';
 import { detectionConfigApi } from '@/api/detection';
@@ -671,7 +664,9 @@ export default defineComponent({
     CircleCheckFilled,
     Clock,
     Setting,
-    CircleClose
+    CircleClose,
+    Search,
+    Refresh
   },
   setup() {
     const router = useRouter();
@@ -684,12 +679,56 @@ export default defineComponent({
     const configList = ref([]);
     const deviceList = ref([]);
     const modelList = ref([]);
+    const filterModelList = ref([]);
     const targetClasses = ref([]); // 用于存储目标类别
 
     // 分页相关
     const currentPage = ref(1);
     const pageSize = ref(20);
     const totalCount = ref(0);
+
+    // 筛选相关
+    const filterForm = reactive({
+      device_name: '',
+      models_id: '',
+      enabled: '',
+      frequency: ''
+    });
+    const isFiltering = ref(false);
+
+    const configStats = ref({
+      total_configs: 0,
+      enabled_configs: 0,
+      disabled_configs: 0,
+      scheduled_configs: 0,
+      realtime_configs: 0
+    });
+
+    const hasActiveFilter = () => {
+      return Object.entries(filterForm).some(([_, value]) => value !== '' && value !== null && value !== undefined);
+    };
+
+    const buildConfigQueryParams = () => {
+      const params = {
+        skip: (currentPage.value - 1) * pageSize.value,
+        limit: pageSize.value
+      };
+
+      if (filterForm.device_name?.trim()) {
+        params.device_name = filterForm.device_name.trim();
+      }
+      if (filterForm.models_id) {
+        params.models_id = filterForm.models_id;
+      }
+      if (filterForm.enabled !== '' && filterForm.enabled !== null && filterForm.enabled !== undefined) {
+        params.enabled = filterForm.enabled;
+      }
+      if (filterForm.frequency) {
+        params.frequency = filterForm.frequency;
+      }
+
+      return params;
+    };
 
     // 模态框状态
     const modalVisible = ref(false);
@@ -747,18 +786,22 @@ export default defineComponent({
       return dayjs(dateStr).format('YYYY-MM-DD HH:mm:ss');
     };
 
-    // 步骤控制
-    const currentStep = ref(1);
+    const formatSensitivity = (value) => `${Math.round(value * 100)}%`;
 
-    const nextStep = () => {
-      if (currentStep.value < 3) {
-        currentStep.value++;
-      }
+    const sensitivityMarks = {
+      0.1: '低',
+      0.5: '中',
+      0.9: '高'
     };
 
-    const prevStep = () => {
-      if (currentStep.value > 1) {
-        currentStep.value--;
+    // 步骤控制
+    const activeConfigTab = ref('basic');
+
+    const handleFrequencyChange = (value) => {
+      if (value === 'scheduled') {
+        activeConfigTab.value = 'schedule';
+      } else if (activeConfigTab.value === 'schedule') {
+        activeConfigTab.value = 'basic';
       }
     };
 
@@ -796,16 +839,26 @@ export default defineComponent({
     };
 
     // 更新目标类别
-    const updateTargetClasses = (modelId) => {
+    const updateTargetClasses = (modelId, options = {}) => {
+      const { preserveSelection = false } = options;
       const selectedModel = modelList.value.find(model => model.models_id === modelId);
+
       if (selectedModel && selectedModel.models_classes) {
-        // 将 models_classes 字典转换为数组，格式为 { label: name, value: key }
         targetClasses.value = Object.entries(selectedModel.models_classes).map(([key, name]) => ({
-          label: name, // 显示的名称
-          value: key   // 对应的键
+          label: name,
+          value: key
         }));
+
+        if (!preserveSelection) {
+          formState.target_classes = targetClasses.value.length > 0
+            ? [targetClasses.value[0].value]
+            : [];
+        }
       } else {
-        targetClasses.value = []; // 如果没有选择模型，清空目标类别
+        targetClasses.value = [];
+        if (!preserveSelection) {
+          formState.target_classes = [];
+        }
       }
     }
 
@@ -1002,14 +1055,32 @@ export default defineComponent({
       return map[saveMode] || '';
     };
 
+    // 加载配置统计
+    const loadConfigStats = async () => {
+      try {
+        const response = await detectionConfigApi.getConfigsStatsOverview();
+        if (response.data.status === 'success') {
+          configStats.value = {
+            ...configStats.value,
+            ...(response.data.data || {})
+          };
+        }
+      } catch (error) {
+        configStats.value = {
+          total_configs: 0,
+          enabled_configs: 0,
+          disabled_configs: 0,
+          scheduled_configs: 0,
+          realtime_configs: 0
+        };
+      }
+    };
+
     // 加载配置列表
     const loadConfigList = async () => {
       loading.value = true;
       try {
-        const skip = (currentPage.value - 1) * pageSize.value
-        const paginationParams = { skip, limit: pageSize.value }
-
-        const response = await detectionConfigApi.getConfigs(paginationParams);
+        const response = await detectionConfigApi.getConfigs(buildConfigQueryParams());
 
         configList.value = response.data.data;
         totalCount.value = response.data.total;
@@ -1018,6 +1089,28 @@ export default defineComponent({
       } finally {
         loading.value = false;
       }
+    };
+
+    const reloadConfigList = async () => {
+      await Promise.all([loadConfigList(), loadConfigStats()]);
+    };
+
+    const handleSearch = () => {
+      currentPage.value = 1;
+      isFiltering.value = hasActiveFilter();
+      loadConfigList();
+    };
+
+    const handleResetFilter = () => {
+      Object.assign(filterForm, {
+        device_name: '',
+        models_id: '',
+        enabled: '',
+        frequency: ''
+      });
+      currentPage.value = 1;
+      isFiltering.value = false;
+      loadConfigList();
     };
 
     // 加载设备列表
@@ -1034,7 +1127,8 @@ export default defineComponent({
     const loadModelList = async () => {
       try {
         const response = await deviceApi.getModels();
-        modelList.value = response.data.filter(model => model.is_active);
+        filterModelList.value = response.data || [];
+        modelList.value = filterModelList.value.filter(model => model.is_active);
       } catch (error) {
         ElMessage.error('获取模型列表失败: ' + error.message);
       }
@@ -1042,15 +1136,15 @@ export default defineComponent({
 
     // 初始化
     onMounted(() => {
-      loadConfigList();
       loadDeviceList();
       loadModelList();
+      reloadConfigList();
     });
 
     // 显示添加模态框
     const showAddModal = () => {
       isEdit.value = false;
-      currentStep.value = 1;
+      activeConfigTab.value = 'basic';
       resetForm();
       modalVisible.value = true;
     };
@@ -1094,7 +1188,7 @@ export default defineComponent({
     // 编辑配置
     const editConfig = (record) => {
       isEdit.value = true;
-      currentStep.value = 1;
+      activeConfigTab.value = 'basic';
       // 处理 schedule_config
       let scheduleTime = null;
       let scheduleDays = [];
@@ -1201,7 +1295,7 @@ export default defineComponent({
         scheduleDays: scheduleDays,
         ...defaultSchedule
       });
-      updateTargetClasses(record.models_id);
+      updateTargetClasses(record.models_id, { preserveSelection: true });
       modalVisible.value = true;
     };
 
@@ -1304,13 +1398,20 @@ export default defineComponent({
               }
 
               modalVisible.value = false;
-              loadConfigList();
+              reloadConfigList();
             } catch (error) {
               ElMessage.error('提交失败: ' + error.message);
             } finally {
               submitLoading.value = false;
             }
           } else {
+            if (!formState.device_id || !formState.models_id) {
+              activeConfigTab.value = 'basic';
+            } else if (formState.frequency === 'scheduled') {
+              activeConfigTab.value = 'schedule';
+            } else {
+              activeConfigTab.value = 'save';
+            }
             ElMessage.error('请完善表单信息');
           }
         });
@@ -1343,21 +1444,53 @@ export default defineComponent({
             ElMessage.error(response.message || '停止任务失败')
           }
         }
-        loadConfigList();
+        reloadConfigList();
       } catch (error) {
         ElMessage.error('操作失败: ' + error.message);
       }
     };
 
-    // 删除配置
-    const deleteConfig = async (configId) => {
-      try {
-        await detectionConfigApi.deleteConfig(configId);
-        ElMessage.success('配置删除成功');
-        loadConfigList();
-      } catch (error) {
-        ElMessage.error('删除失败: ' + error.message);
-      }
+    const buildDeleteConfirmMessage = (record) => {
+      const deviceName = getDeviceName(record.device_id);
+      const modelName = getModelName(record.models_id);
+
+      return h('div', { class: 'delete-confirm-message' }, [
+        h('p', { class: 'delete-confirm-line' }, '确认删除以下检测配置及其关联数据吗？'),
+        h('p', { class: 'delete-confirm-line delete-confirm-tip' }, '关联数据包括：检测事件、检测日志、性能记录配置等。'),
+        h('p', { class: 'delete-confirm-line delete-confirm-devices' }, [
+          h('span', { class: 'delete-confirm-label' }, '设备：'),
+          h('span', deviceName)
+        ]),
+        h('p', { class: 'delete-confirm-line delete-confirm-devices' }, [
+          h('span', { class: 'delete-confirm-label' }, '模型：'),
+          h('span', modelName)
+        ])
+      ]);
+    };
+
+    const showDeleteConfirm = (record) => {
+      return ElMessageBox.confirm(
+        buildDeleteConfirmMessage(record),
+        '删除确认',
+        {
+          confirmButtonText: '确认',
+          cancelButtonText: '取消',
+          type: 'warning',
+          customClass: 'config-delete-messagebox'
+        }
+      );
+    };
+
+    const handleDeleteConfig = (record) => {
+      showDeleteConfirm(record).then(async () => {
+        try {
+          await detectionConfigApi.deleteConfig(record.config_id);
+          ElMessage.success('配置删除成功');
+          reloadConfigList();
+        } catch (error) {
+          ElMessage.error('删除失败: ' + (error.response?.data?.detail || error.message));
+        }
+      }).catch(() => { });
     };
 
     // 新增定时设置处理方法
@@ -1447,12 +1580,12 @@ export default defineComponent({
     // 分页处理方法
     const handleSizeChange = (val) => {
       pageSize.value = val;
-      loadConfigList(); // 重新加载数据
+      loadConfigList();
     };
 
     const handleCurrentChange = (val) => {
       currentPage.value = val;
-      loadConfigList(); // 重新加载数据
+      loadConfigList();
     };
 
     return {
@@ -1469,6 +1602,8 @@ export default defineComponent({
       rules,
       targetClasses,
       formatDateTime,
+      formatSensitivity,
+      sensitivityMarks,
       setInterestArea,
       updateTargetClasses,
       getModelTypeName,
@@ -1483,7 +1618,7 @@ export default defineComponent({
       submitForm,
       cancelModal,
       toggleEnabled,
-      deleteConfig,
+      handleDeleteConfig,
       getScheduleDetail,
       handleScheduleModeChange,
       addTimePoint,
@@ -1498,13 +1633,17 @@ export default defineComponent({
       selectAllClasses,
       clearAllClasses,
       scheduleActiveTab,
-      currentStep,
-      nextStep,
-      prevStep,
+      activeConfigTab,
+      handleFrequencyChange,
       // 分页相关
       currentPage,
       pageSize,
       totalCount,
+      configStats,
+      filterForm,
+      handleSearch,
+      handleResetFilter,
+      reloadConfigList,
       handleSizeChange,
       handleCurrentChange
     };
@@ -1515,6 +1654,71 @@ export default defineComponent({
 <style scoped>
 .detection-config-page {
   padding: 20px;
+}
+
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.header-content p {
+  margin: 0;
+  color: #666;
+  font-size: 14px;
+}
+
+.header-actions {
+  display: flex;
+  gap: 12px;
+}
+
+.stats-cards {
+  margin-bottom: 20px;
+}
+
+.stat-item {
+  display: flex;
+  align-items: center;
+  padding: 16px;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.stat-icon {
+  font-size: 32px;
+  margin-right: 16px;
+}
+
+.stat-value {
+  font-size: 24px;
+  font-weight: 600;
+  color: #333;
+}
+
+.stat-label {
+  font-size: 12px;
+  color: #666;
+  margin-top: 4px;
+}
+
+.filter-section {
+  margin-bottom: 20px;
+  border-radius: 8px;
+}
+
+.filter-section .el-form {
+  margin-bottom: 0;
+}
+
+.filter-section .el-form-item {
+  margin-bottom: 0;
+}
+
+.main-card {
+  margin-bottom: 20px;
 }
 
 .form-item-container {
@@ -1593,14 +1797,46 @@ export default defineComponent({
 }
 
 /* 灵敏度滑块 */
-.sensitivity-container {
+.sensitivity-item :deep(.el-form-item__content) {
   width: 100%;
-  padding: 5px 0;
 }
 
-:deep(.el-slider__marks-text) {
-  color: #909399;
+.sensitivity-container {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 4px 18px 34px;
+}
+
+.sensitivity-header {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 4px;
+}
+
+.sensitivity-current {
+  font-size: 13px;
+  color: #409eff;
+  font-weight: 500;
+}
+
+.sensitivity-container :deep(.el-slider) {
+  width: 100%;
+}
+
+.sensitivity-container :deep(.el-slider__runway) {
+  margin: 14px 0 22px;
+}
+
+.sensitivity-container :deep(.el-slider__marks) {
+  width: calc(100% + 8px);
+  left: -4px;
+}
+
+.sensitivity-container :deep(.el-slider__marks-text) {
+  margin-top: 10px;
+  color: #606266;
   font-size: 12px;
+  white-space: nowrap;
 }
 
 /* 目标类别选择 */
@@ -1988,73 +2224,44 @@ export default defineComponent({
   color: #606266;
 }
 
-/* 步骤指示器样式 */
-.config-steps {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-bottom: 25px;
-  padding: 0 20px;
+/* 配置弹窗 */
+.config-tabs {
+  margin-top: -8px;
 }
 
-.step {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  position: relative;
-  z-index: 1;
+.config-tabs :deep(.el-tabs__content) {
+  max-height: 58vh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 4px 8px 12px 4px;
 }
 
-.step-number {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  background-color: #f2f6fc;
-  border: 2px solid #dcdfe6;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: bold;
+.field-hint {
+  margin-top: 8px;
+  font-size: 12px;
   color: #909399;
-  margin-bottom: 8px;
-  transition: all 0.3s;
+  line-height: 1.5;
 }
 
-.step.active .step-number {
-  background-color: #ecf5ff;
-  border-color: #409eff;
-  color: #409eff;
+.schedule-tab-alert {
+  margin-top: 8px;
 }
 
-.step-label {
-  font-size: 14px;
-  color: #606266;
-  transition: all 0.3s;
+.save-options-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
 }
 
-.step.active .step-label {
-  color: #409eff;
-  font-weight: 500;
-}
-
-.step-divider {
-  flex: 1;
-  height: 2px;
-  background-color: #dcdfe6;
-  margin: 0 15px;
-  position: relative;
-  top: -13px;
-  max-width: 80px;
-  transition: all 0.3s;
-}
-
-.step-buttons {
+.dialog-footer-simple {
   display: flex;
-  gap: 10px;
+  justify-content: flex-end;
+  gap: 12px;
 }
 
 .section-container {
-  min-height: 400px;
+  min-height: auto;
+  padding: 4px 0 8px;
 }
 
 .empty-step-placeholder {
@@ -2086,5 +2293,30 @@ export default defineComponent({
 /* 高优先级对话框样式 - 确保不被菜单和头部遮挡 */
 .high-priority-dialog {
   z-index: 999999 !important;
+}
+</style>
+
+<style>
+.config-delete-messagebox .delete-confirm-message {
+  line-height: 1.6;
+  color: #606266;
+}
+
+.config-delete-messagebox .delete-confirm-line {
+  margin: 0 0 10px 0;
+}
+
+.config-delete-messagebox .delete-confirm-line:last-child {
+  margin-bottom: 0;
+}
+
+.config-delete-messagebox .delete-confirm-tip {
+  color: #909399;
+  font-size: 13px;
+}
+
+.config-delete-messagebox .delete-confirm-label {
+  color: #303133;
+  font-weight: 500;
 }
 </style>

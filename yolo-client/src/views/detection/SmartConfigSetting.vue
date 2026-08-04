@@ -300,6 +300,65 @@
                 </el-col>
               </el-row>
 
+              <el-row :gutter="20">
+                <el-col :span="12">
+                  <el-form-item label="平滑窗口">
+                    <div class="input-with-unit">
+                      <el-input-number v-model="configForm.coordinates.smoothWindow" :min="1" :max="10" :step="1" />
+                      <span class="unit-label">帧</span>
+                    </div>
+                  </el-form-item>
+                </el-col>
+                <el-col :span="12">
+                  <el-form-item label="下降延迟">
+                    <div class="input-with-unit">
+                      <el-input-number v-model="configForm.coordinates.decreaseHoldFrames" :min="0" :max="10" :step="1" />
+                      <span class="unit-label">次</span>
+                    </div>
+                  </el-form-item>
+                </el-col>
+              </el-row>
+
+              <el-row :gutter="20">
+                <el-col :span="12">
+                  <el-form-item label="校正偏移">
+                    <div class="input-with-unit">
+                      <el-input-number v-model="configForm.coordinates.countBias" :min="-50" :max="50" :step="1" />
+                      <span class="unit-label">人</span>
+                    </div>
+                  </el-form-item>
+                </el-col>
+                <el-col :span="12">
+                  <el-form-item label="校正系数">
+                    <el-input-number v-model="configForm.coordinates.countScale" :min="0.5" :max="2" :step="0.05" :precision="2" style="width: 100%;" />
+                  </el-form-item>
+                </el-col>
+              </el-row>
+
+              <el-row :gutter="20">
+                <el-col :span="12">
+                  <el-form-item label="判定点">
+                    <el-select v-model="configForm.coordinates.countPointMode" style="width: 100%;">
+                      <el-option label="脚点（推荐）" value="foot" />
+                      <el-option label="框中心" value="center" />
+                      <el-option label="底边三点" value="bottom_edge" />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+                <el-col :span="12">
+                  <el-form-item label="稳定帧数">
+                    <div class="input-with-unit">
+                      <el-input-number v-model="configForm.coordinates.countMinHits" :min="1" :max="10" :step="1" />
+                      <span class="unit-label">帧</span>
+                    </div>
+                  </el-form-item>
+                </el-col>
+              </el-row>
+
+              <div class="form-hint">
+                平滑窗口用于抑制单帧漏检抖动；下降延迟表示人数减少需连续确认的次数。校正偏移/系数用于与现场人工点数对齐。
+              </div>
+
               <div v-if="configForm.coordinates.occupancyAreas?.length" class="occupancy-area-list">
                 <div class="area-list-title">已绘制区域（{{ configForm.coordinates.occupancyAreas.length }}）</div>
                 <div
@@ -311,7 +370,7 @@
                   <el-input
                     v-model="area.name"
                     size="small"
-                    :placeholder="`区域${index + 1}`"
+                    :placeholder="formatOccupancyAreaName(index + 1)"
                     class="area-name-input"
                   />
                   <span class="area-point-count">{{ area.points.length }} 个顶点</span>
@@ -410,7 +469,7 @@
 </template>
 
 <script>
-import { defineComponent, ref, reactive, onMounted } from 'vue';
+import { defineComponent, ref, reactive, onMounted, onUnmounted } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { ArrowLeft, Operation, Setting, Edit, VideoCamera, Files, CircleClose, InfoFilled } from '@element-plus/icons-vue';
@@ -453,6 +512,12 @@ export default defineComponent({
         occupancyAreas: [],
         countingInterval: 5,
         maxCapacity: 100,
+        smoothWindow: 3,
+        decreaseHoldFrames: 2,
+        countBias: 0,
+        countScale: 1,
+        countPointMode: 'foot',
+        countMinHits: 3,
         flowDirection: 'bidirectional',
         flowPeriod: 'detect_in',
         alarm_interval: 0,
@@ -468,6 +533,7 @@ export default defineComponent({
     const deviceImage = ref(null);
     const deviceImageRef = ref(null);
     const drawingCanvas = ref(null);
+    let canvasResizeObserver = null;
 
     // 绘制相关状态
     const isDrawing = ref(false);
@@ -487,6 +553,33 @@ export default defineComponent({
 
     const createAreaId = () => `area-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
+    const getOccupancyAreaDevicePrefix = () => deviceInfo.value?.device_id || 'device';
+
+    const formatOccupancyAreaName = (index) => `${getOccupancyAreaDevicePrefix()}-${index}`;
+
+    const getNextOccupancyAreaIndex = () => {
+      const prefix = getOccupancyAreaDevicePrefix();
+      const areas = configForm.coordinates.occupancyAreas || [];
+      const usedIndexes = new Set();
+
+      for (const area of areas) {
+        const name = area?.name;
+        if (typeof name !== 'string' || !name.startsWith(`${prefix}-`)) {
+          continue;
+        }
+        const suffix = parseInt(name.slice(prefix.length + 1), 10);
+        if (!Number.isNaN(suffix) && suffix > 0) {
+          usedIndexes.add(suffix);
+        }
+      }
+
+      let next = 1;
+      while (usedIndexes.has(next)) {
+        next += 1;
+      }
+      return next;
+    };
+
     const getAreaColor = (index) => AREA_COLORS[index % AREA_COLORS.length];
 
     const normalizeOccupancyAreas = (coordinates) => {
@@ -497,7 +590,7 @@ export default defineComponent({
       if (coordinates.points && coordinates.points.length >= 3) {
         coordinates.occupancyAreas = [{
           id: createAreaId(),
-          name: '区域1',
+          name: formatOccupancyAreaName(1),
           points: [...coordinates.points]
         }];
       } else if (!coordinates.occupancyAreas) {
@@ -532,6 +625,12 @@ export default defineComponent({
         occupancyAreas: [],
         countingInterval: 5,
         maxCapacity: 100,
+        smoothWindow: 3,
+        decreaseHoldFrames: 2,
+        countBias: 0,
+        countScale: 1,
+        countPointMode: 'foot',
+        countMinHits: 3,
         flowDirection: 'bidirectional',
         flowPeriod: 'detect_in',
         alarm_interval: 0,
@@ -563,6 +662,12 @@ export default defineComponent({
               behaviorDirection: 'in',
               countingInterval: 5,
               maxCapacity: 100,
+              smoothWindow: 3,
+              decreaseHoldFrames: 2,
+              countBias: 0,
+              countScale: 1,
+              countPointMode: 'foot',
+              countMinHits: 3,
               flowDirection: 'bidirectional',
               flowPeriod: 'detect_in',
               alarm_interval: configForm.coordinates.alarm_interval || 0,
@@ -586,7 +691,7 @@ export default defineComponent({
           }
           for (let i = 0; i < areas.length; i++) {
             if (!areas[i].points || areas[i].points.length < 3) {
-              throw new Error(`${areas[i].name || `区域${i + 1}`}无效（至少需要3个点）`);
+              throw new Error(`${areas[i].name || formatOccupancyAreaName(i + 1)}无效（至少需要3个点）`);
             }
           }
           syncOccupancyPoints();
@@ -725,34 +830,97 @@ export default defineComponent({
       }
     };
 
-    // 绘制相关方法
-    const initCanvas = () => {
-      if (!drawingCanvas.value || !deviceImageRef.value) return;
+    // 计算 object-fit: contain 下图片的真实显示区域
+    const getImageDisplayRect = () => {
+      const image = deviceImageRef.value;
+      const wrapper = image?.parentElement;
+      if (!image || !wrapper || !image.naturalWidth || !image.naturalHeight) {
+        return null;
+      }
+
+      const containerWidth = wrapper.clientWidth;
+      const containerHeight = wrapper.clientHeight;
+      if (!containerWidth || !containerHeight) {
+        return null;
+      }
+
+      const imageRatio = image.naturalWidth / image.naturalHeight;
+      const containerRatio = containerWidth / containerHeight;
+
+      let displayWidth;
+      let displayHeight;
+      let offsetX;
+      let offsetY;
+
+      if (imageRatio > containerRatio) {
+        displayWidth = containerWidth;
+        displayHeight = containerWidth / imageRatio;
+        offsetX = 0;
+        offsetY = (containerHeight - displayHeight) / 2;
+      } else {
+        displayHeight = containerHeight;
+        displayWidth = containerHeight * imageRatio;
+        offsetX = (containerWidth - displayWidth) / 2;
+        offsetY = 0;
+      }
+
+      return { displayWidth, displayHeight, offsetX, offsetY };
+    };
+
+    const syncCanvasLayout = () => {
+      if (!drawingCanvas.value || !deviceImageRef.value) return false;
+
+      const rect = getImageDisplayRect();
+      if (!rect) return false;
 
       const canvas = drawingCanvas.value;
-      const image = deviceImageRef.value;
-      const ctx = canvas.getContext('2d');
-
+      const { displayWidth, displayHeight, offsetX, offsetY } = rect;
       const devicePixelRatio = window.devicePixelRatio || 1;
-      const displayWidth = image.clientWidth;
-      const displayHeight = image.clientHeight;
 
-      canvas.width = displayWidth * devicePixelRatio;
-      canvas.height = displayHeight * devicePixelRatio;
-      canvas.style.width = displayWidth + 'px';
-      canvas.style.height = displayHeight + 'px';
+      canvas.style.left = `${offsetX}px`;
+      canvas.style.top = `${offsetY}px`;
+      canvas.style.width = `${displayWidth}px`;
+      canvas.style.height = `${displayHeight}px`;
 
-      ctx.scale(devicePixelRatio, devicePixelRatio);
+      canvas.width = Math.round(displayWidth * devicePixelRatio);
+      canvas.height = Math.round(displayHeight * devicePixelRatio);
+
+      const ctx = canvas.getContext('2d');
+      ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
       ctx.imageSmoothingEnabled = false;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
+      return true;
+    };
+
+    const refreshCanvasDrawing = () => {
+      if (syncCanvasLayout()) {
+        redrawCanvas();
+      }
+    };
+
+    const setupCanvasResizeObserver = () => {
+      if (canvasResizeObserver) {
+        canvasResizeObserver.disconnect();
+        canvasResizeObserver = null;
+      }
+
+      const wrapper = deviceImageRef.value?.parentElement;
+      if (!wrapper || typeof ResizeObserver === 'undefined') {
+        return;
+      }
+
+      canvasResizeObserver = new ResizeObserver(() => {
+        refreshCanvasDrawing();
+      });
+      canvasResizeObserver.observe(wrapper);
     };
 
     const onImageLoaded = () => {
-      setTimeout(() => {
-        initCanvas();
-        redrawCanvas();
-      }, 100);
+      requestAnimationFrame(() => {
+        refreshCanvasDrawing();
+        setupCanvasResizeObserver();
+      });
     };
 
     const getDeviceImageUrl = (ipAddress, channel) => {
@@ -1017,19 +1185,20 @@ export default defineComponent({
       if (!isDrawing.value || points.value.length < minPoints) return;
 
       if (isMultiAreaOccupancy()) {
-        const areaIndex = getOccupancyAreaCount() + 1;
+        const areaIndex = getNextOccupancyAreaIndex();
+        const areaName = formatOccupancyAreaName(areaIndex);
         if (!configForm.coordinates.occupancyAreas) {
           configForm.coordinates.occupancyAreas = [];
         }
         configForm.coordinates.occupancyAreas.push({
           id: createAreaId(),
-          name: `区域${areaIndex}`,
+          name: areaName,
           points: [...points.value]
         });
         syncOccupancyPoints();
         points.value = [];
         redrawCanvas();
-        ElMessage.success(`区域${areaIndex}绘制完成，可继续绘制下一个区域`);
+        ElMessage.success(`${areaName} 绘制完成，可继续绘制下一个区域`);
         return;
       }
 
@@ -1145,6 +1314,15 @@ export default defineComponent({
     onMounted(async () => {
       await loadDeviceList();
       await loadConfigData();
+      window.addEventListener('resize', refreshCanvasDrawing);
+    });
+
+    onUnmounted(() => {
+      window.removeEventListener('resize', refreshCanvasDrawing);
+      if (canvasResizeObserver) {
+        canvasResizeObserver.disconnect();
+        canvasResizeObserver = null;
+      }
     });
 
     return {
@@ -1160,6 +1338,7 @@ export default defineComponent({
       isSnapshotLoading,
       isMultiAreaOccupancy,
       getAreaColor,
+      formatOccupancyAreaName,
       finishDrawingAll,
       removeOccupancyArea,
       goBack,
@@ -1238,12 +1417,15 @@ export default defineComponent({
   gap: 20px;
   padding: 20px 24px;
   overflow: hidden;
+  min-height: 0;
 }
 
 .left-panel {
   flex: 0.9;
   display: flex;
   flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .right-panel {
@@ -1253,9 +1435,11 @@ export default defineComponent({
 }
 
 .drawing-card {
-  /* height: 100%; */
+  flex: 1;
   display: flex;
   flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .drawing-card :deep(.el-card__body) {
@@ -1263,6 +1447,8 @@ export default defineComponent({
   display: flex;
   flex-direction: column;
   padding: 16px;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .card-header {
@@ -1277,14 +1463,16 @@ export default defineComponent({
 }
 
 .image-preview-container {
-  flex: 1;
+  flex: 1 1 auto;
   display: flex;
   justify-content: center;
   align-items: center;
   background-color: #f8f9fa;
   border-radius: 6px;
-  margin-bottom: 16px;
-  min-height: 400px;
+  margin-bottom: 12px;
+  min-height: 240px;
+  max-height: calc(100vh - 340px);
+  overflow: hidden;
 }
 
 .loading-wrapper {
@@ -1352,21 +1540,24 @@ export default defineComponent({
   position: relative;
   width: 100%;
   height: 100%;
+  min-height: 0;
   overflow: hidden;
   border-radius: 6px;
 }
 
-.device-image,
+.device-image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  user-select: none;
+  pointer-events: none;
+}
+
 .drawing-canvas {
   position: absolute;
   top: 0;
   left: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-}
-
-.drawing-canvas {
   z-index: 1;
   cursor: crosshair;
 }
@@ -1381,7 +1572,20 @@ export default defineComponent({
 }
 
 .drawing-hints {
-  margin-top: auto;
+  flex: 0 0 auto;
+  flex-shrink: 0;
+}
+
+.drawing-hints :deep(.el-alert) {
+  padding: 10px 14px;
+}
+
+.drawing-hints :deep(.el-alert__content) {
+  line-height: 1.6;
+}
+
+.drawing-hints p {
+  margin: 4px 0;
 }
 
 .config-card {

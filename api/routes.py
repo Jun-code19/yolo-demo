@@ -231,55 +231,27 @@ def update_device(device_id: str, device: DeviceUpdate, db: Session = Depends(ge
         db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
 
-@router.delete("/devices/{device_id}", tags=["设备管理"])
-def delete_device(device_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    device = db.query(Device).filter(Device.device_id == device_id).first()
-    if not device:
-        raise HTTPException(status_code=404, detail="Device not found")
-    
-    device_name = device.device_name
+def _delete_device_with_relations(db: Session, device: Device) -> None:
+    """删除设备及其关联数据（不提交事务）"""
+    device_id = device.device_id
     device_ip = device.ip_address
-    
-    try:
-        # 删除相关的检测配置及其所有关联数据
-        configs = db.query(DetectionConfig).filter(DetectionConfig.device_id == device_id).all()
-        for config in configs:
-            # 删除配置相关的数据推送配置（可选关联）
-            data_push_configs = db.query(DataPushConfig).filter(DataPushConfig.config_id == config.config_id).all()
-            for push_config in data_push_configs:
-                db.delete(push_config)
-            
-            # 删除配置相关的检测日志
-            detection_logs = db.query(DetectionLog).filter(DetectionLog.config_id == config.config_id).all()
-            for log in detection_logs:
-                db.delete(log)
-            
-            # 删除配置相关的性能记录
-            performance_records = db.query(DetectionPerformance).filter(DetectionPerformance.config_id == config.config_id).all()
-            for perf in performance_records:
-                db.delete(perf)
-            
-            # 删除配置相关的检测事件
-            events = db.query(DetectionEvent).filter(DetectionEvent.config_id == config.config_id).all()
-            for event in events:
-                # 删除事件关联的图片文件
-                try:
-                    if event.thumbnail_path and os.path.exists(event.thumbnail_path):
-                        os.remove(event.thumbnail_path)
-                    if event.snippet_path and os.path.exists(event.snippet_path):
-                        os.remove(event.snippet_path)
-                except OSError as e:
-                    print(f"删除事件文件失败: {e}")
-                
-                db.delete(event)
-            
-            # 删除检测配置
-            db.delete(config)
-        
-        # 删除设备级别的检测事件（可能存在没有config_id的旧事件）
-        device_events = db.query(DetectionEvent).filter(DetectionEvent.device_id == device_id).all()
-        for event in device_events:
-            # 删除事件关联的图片文件
+
+    configs = db.query(DetectionConfig).filter(DetectionConfig.device_id == device_id).all()
+    for config in configs:
+        data_push_configs = db.query(DataPushConfig).filter(DataPushConfig.config_id == config.config_id).all()
+        for push_config in data_push_configs:
+            db.delete(push_config)
+
+        detection_logs = db.query(DetectionLog).filter(DetectionLog.config_id == config.config_id).all()
+        for log in detection_logs:
+            db.delete(log)
+
+        performance_records = db.query(DetectionPerformance).filter(DetectionPerformance.config_id == config.config_id).all()
+        for perf in performance_records:
+            db.delete(perf)
+
+        events = db.query(DetectionEvent).filter(DetectionEvent.config_id == config.config_id).all()
+        for event in events:
             try:
                 if event.thumbnail_path and os.path.exists(event.thumbnail_path):
                     os.remove(event.thumbnail_path)
@@ -287,35 +259,101 @@ def delete_device(device_id: str, db: Session = Depends(get_db), current_user: U
                     os.remove(event.snippet_path)
             except OSError as e:
                 print(f"删除事件文件失败: {e}")
-            
             db.delete(event)
-        
-        # 删除设备相关的性能记录（设备级别）
-        device_performance_records = db.query(DetectionPerformance).filter(DetectionPerformance.device_id == device_id).all()
-        for perf in device_performance_records:
-            db.delete(perf)
-        
-        # 删除设备相关的检测日志（设备级别）
-        device_logs = db.query(DetectionLog).filter(DetectionLog.device_id == device_id).all()
-        for log in device_logs:
-            db.delete(log)
-        
-        # 删除设备快照图片
+
+        db.delete(config)
+
+    device_events = db.query(DetectionEvent).filter(DetectionEvent.device_id == device_id).all()
+    for event in device_events:
         try:
-            device_image_path = f"storage/devices/{device_ip}.jpg"
-            if os.path.exists(device_image_path):
-                os.remove(device_image_path)
-                print(f"删除设备图片: {device_image_path}")
+            if event.thumbnail_path and os.path.exists(event.thumbnail_path):
+                os.remove(event.thumbnail_path)
+            if event.snippet_path and os.path.exists(event.snippet_path):
+                os.remove(event.snippet_path)
         except OSError as e:
-            print(f"删除设备图片失败: {e}")
-        
-        # 删除设备记录
-        db.delete(device)
+            print(f"删除事件文件失败: {e}")
+        db.delete(event)
+
+    device_performance_records = db.query(DetectionPerformance).filter(DetectionPerformance.device_id == device_id).all()
+    for perf in device_performance_records:
+        db.delete(perf)
+
+    device_logs = db.query(DetectionLog).filter(DetectionLog.device_id == device_id).all()
+    for log in device_logs:
+        db.delete(log)
+
+    try:
+        device_image_path = f"storage/devices/{device_ip}.jpg"
+        if os.path.exists(device_image_path):
+            os.remove(device_image_path)
+            print(f"删除设备图片: {device_image_path}")
+    except OSError as e:
+        print(f"删除设备图片失败: {e}")
+
+    db.delete(device)
+
+@router.delete("/devices/{device_id}", tags=["设备管理"])
+def delete_device(device_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    device = db.query(Device).filter(Device.device_id == device_id).first()
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+
+    device_name = device.device_name
+
+    try:
+        _delete_device_with_relations(db, device)
         db.commit()
-        
-        log_action(db, current_user.user_id, 'delete_device', device_id, 
+
+        log_action(db, current_user.user_id, 'delete_device', device_id,
                   f"删除设备 {device_name} 及其相关数据和图片文件")
         return {"message": "Device and related data deleted successfully"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.post("/devices/batch-delete", tags=["设备管理"])
+def batch_delete_devices(
+    request_data: Dict[str, List[str]],
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """批量删除设备及其关联数据"""
+    device_ids = request_data.get('device_ids', [])
+    if not device_ids:
+        raise HTTPException(status_code=400, detail="请提供要删除的设备ID列表")
+
+    deleted_ids = []
+    errors = []
+
+    try:
+        for device_id in device_ids:
+            device = db.query(Device).filter(Device.device_id == device_id).first()
+            if not device:
+                errors.append(f"{device_id}: 设备不存在")
+                continue
+            try:
+                _delete_device_with_relations(db, device)
+                deleted_ids.append(device_id)
+            except Exception as e:
+                errors.append(f"{device_id}: {str(e)}")
+
+        db.commit()
+
+        log_action(
+            db,
+            current_user.user_id,
+            'batch_delete_devices',
+            '批量删除',
+            f"批量删除设备: 成功{len(deleted_ids)}个, 失败{len(errors)}个"
+        )
+
+        return {
+            "message": f"批量删除完成，成功删除 {len(deleted_ids)} 个设备",
+            "deleted_count": len(deleted_ids),
+            "total_requested": len(device_ids),
+            "deleted_ids": deleted_ids,
+            "errors": errors
+        }
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
@@ -737,6 +775,7 @@ async def upload_model(
     # 加载模型并获取类别
     try:      
         rtsp_service_url = "http://detect-server:8000/api/v2/model/load"
+        # rtsp_service_url = "http://127.0.0.1:8000/api/v2/model/load"
         response = requests.post(rtsp_service_url, json={
             "model_path": str(file_path)
         }, timeout=10)
@@ -936,6 +975,12 @@ class AreaCoordinates(BaseModel):
     alarm_interval: Optional[int] = None # 报警推送间隔(秒)
     behaviorSubtype: Optional[str] = None  # 可选值：directional（方向检测）、simple（普通检测）
     behaviorType: Optional[str] = None # 检测类型 area/line
+    smoothWindow: Optional[int] = None # 平滑窗口
+    decreaseHoldFrames: Optional[int] = None # 减少hold帧数
+    countBias: Optional[int] = None # 计数偏移量
+    countScale: Optional[float] = None # 计数缩放比例
+    countPointMode: Optional[str] = None # 计数点模式
+    countMinHits: Optional[int] = None # 计数最小命中数
 # 添加检测配置的Pydantic模型
 class DetectionConfigBase(BaseModel):
     device_id: str
@@ -1027,18 +1072,24 @@ class DetectionEventResponse(DetectionEventBase):
 @router.get("/detection/configs", tags=["检测配置"])
 async def get_detection_configs(
     device_id: Optional[str] = None,
+    device_name: Optional[str] = None,
+    models_id: Optional[str] = None,
     enabled: Optional[bool] = None,
     frequency: Optional[str] = None,
     skip: int = 0,
     limit: int = 100,
     db: Session = Depends(get_db)):
     """
-    获取检测配置列表，可按设备ID和启用状态筛选
+    获取检测配置列表，可按设备、模型、启用状态和检测频率筛选
     """
     query = db.query(DetectionConfig).join(Device).join(DetectionModel)
     
     if device_id:
         query = query.filter(DetectionConfig.device_id == device_id)
+    if device_name:
+        query = query.filter(Device.device_name.ilike(f"%{device_name}%"))
+    if models_id:
+        query = query.filter(DetectionConfig.models_id == models_id)
     if enabled is not None:
         query = query.filter(DetectionConfig.enabled == enabled)
     if frequency is not None:
@@ -1087,6 +1138,33 @@ async def get_detection_configs(
         "data": result,
         "total": total_count
     }
+
+@router.get("/detection/configs/stats", tags=["检测配置"])
+async def get_detection_configs_stats(db: Session = Depends(get_db)):
+    """获取检测配置统计概览"""
+    try:
+        total_configs = db.query(DetectionConfig).count()
+        enabled_configs = db.query(DetectionConfig).filter(DetectionConfig.enabled == True).count()
+        disabled_configs = total_configs - enabled_configs
+        scheduled_configs = db.query(DetectionConfig).filter(
+            DetectionConfig.frequency == DetectionFrequency.scheduled
+        ).count()
+        realtime_configs = db.query(DetectionConfig).filter(
+            DetectionConfig.frequency == DetectionFrequency.realtime
+        ).count()
+
+        return {
+            "status": "success",
+            "data": {
+                "total_configs": total_configs,
+                "enabled_configs": enabled_configs,
+                "disabled_configs": disabled_configs,
+                "scheduled_configs": scheduled_configs,
+                "realtime_configs": realtime_configs
+            }
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取检测配置统计失败: {str(e)}")
 
 # 获取单个检测配置
 @router.get("/detection/configs/{config_id}", response_model=DetectionConfigInfoResponse, tags=["检测配置"])
