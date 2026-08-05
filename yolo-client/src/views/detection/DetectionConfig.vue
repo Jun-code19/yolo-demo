@@ -147,9 +147,27 @@
         </el-table-column>
 
         <!-- 模型名称列 -->
-        <el-table-column label="模型" prop="models_id" min-width="150">
+        <el-table-column label="模型" prop="models_id" min-width="140">
           <template #default="scope">
             {{ getModelName(scope.row.models_id) }}
+          </template>
+        </el-table-column>
+
+        <!-- 目标类别列 -->
+        <el-table-column label="目标类别" prop="target_classes" min-width="100">
+          <template #default="scope">
+            <div class="target-class-tags">
+              <el-tag
+                v-for="className in getTargetClassLabels(scope.row)"
+                :key="className"
+                size="small"
+                type="primary"
+                style="margin-right: 4px; margin-bottom: 4px;"
+              >
+                {{ className }}
+              </el-tag>
+              <span v-if="!getTargetClassLabels(scope.row).length" class="empty-text">-</span>
+            </div>
           </template>
         </el-table-column>
 
@@ -197,6 +215,16 @@
             <el-tag>
               {{ getAreaTypeLabel(scope.row.area_coordinates) }}
             </el-tag>
+          </template>
+        </el-table-column>
+
+        <!-- 推送标签列 -->
+        <el-table-column label="推送标签" prop="pushLabel" min-width="100">
+          <template #default="scope">
+            <el-tag v-if="getPushLabel(scope.row.area_coordinates)" type="info" size="small">
+              {{ getPushLabel(scope.row.area_coordinates) }}
+            </el-tag>
+            <span v-else class="empty-text">-</span>
           </template>
         </el-table-column>
 
@@ -923,6 +951,21 @@ export default defineComponent({
       return model ? model.models_name : modelId;
     };
 
+    const getTargetClassLabels = (record) => {
+      const classes = record?.target_classes || [];
+      if (!classes.length) return [];
+
+      const model = modelList.value.find(m => m.models_id === record.models_id);
+      const classMap = model?.models_classes || {};
+
+      return classes.map((classKey) => classMap[classKey] || classKey);
+    };
+
+    const getPushLabel = (areaCoordinates) => {
+      const label = areaCoordinates?.pushLabel;
+      return typeof label === 'string' ? label.trim() : '';
+    };
+
     // 获取频率标签
     const getFrequencyLabel = (frequency) => {
       const map = {
@@ -1609,6 +1652,8 @@ export default defineComponent({
       getModelTypeName,
       getDeviceName,
       getModelName,
+      getTargetClassLabels,
+      getPushLabel,
       getFrequencyLabel,
       getFrequencyType,
       getSaveModeLabel,
@@ -2293,6 +2338,17 @@ export default defineComponent({
 /* 高优先级对话框样式 - 确保不被菜单和头部遮挡 */
 .high-priority-dialog {
   z-index: 999999 !important;
+}
+
+.target-class-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.empty-text {
+  color: #c0c4cc;
+  font-size: 13px;
 }
 </style>
 

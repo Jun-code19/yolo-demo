@@ -167,6 +167,23 @@
           </template>
         </el-table-column>
 
+        <el-table-column prop="push_tags" label="标签" min-width="140">
+          <template #default="{ row }">
+            <div class="push-tags">
+              <el-tag
+                v-for="tag in getPushTags(row.push_tags)"
+                :key="tag"
+                type="info"
+                size="small"
+                style="margin-right: 4px; margin-bottom: 4px;"
+              >
+                {{ tag }}
+              </el-tag>
+              <span v-if="!getPushTags(row.push_tags).length" class="no-tags">-</span>
+            </div>
+          </template>
+        </el-table-column>
+
         <el-table-column prop="status" label="状态" width="150">
           <template #default="{ row }">
             <el-tag :type="getStatusTagType(row.status)">
@@ -475,6 +492,11 @@ const getEventTypeText = (type) => {
   return texts[type] || type
 }
 
+const getPushTags = (pushTags) => {
+  if (!pushTags || typeof pushTags !== 'string') return []
+  return pushTags.split(',').map(tag => tag.trim()).filter(Boolean)
+}
+
 const formatDateTime = (dateTime) => {
   if (!dateTime) return ''
   return new Date(dateTime).toLocaleString('zh-CN')
@@ -590,6 +612,17 @@ onMounted(() => {
 .event-count {
   font-weight: 500;
   color: #409EFF;
+}
+
+.push-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.no-tags {
+  color: #c0c4cc;
+  font-size: 13px;
 }
 
 .pagination-container {
