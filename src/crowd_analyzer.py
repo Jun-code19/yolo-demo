@@ -29,6 +29,7 @@ from src.database import (
 )
 # 导入数据推送模块
 from src.data_pusher import data_pusher
+from src.rtsp_url import build_rtsp_url
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -690,13 +691,7 @@ class CrowdAnalyzer:
             图像帧，失败则返回None
         """
         try:
-            # 构建RTSP URL
-            if device.device_type == 'nvr':
-                stream_type = 1 if device.stream_type == 'sub' else 0
-                rtsp_url = f"rtsp://{device.username}:{device.password}@{device.ip_address}:{device.port}/cam/realmonitor?channel={device.channel}&subtype={stream_type}"
-            else:
-                stream_type = 1 if device.stream_type == 'sub' else 0
-                rtsp_url = f"rtsp://{device.username}:{device.password}@{device.ip_address}:{device.port}/cam/realmonitor?channel=1&subtype={stream_type}"
+            rtsp_url = build_rtsp_url(device)
             
             # 连接到摄像机
             cap = cv2.VideoCapture(rtsp_url)

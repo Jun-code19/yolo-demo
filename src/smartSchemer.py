@@ -25,8 +25,27 @@ try:
     from NetSDK.SDK_Callback import fDisConnect, fHaveReConnect, fMessCallBackEx1, fVideoStatSumCallBack, fAnalyzerDataCallBack, CB_FUNCTYPE
     # from ctypes import cast, POINTER, c_char, c_long, c_llong, c_dword, c_ldword
     NETSDK_AVAILABLE = True
+
+    # 事件类型 -> (标题后缀, 描述动作短语, 描述前缀)
+    # 新增类型时只需要在这里补一行映射即可
+    SMART_TYPE_TEXT_MAP = {
+        EM_EVENT_IVS_TYPE.CROSSREGIONDETECTION: ("区域入侵", "触发区域入侵", ""),
+        EM_EVENT_IVS_TYPE.CROSSLINEDETECTION: ("绊线入侵", "触发绊线入侵", ""),
+        EM_EVENT_IVS_TYPE.HEAT_IMAGING_TEMPER: ("温度规则", "触发温度规则", ""),
+        EM_EVENT_IVS_TYPE.FIREDETECTION: ("火情报警", "触发火情报警", ""),
+        EM_EVENT_IVS_TYPE.SMOKEDETECTION: ("烟雾报警", "触发烟雾报警", ""),
+    }
+
+    ALARM_TYPE_TEXT_MAP = {
+        SDK_ALARM_TYPE.EVENT_CROSSREGION_DETECTION: ("区域入侵", "触发区域入侵", ""),
+        SDK_ALARM_TYPE.EVENT_CROSSLINE_DETECTION: ("绊线入侵", "触发绊线入侵", ""),
+        SDK_ALARM_TYPE.ALARM_FIREWARNING_INFO: ("火情报警", "触发火情报警", ""),
+        # 兜底：保持原逻辑（非上述类型默认为火情报警）
+    }
 except ImportError:
     NETSDK_AVAILABLE = False
+    SMART_TYPE_TEXT_MAP = {}
+    ALARM_TYPE_TEXT_MAP = {}
     logging.warning("NetSDK包未安装，请检查NetSDK包是否正确安装")
 
 from sqlalchemy.orm import Session
@@ -36,23 +55,6 @@ from src.database import (
 )
 
 logger = logging.getLogger(__name__)
-
-# 事件类型 -> (标题后缀, 描述动作短语, 描述前缀)
-# 新增类型时只需要在这里补一行映射即可
-SMART_TYPE_TEXT_MAP = {
-    EM_EVENT_IVS_TYPE.CROSSREGIONDETECTION: ("区域入侵", "触发区域入侵", ""),
-    EM_EVENT_IVS_TYPE.CROSSLINEDETECTION: ("绊线入侵", "触发绊线入侵", ""),
-    EM_EVENT_IVS_TYPE.HEAT_IMAGING_TEMPER: ("温度规则", "触发温度规则", ""),
-    EM_EVENT_IVS_TYPE.FIREDETECTION: ("火情报警", "触发火情报警", ""),
-    EM_EVENT_IVS_TYPE.SMOKEDETECTION: ("烟雾报警", "触发烟雾报警", ""),
-}
-
-ALARM_TYPE_TEXT_MAP = {
-    SDK_ALARM_TYPE.EVENT_CROSSREGION_DETECTION: ("区域入侵", "触发区域入侵", ""),
-    SDK_ALARM_TYPE.EVENT_CROSSLINE_DETECTION: ("绊线入侵", "触发绊线入侵", ""),
-    SDK_ALARM_TYPE.ALARM_FIREWARNING_INFO: ("火情报警", "触发火情报警", ""),
-    # 兜底：保持原逻辑（非上述类型默认为火情报警）
-}
 
 
 @dataclass
@@ -147,6 +149,9 @@ class SmartSchemer:
     
     async def _start_scheme_internal(self, scheme: SmartScheme, db: Session):
         """内部启动订阅"""
+        if not NETSDK_AVAILABLE:
+            logger.warning(f"NetSDK未安装，跳过订阅启动: {scheme.id}")
+            return False
         try:
             device = db.query(Device).filter(Device.device_id == scheme.camera_id).first()
             if not device:

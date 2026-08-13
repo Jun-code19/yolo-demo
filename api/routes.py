@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
 from src.database import get_db, Device, User, SysLog, DetectionModel, DetectionConfig, DetectionEvent, DetectionPerformance, SaveMode, EventStatus, DetectionFrequency, DetectionLog, CrowdAnalysisJob,CrowdAnalysisResult, DataPushConfig, EdgeServer,ExternalEvent,ListenerConfig,SmartEvent
+from src.rtsp_url import build_rtsp_url, RTSP_URL_PRESETS
 from pydantic import BaseModel, Field, validator
 from fastapi.security import OAuth2PasswordRequestForm
 from api.auth import authenticate_user, create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES, get_current_user, check_admin_permission, get_password_hash, verify_password
@@ -41,6 +42,8 @@ class DeviceCreate(BaseModel):
     password: str
     channel: Optional[int] = 1
     stream_type: Optional[str] = "main"
+    rtsp_url_mode: Optional[str] = "dahua"
+    rtsp_url: Optional[str] = None
     location: Optional[str] = None
     area: Optional[str] = None
 
@@ -54,6 +57,8 @@ class DeviceResponse(BaseModel):
     password: str
     channel: Optional[int] = 1
     stream_type: Optional[str] = "main"
+    rtsp_url_mode: Optional[str] = "dahua"
+    rtsp_url: Optional[str] = None
     location: Optional[str] = None
     area: Optional[str] = None
     status: bool
@@ -72,6 +77,8 @@ class DeviceUpdate(BaseModel):
     password: Optional[str] = None
     channel: Optional[int] = None
     stream_type: Optional[str] = None
+    rtsp_url_mode: Optional[str] = None
+    rtsp_url: Optional[str] = None
     location: Optional[str] = None
     area: Optional[str] = None
     area_coordinates:Optional[Coordinates] = None
@@ -207,6 +214,18 @@ def update_device_status(db: Session = Depends(get_db)):
 
     db.commit()
     return {"message": "Status updated successfully"}
+
+@router.get("/devices/{device_id}/rtsp-url", tags=["设备管理"])
+def get_device_rtsp_url(device_id: str, db: Session = Depends(get_db)):
+    """获取设备实际使用的 RTSP 拉流地址（不返回密码明文日志）"""
+    db_device = db.query(Device).filter(Device.device_id == device_id).first()
+    if not db_device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    return {
+        "device_id": device_id,
+        "rtsp_url_mode": db_device.rtsp_url_mode or "dahua",
+        "rtsp_url": build_rtsp_url(db_device),
+    }
 
 @router.put("/devices/{device_id}", response_model=DeviceResponse, tags=["设备管理"])
 def update_device(device_id: str, device: DeviceUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
@@ -2186,26 +2205,45 @@ def export_device_template(current_user: User = Depends(get_current_user)):
     """导出设备数据模板"""
     # 创建数据框架
     df = pd.DataFrame(columns=[
-        "device_id", "device_name", "device_type", 
+        "device_id", "device_name", "device_type",
         "ip_address", "port", "username", "password",
-        "channel", "stream_type", "location", "area"
+        "channel", "stream_type", "rtsp_url_mode", "rtsp_url",
+        "location", "area"
     ])
-    
+
     # 添加示例数据行
     example_row = {
-        "device_id": "camera1", 
-        "device_name": "前门摄像头", 
+        "device_id": "camera1",
+        "device_name": "前门摄像头",
         "device_type": "camera",
-        "ip_address": "192.168.1.100", 
-        "port": 554, 
-        "username": "admin", 
+        "ip_address": "192.168.1.100",
+        "port": 554,
+        "username": "admin",
         "password": "admin123",
-        "channel": 1, 
-        "stream_type": "main", 
-        "location": "前门", 
+        "channel": 1,
+        "stream_type": "main",
+        "rtsp_url_mode": "dahua",
+        "rtsp_url": "",
+        "location": "前门",
         "area": "安全区"
     }
-    df = pd.concat([df, pd.DataFrame([example_row])], ignore_index=True)
+    hikvision_preset = next(p for p in RTSP_URL_PRESETS if p["value"] == "hikvision")
+    hikvision_example_row = {
+        "device_id": "hik_nvr_ch1",
+        "device_name": "海康NVR-1通道",
+        "device_type": "nvr",
+        "ip_address": "192.168.1.101",
+        "port": 554,
+        "username": "admin",
+        "password": "admin123",
+        "channel": 1,
+        "stream_type": "main",
+        "rtsp_url_mode": hikvision_preset["mode"],
+        "rtsp_url": hikvision_preset["url"],
+        "location": "大厅",
+        "area": "安全区"
+    }
+    df = pd.concat([df, pd.DataFrame([example_row, hikvision_example_row])], ignore_index=True)
     
     # 创建内存缓冲区并保存Excel文件
     output = io.BytesIO()
@@ -2259,6 +2297,8 @@ def export_device_template(current_user: User = Depends(get_current_user)):
             ['password', '密码，必填'],
             ['channel', '通道号，选填，适用于NVR设备，整数，默认1'],
             ['stream_type', '码流类型，选填，可选值：main(主码流)/sub(辅码流)，默认main'],
+            ['rtsp_url_mode', '拉流方式存储值，选填：dahua(大华)/custom(海康/宇视/通用)，默认 dahua'],
+            ['rtsp_url', 'RTSP 模板或完整地址；custom 时必填。海康: .../Streaming/Channels/{hik_channel}；宇视: .../video{channel}/{subtype}'],
             ['location', '位置，选填'],
             ['area', '区域，选填']
         ]
@@ -2305,6 +2345,8 @@ def export_devices(db: Session = Depends(get_db), current_user: User = Depends(g
             "password": device.password,
             "channel": device.channel,
             "stream_type": device.stream_type,
+            "rtsp_url_mode": device.rtsp_url_mode or "dahua",
+            "rtsp_url": device.rtsp_url or "",
             "location": device.location,
             "area": device.area,
             "status": "在线" if device.status else "离线",
@@ -2390,6 +2432,21 @@ async def import_devices(
                 if row['device_type'] not in valid_device_types:
                     raise ValueError(f"第{index+2}行: 无效的设备类型 '{row['device_type']}'. 有效类型: {', '.join(valid_device_types)}")
                 
+                valid_stream_types = ['main', 'sub']
+                stream_type = str(row['stream_type']).strip() if 'stream_type' in row and not pd.isna(row['stream_type']) else 'main'
+                if stream_type not in valid_stream_types:
+                    raise ValueError(f"第{index+2}行: 无效的码流类型 '{stream_type}'，有效值: main, sub")
+
+                rtsp_url_mode = str(row['rtsp_url_mode']).strip().lower() if 'rtsp_url_mode' in row and not pd.isna(row['rtsp_url_mode']) else 'dahua'
+                if rtsp_url_mode not in ['dahua', 'custom']:
+                    raise ValueError(f"第{index+2}行: 无效的拉流方式 '{rtsp_url_mode}'，有效值: dahua, custom")
+
+                rtsp_url = str(row['rtsp_url']).strip() if 'rtsp_url' in row and not pd.isna(row['rtsp_url']) else ''
+                if rtsp_url_mode == 'custom' and not rtsp_url:
+                    raise ValueError(f"第{index+2}行: 自定义拉流方式需填写 rtsp_url")
+                if rtsp_url_mode == 'dahua':
+                    rtsp_url = None
+
                 # 准备设备数据
                 device_data = {
                     "device_id": str(row['device_id']),
@@ -2400,7 +2457,9 @@ async def import_devices(
                     "username": str(row['username']),
                     "password": str(row['password']),
                     "channel": int(row['channel']) if 'channel' in row and not pd.isna(row['channel']) else 1,
-                    "stream_type": str(row['stream_type']) if 'stream_type' in row and not pd.isna(row['stream_type']) else 'main',
+                    "stream_type": stream_type,
+                    "rtsp_url_mode": rtsp_url_mode,
+                    "rtsp_url": rtsp_url,
                     "location": str(row['location']) if 'location' in row and not pd.isna(row['location']) else None,
                     "area": str(row['area']) if 'area' in row and not pd.isna(row['area']) else None
                 }

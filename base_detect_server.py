@@ -28,6 +28,7 @@ from src.database import (
 )
 
 from src.run_detection_task import DetectionTask
+from src.db_migrations import ensure_device_rtsp_columns
 
 # 导入认证模块
 from api.auth import get_current_user, User
@@ -1041,6 +1042,7 @@ async def lifespan(app: FastAPI):
     
     # 创建数据库表（如果不存在）
     Base.metadata.create_all(bind=engine)
+    ensure_device_rtsp_columns(engine)
     
     # 1. 注册数据监听器类型
     try:

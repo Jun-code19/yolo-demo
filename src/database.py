@@ -57,6 +57,8 @@ class Device(Base):
     password = Column(String(256), nullable=False)
     channel = Column(Integer, default=1)  # 通道号，默认为1
     stream_type = Column(String(10), default="main")  # 码流类型，main或sub
+    rtsp_url_mode = Column(String(20), default="dahua")  # dahua=大华默认, custom=自定义URL/模板
+    rtsp_url = Column(Text, nullable=True)  # 自定义 RTSP 完整地址或模板
     offline_count = Column(Integer, default=0) # 记录设备连续离线的次数
     last_online_time = Column(DateTime, default=datetime.now) # 记录设备最后一次在线的时间
     status = Column(Boolean, default=True)

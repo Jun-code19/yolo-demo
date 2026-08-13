@@ -116,9 +116,9 @@
           </template>
         </el-table-column>
         <el-table-column prop="ip_address" label="IP地址" sortable min-width="120" />
-        <el-table-column prop="port" label="端口" width="120" />
+        <el-table-column prop="port" label="端口" width="80" />
         <!-- <el-table-column prop="username" label="用户名" min-width="100" /> -->
-        <el-table-column prop="status" label="状态" width="120">
+        <el-table-column prop="status" label="状态" width="80">
           <template #default="{ row }">
             <el-tag :type="row.status ? 'success' : 'danger'">
               {{ row.status ? '在线' : '离线' }}
@@ -128,6 +128,18 @@
         <el-table-column prop="last_heartbeat" label="最后心跳" min-width="180">
           <template #default="{ row }">
             {{ formatDateTime(row.last_heartbeat) }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="stream_type" label="码流" min-width="80">
+          <template #default="{ row }">
+            {{ row.stream_type === 'sub' ? '辅码流' : '主码流' }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="rtsp_url_mode" label="拉流方式" min-width="120">
+          <template #default="{ row }">
+            <el-tag size="small" :type="row.rtsp_url_mode === 'custom' ? 'warning' : 'info'">
+              {{ getRtspPresetLabel(row) }}
+            </el-tag>
           </template>
         </el-table-column>
         <el-table-column prop="location" label="位置" sortable min-width="120" />
@@ -162,7 +174,7 @@
     <el-dialog 
       v-model="dialogVisible" 
       :title="dialogType === 'add' ? '添加设备' : '编辑设备'" 
-      width="30%" top="5vh"
+      width="40%" top="5vh"
       destroy-on-close
       :z-index="999999"
       append-to-body
@@ -192,6 +204,37 @@
             <el-option label="辅码流" value="sub" />
           </el-select>
         </el-form-item>
+        <template v-if="['camera', 'nvr'].includes(deviceForm.device_type)">
+          <el-form-item label="拉流方式" prop="selectedRtspPreset">
+            <el-select
+              v-model="selectedRtspPreset"
+              placeholder="请选择拉流方式"
+              style="width: 100%"
+              @change="handleRtspPresetChange"
+            >
+              <el-option
+                v-for="preset in RTSP_URL_PRESETS"
+                :key="preset.value"
+                :label="preset.label"
+                :value="preset.value"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="RTSP 格式" prop="rtsp_url">
+            <el-input
+              :model-value="displayRtspFormat"
+              type="textarea"
+              :rows="2"
+              :readonly="selectedRtspPreset === 'dahua'"
+              :placeholder="selectedRtspPreset === 'dahua' ? '' : 'RTSP 地址或模板'"
+              @update:model-value="handleRtspFormatInput"
+            />
+            <div class="form-hint rtsp-form-hint">
+              <div>{{ rtspPresetHint }}</div>
+              <div>示例：{{ rtspPreviewExample }}</div>
+            </div>
+          </el-form-item>
+        </template>
         <el-form-item label="位置" prop="location">
           <el-input v-model="deviceForm.location" placeholder="请输入设备位置" />
         </el-form-item>
@@ -306,7 +349,8 @@
         </div>
         <template #tip>
           <div class="el-upload__tip">
-            请上传Excel(.xlsx/.xls)或CSV(.csv)格式文件，文件大小不超过10MB
+            请上传 Excel(.xlsx/.xls) 或 CSV(.csv) 格式文件，文件大小不超过 10MB。
+            旧模板不含 rtsp_url_mode / rtsp_url 时，将默认使用大华拉流方式。
           </div>
         </template>
       </el-upload>
@@ -324,11 +368,45 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onUnmounted, h } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, h, computed } from 'vue'
 import { Plus, VideoCamera, CircleClose, Camera, Download, ArrowDown, Upload, UploadFilled, Search, Refresh, FullScreen } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import deviceApi from '@/api/device'
 import router from '@/router'
+import {
+  buildRtspUrl,
+  getRtspPresetLabel,
+  RTSP_URL_PRESETS,
+  DAHUA_RTSP_TEMPLATE,
+  detectRtspPreset,
+  applyRtspPreset,
+  getRtspPreset
+} from '@/utils/rtspUrl'
+
+const selectedRtspPreset = ref('dahua')
+
+const displayRtspFormat = computed(() => {
+  if (selectedRtspPreset.value === 'dahua') {
+    return DAHUA_RTSP_TEMPLATE
+  }
+  return deviceForm.rtsp_url || ''
+})
+
+const rtspPresetHint = computed(() => {
+  const preset = getRtspPreset(selectedRtspPreset.value)
+  return preset?.hint || ''
+})
+
+const rtspPreviewExample = computed(() => {
+  return previewRtspUrl.value || '请先填写 IP、账号等信息'
+})
+
+const previewRtspUrl = computed(() => {
+  if (!deviceForm.ip_address || !deviceForm.username) {
+    return ''
+  }
+  return buildRtspUrl(deviceForm)
+})
 
 // 列表数据
 const loading = ref(false)
@@ -356,6 +434,8 @@ const deviceForm = reactive({
   password: '',
   channel: 1,
   stream_type: 'main',
+  rtsp_url_mode: 'dahua',
+  rtsp_url: '',
   location: '',
   area: ''
 })
@@ -374,7 +454,17 @@ const deviceRules = {
   ],
   port: [{ required: true, message: '请输入端口号', trigger: 'blur' }],
   username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
-  password: [{ required: true, message: '请输入密码', trigger: 'blur' }]
+  password: [{ required: true, message: '请输入密码', trigger: 'blur' }],
+  rtsp_url: [{
+    validator: (_rule, value, callback) => {
+      if (selectedRtspPreset.value !== 'dahua' && (!value || !String(value).trim())) {
+        callback(new Error('当前拉流方式需填写 RTSP 格式'))
+      } else {
+        callback()
+      }
+    },
+    trigger: 'blur'
+  }]
 }
 
 // 预览相关
@@ -543,9 +633,12 @@ const handleAdd = () => {
     password: '',
     channel: 1,
     stream_type: 'main',
+    rtsp_url_mode: 'dahua',
+    rtsp_url: '',
     location: '',
     area: ''
   })
+  selectedRtspPreset.value = 'dahua'
 }
 
 // 编辑设备
@@ -562,9 +655,39 @@ const handleEdit = (row) => {
     password: row.password,
     channel: row.channel || 1,
     stream_type: row.stream_type || 'main',
+    rtsp_url_mode: row.rtsp_url_mode || 'dahua',
+    rtsp_url: row.rtsp_url || '',
     location: row.location || '',
     area: row.area || ''
   })
+  syncRtspPresetFromForm()
+}
+
+const syncRtspPresetFromForm = () => {
+  selectedRtspPreset.value = detectRtspPreset(deviceForm)
+}
+
+const handleRtspPresetChange = (presetValue) => {
+  applyRtspPreset(presetValue, deviceForm)
+}
+
+const handleRtspFormatInput = (value) => {
+  if (selectedRtspPreset.value === 'dahua') {
+    return
+  }
+  deviceForm.rtsp_url = value
+  deviceForm.rtsp_url_mode = 'custom'
+  const preset = getRtspPreset(selectedRtspPreset.value)
+  if (preset?.url && value !== preset.url && selectedRtspPreset.value !== 'generic') {
+    selectedRtspPreset.value = 'generic'
+  }
+}
+
+const prepareRtspFormForSubmit = () => {
+  applyRtspPreset(selectedRtspPreset.value, deviceForm)
+  if (selectedRtspPreset.value === 'dahua') {
+    deviceForm.rtsp_url = ''
+  }
 }
 
 // 提交表单
@@ -574,6 +697,7 @@ const handleSubmit = async () => {
   await deviceFormRef.value.validate(async (valid) => {
     if (!valid) return
 
+    prepareRtspFormForSubmit()
     submitting.value = true
     try {
       if (dialogType.value === 'add') {
@@ -798,7 +922,7 @@ const handleWsMessage = (event) => {
             JSON.stringify({
               type: 'preview_request',
               device_id: currentDevice.value.device_id,
-              stream_url: buildRtspUrl()
+              stream_url: buildRtspUrl(currentDevice.value)
             })
           )
         }
@@ -1312,19 +1436,6 @@ const exitFullscreen = () => {
   isFullscreen.value = false
 }
 
-// 构建RTSP URL
-const buildRtspUrl = () => {
-  if (!currentDevice.value) return '';
-
-  if (currentDevice.value.device_type === 'nvr') {
-    // NVR设备，包含通道号
-    return `rtsp://${currentDevice.value.username}:${currentDevice.value.password}@${currentDevice.value.ip_address}:${currentDevice.value.port}/cam/realmonitor?channel=${currentDevice.value.channel || 1}&subtype=${currentDevice.value.stream_type === 'sub' ? 1 : 0}`
-  } else {
-    // 普通摄像头
-    return `rtsp://${currentDevice.value.username}:${currentDevice.value.password}@${currentDevice.value.ip_address}:${currentDevice.value.port}/cam/realmonitor?channel=1&subtype=${currentDevice.value.stream_type === 'sub' ? 1 : 0}`
-  }
-}
-
 // 导入功能
 const handleImport = () => {
   importDialogVisible.value = true
@@ -1643,10 +1754,32 @@ const handleResetFilter = () => {
   -moz-user-select: none;
   -ms-user-select: none;
 }
+
+.form-hint {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #909399;
+  line-height: 1.5;
+}
+
+.rtsp-form-hint {
+  word-break: break-all;
+}
+
+.rtsp-form-hint > div + div {
+  margin-top: 4px;
+}
 </style>
 
 <style>
-.device-delete-messagebox .delete-confirm-message {
+.device-delete-messagebox .form-hint {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #909399;
+  line-height: 1.5;
+}
+
+.delete-confirm-message {
   line-height: 1.6;
   color: #606266;
 }

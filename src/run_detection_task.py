@@ -29,6 +29,7 @@ from src.database import (
 from src.tracker import ObjectTracker
 # 导入数据推送模块
 from src.data_pusher import data_pusher
+from src.rtsp_url import build_rtsp_url
 
 logger = logging.getLogger(__name__)
 # 导入GPU解码器
@@ -176,13 +177,7 @@ class DetectionTask:
                 logger.error(f"设备信息不存在: {self.device_id}")
                 return False
 
-            if device.device_type == 'nvr':
-                stream_type = 1 if device.stream_type == 'sub' else 0
-                rtsp_url = f"rtsp://{device.username}:{device.password}@{device.ip_address}:{device.port}/cam/realmonitor?channel={device.channel}&subtype={stream_type}"
-            else:
-                stream_type = 1 if device.stream_type == 'sub' else 0
-                rtsp_url = f"rtsp://{device.username}:{device.password}@{device.ip_address}:{device.port}/cam/realmonitor?channel=1&subtype={stream_type}"
-            
+            rtsp_url = build_rtsp_url(device)
             self.stream_type = device.stream_type
 
             # 优先使用GPU解码器
