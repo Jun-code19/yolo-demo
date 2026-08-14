@@ -72,32 +72,56 @@ const routes = [
   },
   {
     path: '/video',
-    name: 'VideoDetection',
-    component: () => import('../views/detection/VideoDetection.vue'),
-    meta: {
-      requiresAuth: true
-    }
+    redirect: '/models/video'
   },
   {
     path: '/image',
-    name: 'ImageDetection',
-    component: () => import('../views/detection/ImageDetection.vue'),
+    redirect: '/models/image'
+  },
+  {
+    path: '/models',
+    component: () => import('../views/models/Layout.vue'),
     meta: {
       requiresAuth: true
-    }
+    },
+    children: [
+      {
+        path: '',
+        redirect: '/models/list'
+      },
+      {
+        path: 'list',
+        name: 'ModelList',
+        component: () => import('../views/models/ModelList.vue'),
+        meta: {
+          requiresAuth: true,
+          title: '模型列表'
+        }
+      },
+      {
+        path: 'image',
+        name: 'ModelImageValidation',
+        component: () => import('../views/models/ImageValidation.vue'),
+        meta: {
+          requiresAuth: true,
+          title: '图片验证'
+        }
+      },
+      {
+        path: 'video',
+        name: 'ModelVideoValidation',
+        component: () => import('../views/models/VideoValidation.vue'),
+        meta: {
+          requiresAuth: true,
+          title: '视频验证'
+        }
+      }
+    ]
   },
   {
     path: '/profile',
     name: 'UserProfile',
     component: () => import('../views/UserProfile.vue'),
-    meta: {
-      requiresAuth: true
-    }
-  },
-  {
-    path: '/models',
-    name: 'Models',
-    component: () => import('../views/Models.vue'),
     meta: {
       requiresAuth: true
     }

@@ -12,7 +12,7 @@
           <el-option
             v-for="config in configs"
             :key="config.config_id"
-            :label="config.device_id + '-' + config.device_name + ' - ' + config.model_name"
+            :label="getConfigOptionLabel(config)"
             :value="config.config_id"
           />
         </el-select>
@@ -212,6 +212,12 @@
           <el-descriptions-item label="配置ID">{{ selectedConfigDetails.config_id }}</el-descriptions-item>
           <el-descriptions-item label="设备">{{ selectedConfigDetails.device_name }} - {{ selectedConfigDetails.device_id }}</el-descriptions-item>
           <el-descriptions-item label="模型">{{ getModelTypeName(selectedConfigDetails.models_type) }} - {{ selectedConfigDetails.models_name }}</el-descriptions-item>
+          <el-descriptions-item label="检测方式">
+            {{ getFrequencyLabel(selectedConfigDetails.frequency) }}
+            <span v-if="getFrameIntervalText(selectedConfigDetails)">
+              · {{ getFrameIntervalText(selectedConfigDetails) }}
+            </span>
+          </el-descriptions-item>
           <el-descriptions-item label="灵敏度">{{ (selectedConfigDetails.sensitivity * 100).toFixed(0) }}%</el-descriptions-item>
           <el-descriptions-item label="状态">
             <el-tag :type="selectedConfigDetails.enabled ? 'success' : 'info'">
@@ -262,23 +268,48 @@ const selectedConfigName = computed(() => {
   return config ? `${config.device_name} - ${config.model_name}` : '未选择'
 })
 
-// 加载检测配置
+// 检测方式标签
+const getFrequencyLabel = (frequency) => {
+  const map = {
+    realtime: '实时检测',
+    manual: '抽帧检测',
+    scheduled: '定时检测'
+  }
+  return map[frequency] || frequency || '未知'
+}
+
+const getFrameIntervalText = (config) => {
+  if (!config || config.frequency !== 'manual') return ''
+  const interval = config.schedule_config?.runtime?.frame_interval
+  return interval ? `${interval}秒/帧` : ''
+}
+
+const getConfigOptionLabel = (config) => {
+  const base = `${config.device_id}-${config.device_name} - ${config.model_name}`
+  const mode = getFrequencyLabel(config.frequency)
+  const interval = config.frequency === 'manual' && config.schedule_config?.runtime?.frame_interval
+    ? ` ${config.schedule_config.runtime.frame_interval}秒/帧`
+    : ''
+  return `${base} (${mode}${interval})`
+}
+
+// 加载检测配置（实时 + 抽帧）
 const loadConfigurations = async () => {
   try {
-    // 替换为实际的API端点
-    const response = await detectionConfigApi.getConfigs(null, 'realtime');
-    // 转换配置数据
+    const response = await detectionConfigApi.getConfigs({ skip: 0, limit: 500 })
     configs.value = response.data.data.map(config => ({
       config_id: config.config_id,
       device_id: config.device_id,
       device_name: config.device_name || config.device_id,
       model_name: config.models_name || '默认模型',
+      models_type: config.models_type,
+      models_name: config.models_name,
+      frequency: config.frequency,
+      schedule_config: config.schedule_config,
       sensitivity: config.sensitivity,
       enabled: config.enabled
     }))
-    
   } catch (error) {
-    // console.error('加载检测配置失败:', error)
     ElMessage.error('加载检测配置失败')
   }
 }

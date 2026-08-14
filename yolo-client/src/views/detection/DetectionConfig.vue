@@ -71,8 +71,8 @@
               </el-icon>
             </div>
             <div class="stat-info">
-              <div class="stat-value">{{ configStats.scheduled_configs || 0 }}</div>
-              <div class="stat-label">定时检测</div>
+              <div class="stat-value">{{ configStats.manual_configs || 0 }}</div>
+              <div class="stat-label">抽帧检测</div>
             </div>
           </div>
         </el-col>
@@ -109,11 +109,10 @@
           </el-select>
         </el-form-item>
 
-        <el-form-item label="检测频率">
-          <el-select v-model="filterForm.frequency" placeholder="选择频率" style="width: 140px" clearable>
+        <el-form-item label="检测方式">
+          <el-select v-model="filterForm.frequency" placeholder="选择方式" style="width: 140px" clearable>
             <el-option value="realtime" label="实时检测" />
-            <el-option value="scheduled" label="定时检测" />
-            <el-option value="manual" label="手动检测" />
+            <el-option value="manual" label="抽帧检测" />
           </el-select>
         </el-form-item>
 
@@ -185,7 +184,7 @@
         </el-table-column>
 
         <!-- 检测频率列 -->
-        <el-table-column label="检测频率" prop="frequency" min-width="100">
+        <el-table-column label="检测方式" prop="frequency" min-width="100">
           <template #default="scope">
             <el-tag :type="getFrequencyType(scope.row.frequency)">
               {{ getFrequencyLabel(scope.row.frequency) }}
@@ -193,8 +192,7 @@
           </template>
         </el-table-column>
 
-        <!-- 定时检测详细信息列 -->
-        <el-table-column label="定时检测详细信息" prop="schedule_config" min-width="250">
+        <el-table-column label="运行时段" prop="schedule_config" min-width="220">
           <template #default="scope">
             {{ getScheduleDetail(scope.row) }}
           </template>
@@ -277,7 +275,7 @@
     <el-dialog 
       v-model="modalVisible" 
       :title="isEdit ? '编辑检测配置' : '创建检测配置'" 
-      width="720px"
+      width="920px"
       top="5vh" 
       destroy-on-close
       :z-index="999999"
@@ -290,334 +288,147 @@
           <el-tab-pane label="基本设置" name="basic">
             <div class="section-container">
               <div class="form-section">
-                <div class="form-grid">
-                  <el-form-item label="设备" prop="device_id" class="grid-item full-width">
-                    <el-select v-model="formState.device_id" placeholder="请选择设备" :disabled="isEdit" filterable popper-append-to-body>
-                      <el-option v-for="device in deviceList" :key="device.device_id"
-                        :label="`${device.device_name} (${device.device_id})`" :value="device.device_id">
-                        <div class="device-option">
-                          <el-icon>
-                            <VideoCamera />
-                          </el-icon>
-                          <span>{{ device.device_name }}</span>
-                          <span class="device-id">({{ device.device_id }})</span>
-                        </div>
-                      </el-option>
-                    </el-select>
-                  </el-form-item>
-
-                  <el-form-item label="检测模型" prop="models_id" class="grid-item full-width">
-                    <el-select v-model="formState.models_id" placeholder="请选择检测模型" @change="updateTargetClasses" filterable popper-append-to-body>
-                      <el-option v-for="model in modelList" :key="model.models_id"
-                        :label="`${model.models_name} (${getModelTypeName(model.models_type)})`" :value="model.models_id">
-                        <div class="model-option">
-                          <span>{{ model.models_name }}</span>
-                          <el-tag size="small" effect="plain">{{ getModelTypeName(model.models_type) }}</el-tag>
-                        </div>
-                      </el-option>
-                    </el-select>
-                  </el-form-item>
-
-                  <el-form-item label="检测频率" prop="frequency" class="grid-item full-width">
-                    <el-radio-group v-model="formState.frequency" @change="handleFrequencyChange">
-                      <el-radio-button value="realtime">实时检测</el-radio-button>
-                      <el-radio-button value="scheduled">定时检测</el-radio-button>
-                      <el-radio-button value="manual">手动触发</el-radio-button>
-                    </el-radio-group>
-                    <div class="field-hint">
-                      实时检测最常用；选择「定时检测」后可在「运行计划」中配置时间
-                    </div>
-                  </el-form-item>
-
-                  <el-form-item label="检测灵敏度" prop="sensitivity" class="grid-item full-width sensitivity-item">
-                    <div class="sensitivity-container slider-with-value">
-                      <div class="sensitivity-header">
-                        <span class="sensitivity-current">当前 {{ formatSensitivity(formState.sensitivity) }}</span>
-                      </div>
-                      <el-slider
-                        v-model="formState.sensitivity"
-                        :min="0.1"
-                        :max="0.9"
-                        :step="0.05"
-                        :format-tooltip="formatSensitivity"
-                        :marks="sensitivityMarks"
-                      />
-                    </div>
-                  </el-form-item>
-
-                  <el-form-item label="目标类别" prop="target_classes" class="grid-item full-width">
-                    <el-select v-model="formState.target_classes" multiple placeholder="请选择要检测的目标类别" collapse-tags
-                      collapse-tags-tooltip :max-collapse-tags="4" filterable popper-append-to-body>
-                      <el-option v-for="classItem in targetClasses" :key="classItem.value" :label="classItem.label"
-                        :value="classItem.value">
-                        <div class="class-option">
-                          <span>{{ classItem.label }}</span>
-                          <span class="class-id">{{ classItem.value }}</span>
-                        </div>
-                      </el-option>
-                    </el-select>
-                    <div class="select-hint">
-                      <div class="hint-buttons">
-                        <el-button link size="small" @click="selectAllClasses" v-if="targetClasses.length > 0">
-                          <el-icon>
-                            <CircleCheckFilled />
-                          </el-icon> 全选
-                        </el-button>
-                        <el-button link size="small" @click="clearAllClasses" v-if="formState.target_classes.length > 0">
-                          <el-icon>
-                            <CircleCloseFilled />
-                          </el-icon> 清空
-                        </el-button>
-                      </div>
-                      <span class="selected-count" v-if="targetClasses.length > 0">
-                        已选择 {{ formState.target_classes.length }}/{{ targetClasses.length }}
-                      </span>
-                    </div>
-                  </el-form-item>
-                </div>
-              </div>
-            </div>
-          </el-tab-pane>
-
-          <el-tab-pane label="运行计划" name="schedule" :disabled="formState.frequency !== 'scheduled'">
-            <div class="section-container">
-              <el-alert
-                v-if="formState.frequency !== 'scheduled'"
-                title="请先在「基本设置」中选择「定时检测」"
-                type="info"
-                :closable="false"
-                show-icon
-                class="schedule-tab-alert"
-              />
-              <div v-else class="form-section schedule-section">
-              <!-- 模式选择 -->
-              <div class="section-header" style="margin-top: 20px;">
-                <div class="section-title">配置模式</div>
-                <el-radio-group v-model="formState.scheduleMode" @change="handleScheduleModeChange" size="large"
-                  class="mode-selector">
-                  <el-radio-button value="simple">简单模式</el-radio-button>
-                  <el-radio-button value="advanced">高级模式</el-radio-button>
-                </el-radio-group>
-              </div>
-
-              <!-- 简单模式 -->
-              <div v-if="formState.scheduleMode === 'simple'" class="schedule-simple-mode schedule-card">
-                <div class="form-row time-settings">
-                  <el-form-item label="执行时间" class="form-item">
-                    <el-time-picker v-model="formState.scheduleTime" format="HH:mm" placeholder="选择时间"
-                      class="time-picker" popper-append-to-body></el-time-picker>
-                  </el-form-item>
-                  <el-form-item label="执行时长" class="form-item">
-                    <div class="input-with-unit">
-                      <el-input-number v-model="formState.scheduleDuration" :min="1" :max="1440" :step="5"
-                        controls-position="right"></el-input-number>
-                      <span class="unit-label">分钟</span>
-                    </div>
-                  </el-form-item>
-                </div>
-                <el-form-item label="执行日期">
-                  <div class="weekday-selector">
-                    <el-checkbox-group v-model="formState.scheduleDays" class="day-checkboxes">
-                      <el-checkbox value="1" class="day-checkbox">周一</el-checkbox>
-                      <el-checkbox value="2" class="day-checkbox">周二</el-checkbox>
-                      <el-checkbox value="3" class="day-checkbox">周三</el-checkbox>
-                      <el-checkbox value="4" class="day-checkbox">周四</el-checkbox>
-                      <el-checkbox value="5" class="day-checkbox">周五</el-checkbox>
-                      <el-checkbox value="6" class="day-checkbox">周六</el-checkbox>
-                      <el-checkbox value="0" class="day-checkbox">周日</el-checkbox>
-                    </el-checkbox-group>
-                    <div class="quick-buttons">
-                      <el-button link size="small" @click="selectAllWeekdays">全选</el-button>
-                      <el-button link size="small" @click="selectWorkdays">工作日</el-button>
-                      <el-button link size="small" @click="selectWeekends">周末</el-button>
-                      <el-button link size="small" @click="clearWeekdays">清空</el-button>
-                    </div>
-                  </div>
-                </el-form-item>
-              </div>
-
-              <!-- 高级模式 -->
-              <div v-else class="schedule-advanced-mode">
-                <div class="schedule-cards">
-                  <!-- 时间设置卡片 -->
-                  <div class="schedule-card">
-                    <div class="card-title">
-                      <el-icon>
-                        <Clock />
-                      </el-icon>
-                      <span>时间设置</span>
-                    </div>
-                    <div class="card-content">
-                      <el-radio-group v-model="formState.scheduleTimeType" class="time-type-selector">
-                        <el-radio value="points">多时间点</el-radio>
-                        <el-radio value="range">时间范围</el-radio>
-                      </el-radio-group>
-
-                      <!-- 多时间点模式 -->
-                      <div v-if="formState.scheduleTimeType === 'points'" class="time-points-section">
-                        <div class="time-points-header">
-                          <el-button type="primary" plain @click="addTimePoint" size="small">
+                <div class="config-section-block">
+                  <div class="config-section-title">设备与模型</div>
+                  <div class="form-grid">
+                  <div class="form-row">
+                    <el-form-item label="设备" prop="device_id" class="form-item form-item-device">
+                      <el-select
+                        v-model="formState.device_id"
+                        placeholder="请选择设备"
+                        :disabled="isEdit"
+                        filterable
+                        popper-append-to-body
+                        @change="handleDeviceChange"
+                      >
+                        <el-option v-for="device in deviceList" :key="device.device_id"
+                          :label="`${device.device_name} (${device.device_id})`" :value="device.device_id">
+                          <div class="device-option">
                             <el-icon>
-                              <plus />
-                            </el-icon>添加时间点
-                          </el-button>
-                        </div>
-                        <transition-group name="time-point-list" tag="div" class="time-points-list">
-                          <div v-for="(time, index) in formState.scheduleTimePoints" :key="index"
-                            class="time-point-item">
-                            <el-time-picker v-model="formState.scheduleTimePoints[index]" format="HH:mm"
-                              class="time-point-picker" popper-append-to-body></el-time-picker>
-                            <el-button type="danger" circle plain @click="removeTimePoint(index)"
-                              class="remove-time-btn" size="small">
-                              <el-icon>
-                                <delete />
-                              </el-icon>
-                            </el-button>
+                              <VideoCamera />
+                            </el-icon>
+                            <span>{{ device.device_name }}</span>
+                            <span class="device-id">({{ device.device_id }})</span>
                           </div>
-                        </transition-group>
-                        <div v-if="formState.scheduleTimePoints.length === 0" class="empty-time-points">
-                          <el-empty description="暂无时间点" :image-size="60"></el-empty>
-                        </div>
-                      </div>
+                        </el-option>
+                      </el-select>
+                    </el-form-item>
 
-                      <!-- 时间范围模式 -->
-                      <div v-else class="time-range-section">
-                        <div class="time-range-row">
-                          <el-form-item label="开始时间" class="form-item">
-                            <el-time-picker v-model="formState.scheduleStartTime" format="HH:mm" placeholder="开始时间"
-                              class="time-picker" popper-append-to-body></el-time-picker>
-                          </el-form-item>
-                          <div class="time-separator">至</div>
-                          <el-form-item label="结束时间" class="form-item">
-                            <el-time-picker v-model="formState.scheduleEndTime" format="HH:mm" placeholder="结束时间"
-                              class="time-picker" popper-append-to-body></el-time-picker>
-                          </el-form-item>
-                        </div>
-                        <el-form-item label="执行间隔">
-                          <div class="input-with-unit">
-                            <span class="unit-label-prefix">每隔</span>
-                            <el-input-number v-model="formState.scheduleInterval" :min="1" :max="120" :step="5"
-                              controls-position="right"></el-input-number>
-                            <span class="unit-label">分钟执行一次</span>
-                          </div>
-                        </el-form-item>
-                      </div>
-                    </div>
+                    <el-form-item label="码流" prop="stream_type" class="form-item form-item-stream">
+                      <el-select v-model="formState.stream_type" placeholder="请选择码流" :disabled="!formState.device_id">
+                        <el-option label="主码流" value="main" />
+                        <el-option label="辅码流" value="sub" />
+                      </el-select>
+                    </el-form-item>
                   </div>
 
-                  <!-- 日期设置卡片 -->
-                  <div class="schedule-card">
-                    <div class="card-title">
-                      <el-icon>
-                        <Calendar />
-                      </el-icon>
-                      <span>日期设置</span>
-                    </div>
-                    <div class="card-content">
-                      <el-radio-group v-model="formState.scheduleDateType" class="date-type-selector">
-                        <el-radio value="weekday">星期几</el-radio>
-                        <el-radio value="monthday">每月日期</el-radio>
-                        <el-radio value="specific">特定日期</el-radio>
-                      </el-radio-group>
-
-                      <div class="date-content">
-                        <!-- 星期几 -->
-                        <div v-if="formState.scheduleDateType === 'weekday'" class="weekday-section">
-                          <el-checkbox-group v-model="formState.scheduleAdvWeekdays" class="weekday-checkboxes">
-                            <el-checkbox value="1" border class="day-checkbox">周一</el-checkbox>
-                            <el-checkbox value="2" border class="day-checkbox">周二</el-checkbox>
-                            <el-checkbox value="3" border class="day-checkbox">周三</el-checkbox>
-                            <el-checkbox value="4" border class="day-checkbox">周四</el-checkbox>
-                            <el-checkbox value="5" border class="day-checkbox">周五</el-checkbox>
-                            <el-checkbox value="6" border class="day-checkbox">周六</el-checkbox>
-                            <el-checkbox value="0" border class="day-checkbox">周日</el-checkbox>
-                          </el-checkbox-group>
-                          <div class="quick-buttons">
-                            <el-button link size="small" @click="selectAllWeekdays">全选</el-button>
-                            <el-button link size="small" @click="selectWorkdays">工作日</el-button>
-                            <el-button link size="small" @click="selectWeekends">周末</el-button>
-                            <el-button link size="small" @click="clearWeekdays">清空</el-button>
+                  <div class="form-row form-row-three">
+                    <el-form-item label="检测模型" prop="models_id" class="form-item">
+                      <el-select v-model="formState.models_id" placeholder="请选择检测模型" @change="updateTargetClasses" filterable popper-append-to-body>
+                        <el-option v-for="model in modelList" :key="model.models_id"
+                          :label="`${model.models_name} (${getModelTypeName(model.models_type)})`" :value="model.models_id">
+                          <div class="model-option">
+                            <span>{{ model.models_name }}</span>
+                            <el-tag size="small" effect="plain">{{ getModelTypeName(model.models_type) }}</el-tag>
                           </div>
-                        </div>
+                        </el-option>
+                      </el-select>
+                    </el-form-item>
 
-                        <!-- 每月日期 -->
-                        <div v-else-if="formState.scheduleDateType === 'monthday'" class="monthday-section">
-                          <el-select v-model="formState.scheduleMonthdays" multiple placeholder="选择每月几号执行"
-                            style="width: 100%" collapse-tags popper-append-to-body>
-                            <el-option v-for="i in 31" :key="i" :label="`${i}日`" :value="i"></el-option>
-                          </el-select>
-                          <div class="quick-buttons">
-                            <el-button link size="small"
-                              @click="selectMonthdays([1, 5, 10, 15, 20, 25])">常用日期</el-button>
-                            <el-button link size="small" @click="clearMonthdays">清空</el-button>
+                    <el-form-item prop="target_classes" class="form-item form-item-classes">
+                      <template #label>
+                        <div class="form-item-label-row">
+                          <span>目标类别</span>
+                          <span v-if="targetClasses.length > 0" class="label-extra">
+                            <el-button link size="small" @click.stop="selectAllClasses">全选</el-button>
+                            <el-button link size="small" @click.stop="clearAllClasses" v-if="formState.target_classes.length > 0">清空</el-button>
+                            <span class="selected-count">{{ formState.target_classes.length }}/{{ targetClasses.length }}</span>
+                          </span>
+                        </div>
+                      </template>
+                      <el-select v-model="formState.target_classes" multiple placeholder="请选择目标类别" collapse-tags
+                        collapse-tags-tooltip :max-collapse-tags="2" filterable popper-append-to-body>
+                        <el-option v-for="classItem in targetClasses" :key="classItem.value" :label="classItem.label"
+                          :value="classItem.value">
+                          <div class="class-option">
+                            <span>{{ classItem.label }}</span>
+                            <span class="class-id">{{ classItem.value }}</span>
                           </div>
-                        </div>
+                        </el-option>
+                      </el-select>
+                    </el-form-item>
 
-                        <!-- 特定日期 -->
-                        <div v-else class="specific-date-section">
-                          <el-date-picker v-model="formState.scheduleSpecificDates" type="dates" placeholder="选择特定日期"
-                            style="width: 100%" popper-append-to-body>
-                          </el-date-picker>
+                    <el-form-item label="检测灵敏度" prop="sensitivity" class="form-item sensitivity-item">
+                      <div class="sensitivity-control">
+                        <el-input-number
+                          v-model="formState.sensitivity"
+                          :min="0.1"
+                          :max="0.9"
+                          :step="0.05"
+                          :precision="2"
+                          controls-position="right"
+                          class="sensitivity-input"
+                        />
+                        <div class="sensitivity-presets">
+                          <button
+                            v-for="preset in sensitivityPresets"
+                            :key="preset.value"
+                            type="button"
+                            class="sensitivity-preset"
+                            :class="{ active: isSensitivityPresetActive(preset.value) }"
+                            @click="formState.sensitivity = preset.value"
+                          >
+                            {{ preset.label }}
+                          </button>
                         </div>
                       </div>
-                    </div>
+                    </el-form-item>
                   </div>
-
-                  <!-- 执行控制卡片 -->
-                  <div class="schedule-card">
-                    <div class="card-title">
-                      <el-icon>
-                        <Setting />
-                      </el-icon>
-                      <span>执行控制</span>
-                    </div>
-                    <div class="card-content">
-                      <div class="control-grid">
-                        <el-form-item label="单次执行时长" class="control-item">
-                          <div class="input-with-unit">
-                            <el-input-number v-model="formState.scheduleDuration" :min="1" :max="120"
-                              controls-position="right"></el-input-number>
-                            <span class="unit-label">分钟</span>
-                          </div>
-                        </el-form-item>
-
-                        <el-form-item label="最大执行次数" class="control-item">
-                          <div class="input-with-unit">
-                            <el-input-number v-model="formState.scheduleMaxExecutions" :min="-1" :max="100"
-                              controls-position="right"></el-input-number>
-                            <el-tooltip content="设置为-1表示不限制执行次数" placement="top">
-                              <el-icon class="info-icon">
-                                <InfoFilled />
-                              </el-icon>
-                            </el-tooltip>
-                          </div>
-                        </el-form-item>
-
-                        <el-form-item label="无活动自动停止" class="control-item">
-                          <div class="input-with-unit">
-                            <el-input-number v-model="formState.scheduleIdleTimeout" :min="0" :max="60"
-                              controls-position="right"></el-input-number>
-                            <span class="unit-label">分钟</span>
-                            <el-tooltip content="设置为0表示不自动停止" placement="top">
-                              <el-icon class="info-icon">
-                                <InfoFilled />
-                              </el-icon>
-                            </el-tooltip>
-                          </div>
-                        </el-form-item>
-                      </div>
-                    </div>
                   </div>
                 </div>
-              </div>
+
+                <div class="config-section-block">
+                  <div class="config-section-title">运行策略</div>
+                  <div class="runtime-panel">
+                    <div class="runtime-mode-row">
+                      <el-form-item label="检测方式" prop="frequency" class="runtime-mode-item">
+                        <el-radio-group v-model="formState.frequency" class="mode-radio-group">
+                          <el-radio-button value="realtime">实时检测</el-radio-button>
+                          <el-radio-button value="manual">抽帧检测</el-radio-button>
+                        </el-radio-group>
+                      </el-form-item>
+                      <el-form-item
+                        v-if="formState.frequency === 'manual'"
+                        label="抽帧间隔"
+                        class="runtime-interval-item"
+                      >
+                        <div class="input-with-unit">
+                          <el-input-number
+                            v-model="formState.frameInterval"
+                            :min="1"
+                            :max="3600"
+                            :step="1"
+                            controls-position="right"
+                          />
+                          <span class="unit-label">秒 / 帧</span>
+                        </div>
+                      </el-form-item>
+                    </div>
+                    <el-form-item label="生效时段" class="runtime-schedule-item">
+                      <WeeklyTimeSchedule v-model="formState.weeklySchedule" />
+                    </el-form-item>
+                  </div>
+                </div>
               </div>
             </div>
           </el-tab-pane>
 
           <el-tab-pane label="保存设置" name="save">
             <div class="section-container">
-              <div class="form-section save-section">
-                <el-form-item label="保存模式" prop="save_mode" class="grid-item full-width">
+              <div class="form-section">
+                <div class="config-section-block">
+                  <div class="config-section-title">事件保存</div>
+                  <el-form-item label="保存模式" prop="save_mode" class="grid-item full-width">
                   <el-radio-group v-model="formState.save_mode">
                     <el-radio-button value="none">不保存</el-radio-button>
                     <el-radio-button value="screenshot">截图</el-radio-button>
@@ -645,6 +456,7 @@
                     </el-form-item>
                   </div>
                 </div>
+                </div>
               </div>
             </div>
           </el-tab-pane>
@@ -669,11 +481,20 @@
 import { defineComponent, ref, reactive, onMounted, h } from 'vue';
 import { useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { Plus, Delete, Edit, VideoPause, VideoPlay, InfoFilled, Calendar, Operation, CircleCloseFilled, Files, VideoCamera, CircleCheckFilled, Clock, Setting, CircleClose, Search, Refresh } from '@element-plus/icons-vue';
+import { Plus, Delete, Edit, VideoPause, VideoPlay, Operation, CircleCloseFilled, Files, VideoCamera, CircleCheckFilled, Clock, Setting, CircleClose, Search, Refresh } from '@element-plus/icons-vue';
 import deviceApi from '@/api/device'
 import dayjs from 'dayjs';
 import { detectionConfigApi } from '@/api/detection';
 import { startDetection, stopDetection } from '@/api/detection_server';
+import WeeklyTimeSchedule from '@/components/WeeklyTimeSchedule.vue';
+import {
+  createFullWeekSchedule,
+  formatScheduleSummary,
+  isFullWeekSchedule,
+  legacyRuntimeToSchedule,
+  scheduleFromBackend,
+  scheduleToBackend
+} from '@/utils/weeklySchedule';
 
 export default defineComponent({
   name: 'DetectionConfig',
@@ -683,8 +504,6 @@ export default defineComponent({
     Edit,
     VideoPause,
     VideoPlay,
-    InfoFilled,
-    Calendar,
     Operation,
     CircleCloseFilled,
     Files,
@@ -694,7 +513,8 @@ export default defineComponent({
     Setting,
     CircleClose,
     Search,
-    Refresh
+    Refresh,
+    WeeklyTimeSchedule
   },
   setup() {
     const router = useRouter();
@@ -728,7 +548,7 @@ export default defineComponent({
       total_configs: 0,
       enabled_configs: 0,
       disabled_configs: 0,
-      scheduled_configs: 0,
+      manual_configs: 0,
       realtime_configs: 0
     });
 
@@ -763,9 +583,6 @@ export default defineComponent({
     const isEdit = ref(false);
     const formRef = ref(null);
 
-    // 高级定时设置当前标签
-    const scheduleActiveTab = ref('time');
-
     // 设置感兴趣区域方法（跳转到新页面）
     const setInterestArea = (config) => {
       router.push({
@@ -783,6 +600,7 @@ export default defineComponent({
     const formState = reactive({
       config_id: null,
       device_id: null,
+      stream_type: 'main',
       models_id: null,
       enabled: true,
       sensitivity: 0.5,
@@ -791,22 +609,36 @@ export default defineComponent({
       save_mode: 'none',
       save_duration: 10,
       max_storage_days: 30,
-      scheduleTime: null,
-      scheduleDays: [],
-      scheduleMode: 'simple',
-      scheduleTimeType: 'points',
-      scheduleTimePoints: [],
-      scheduleStartTime: null,
-      scheduleEndTime: null,
-      scheduleInterval: 5,
-      scheduleDateType: 'weekday',
-      scheduleAdvWeekdays: [],
-      scheduleMonthdays: [],
-      scheduleSpecificDates: [],
-      scheduleDuration: 10,
-      scheduleMaxExecutions: -1,
-      scheduleIdleTimeout: 0
+      frameInterval: 5,
+      weeklySchedule: createFullWeekSchedule()
     });
+
+    const resetRuntimeDefaults = () => {
+      formState.frameInterval = 5;
+      formState.weeklySchedule = createFullWeekSchedule();
+    };
+
+    const buildRuntimeConfig = () => {
+      const isAllTime = isFullWeekSchedule(formState.weeklySchedule);
+      const runtime = {
+        frame_interval: formState.frameInterval,
+        time_period_mode: isAllTime ? 'all' : 'weekly'
+      };
+      if (!isAllTime) {
+        runtime.weekly_schedule = scheduleToBackend(formState.weeklySchedule);
+      }
+      return runtime;
+    };
+
+    const applyRuntimeConfig = (scheduleConfig) => {
+      const runtime = scheduleConfig?.runtime || {};
+      formState.frameInterval = runtime.frame_interval ?? 5;
+      if (runtime.time_period_mode === 'weekly' && runtime.weekly_schedule) {
+        formState.weeklySchedule = scheduleFromBackend(runtime.weekly_schedule);
+      } else {
+        formState.weeklySchedule = legacyRuntimeToSchedule(runtime);
+      }
+    };
 
     // 格式化日期时间
     const formatDateTime = (dateStr) => {
@@ -816,54 +648,35 @@ export default defineComponent({
 
     const formatSensitivity = (value) => `${Math.round(value * 100)}%`;
 
-    const sensitivityMarks = {
-      0.1: '低',
-      0.5: '中',
-      0.9: '高'
+    const sensitivityPresets = [
+      { label: '低', value: 0.3 },
+      { label: '中', value: 0.5 },
+      { label: '高', value: 0.7 }
+    ];
+
+    const isSensitivityPresetActive = (value) => Math.abs(formState.sensitivity - value) < 0.001;
+
+    const syncStreamFromDevice = (deviceId) => {
+      const device = deviceList.value.find(d => d.device_id === deviceId);
+      if (!isEdit.value) {
+        formState.stream_type = device?.stream_type || 'main';
+      }
+    };
+
+    const handleDeviceChange = (deviceId) => {
+      syncStreamFromDevice(deviceId);
     };
 
     // 步骤控制
     const activeConfigTab = ref('basic');
-
-    const handleFrequencyChange = (value) => {
-      if (value === 'scheduled') {
-        activeConfigTab.value = 'schedule';
-      } else if (activeConfigTab.value === 'schedule') {
-        activeConfigTab.value = 'basic';
-      }
-    };
 
     // 表单校验规则
     const rules = {
       device_id: [{ required: true, message: '请选择设备', trigger: 'change' }],
       models_id: [{ required: true, message: '请选择检测模型', trigger: 'change' }],
       sensitivity: [{ required: true, message: '请设置检测灵敏度', trigger: 'change' }],
-      frequency: [{ required: true, message: '请选择检测频率', trigger: 'change' }],
-      save_mode: [{ required: true, message: '请选择保存模式', trigger: 'change' }],
-      scheduleTime: [{
-        required: true,
-        message: '请选择定时检测时间',
-        trigger: 'change',
-        validator: (rule, value, callback) => {
-          if (formState.frequency === 'scheduled' && formState.scheduleMode === 'simple' && !value) {
-            callback(new Error('请选择定时检测时间'));
-          } else {
-            callback();
-          }
-        }
-      }],
-      scheduleDays: [{
-        required: true,
-        message: '请选择定时检测日期',
-        trigger: 'change',
-        validator: (rule, value, callback) => {
-          if (formState.frequency === 'scheduled' && formState.scheduleMode === 'simple' && (!value || value.length === 0)) {
-            callback(new Error('请选择定时检测日期'));
-          } else {
-            callback();
-          }
-        }
-      }]
+      frequency: [{ required: true, message: '请选择检测方式', trigger: 'change' }],
+      save_mode: [{ required: true, message: '请选择保存模式', trigger: 'change' }]
     };
 
     // 更新目标类别
@@ -969,111 +782,46 @@ export default defineComponent({
     // 获取频率标签
     const getFrequencyLabel = (frequency) => {
       const map = {
-        'realtime': '实时检测',
-        'scheduled': '定时检测',
-        'manual': '手动触发'
+        realtime: '实时检测',
+        scheduled: '定时检测(已废弃)',
+        manual: '抽帧检测'
       };
       return map[frequency] || frequency;
     };
 
-    // 获取频率类型（用于标签颜色）
     const getFrequencyType = (frequency) => {
       const map = {
-        'realtime': 'success',
-        'scheduled': 'warning',
-        'manual': 'info'
+        realtime: 'success',
+        scheduled: 'warning',
+        manual: 'info'
       };
       return map[frequency] || '';
     };
 
-    // 获取定时检测详细信息
     const getScheduleDetail = (row) => {
-      if (row.frequency !== 'scheduled' || !row.schedule_config) {
-        return '';
+      const runtime = row.schedule_config?.runtime;
+      if (!runtime) {
+        if (row.frequency === 'scheduled') {
+          return '请编辑并改为实时/抽帧检测';
+        }
+        return row.frequency === 'manual' ? '全时段' : '';
       }
 
-      const config = row.schedule_config;
-
-      // 简单模式
-      if (!config.mode || config.mode === 'simple') {
-        const time = config.time || '';
-        const days = config.days || [];
-        const duration = config.duration ? `${config.duration}分钟` : '';
-
-        // 将数字转换为对应的星期名称
-        const dayNames = {
-          '0': '周日',
-          '1': '周一',
-          '2': '周二',
-          '3': '周三',
-          '4': '周四',
-          '5': '周五',
-          '6': '周六'
-        };
-
-        const daysString = days.map(d => dayNames[d]).join(', ');
-        return `${time} - ${daysString} ${duration}`;
+      const parts = [];
+      if (row.frequency === 'manual' && runtime.frame_interval) {
+        parts.push(`${runtime.frame_interval}秒/帧`);
       }
-
-      // 高级模式
-      else {
-        let result = [];
-
-        // 时间设置
-        if (config.timeType === 'points' && config.timePoints) {
-          // 多时间点
-          if (config.timePoints.length > 0) {
-            result.push(`时间点: ${config.timePoints.join(', ')}`);
-          }
-        } else if (config.timeType === 'range') {
-          // 时间范围
-          if (config.startTime && config.endTime) {
-            result.push(`时间段: ${config.startTime}-${config.endTime}, 间隔${config.interval || 5}分钟`);
-          }
-        }
-
-        // 日期设置
-        if (config.dateType === 'weekday' && config.weekdays) {
-          // 星期几
-          const dayNames = {
-            '0': '周日', '1': '周一', '2': '周二', '3': '周三',
-            '4': '周四', '5': '周五', '6': '周六'
-          };
-          const weekdays = config.weekdays.map(d => dayNames[d]).join(', ');
-          if (weekdays) {
-            result.push(`每周: ${weekdays}`);
-          }
-        } else if (config.dateType === 'monthday' && config.monthdays) {
-          //
-          const monthdays = config.monthdays.map(d => `${d}日`).join(', ');
-          if (monthdays) {
-            result.push(`每月: ${monthdays}`);
-          }
-        } else if (config.dateType === 'specific' && config.specificDates) {
-          // 特定日期
-          if (config.specificDates.length > 0) {
-            result.push(`特定日期: ${config.specificDates.length}个日期`);
-          }
-        }
-
-        // 执行控制
-        const controls = [];
-        if (config.duration) {
-          controls.push(`执行${config.duration}分钟`);
-        }
-        if (config.maxExecutions && config.maxExecutions > 0) {
-          controls.push(`最多${config.maxExecutions}次`);
-        }
-        if (config.idleTimeout && config.idleTimeout > 0) {
-          controls.push(`空闲${config.idleTimeout}分钟自动停止`);
-        }
-
-        if (controls.length > 0) {
-          result.push(controls.join(', '));
-        }
-
-        return result.join(' | ');
+      if (runtime.time_period_mode === 'all') {
+        parts.push('全时段');
+      } else if (runtime.time_period_mode === 'weekly' && runtime.weekly_schedule) {
+        parts.push(formatScheduleSummary(scheduleFromBackend(runtime.weekly_schedule)));
+      } else if (runtime.time_period_mode === 'day_night') {
+        const scopeMap = { day: '仅白天', night: '仅夜晚', both: '白天+夜晚' };
+        parts.push(scopeMap[runtime.day_night_scope] || '白天/夜晚');
+      } else if (runtime.time_period_mode === 'custom' && runtime.custom_ranges?.length) {
+        parts.push(`自定义 ${runtime.custom_ranges.map(item => `${item.start}-${item.end}`).join(', ')}`);
       }
+      return parts.join(' · ');
     };
 
     // 获取保存模式标签
@@ -1113,7 +861,7 @@ export default defineComponent({
           total_configs: 0,
           enabled_configs: 0,
           disabled_configs: 0,
-          scheduled_configs: 0,
+          manual_configs: 0,
           realtime_configs: 0
         };
       }
@@ -1197,6 +945,7 @@ export default defineComponent({
       Object.assign(formState, {
         config_id: null,
         device_id: null,
+        stream_type: 'main',
         models_id: null,
         enabled: false,
         sensitivity: 0.5,
@@ -1204,23 +953,9 @@ export default defineComponent({
         frequency: 'realtime',
         save_mode: 'none',
         save_duration: 10,
-        max_storage_days: 30,
-        scheduleTime: null,
-        scheduleDays: [],
-        scheduleMode: 'simple',
-        scheduleTimeType: 'points',
-        scheduleTimePoints: [],
-        scheduleStartTime: null,
-        scheduleEndTime: null,
-        scheduleInterval: 5,
-        scheduleDateType: 'weekday',
-        scheduleAdvWeekdays: [],
-        scheduleMonthdays: [],
-        scheduleSpecificDates: [],
-        scheduleDuration: 10,
-        scheduleMaxExecutions: -1,
-        scheduleIdleTimeout: 0
+        max_storage_days: 30
       });
+      resetRuntimeDefaults();
 
       if (formRef.value) {
         formRef.value.clearValidate();
@@ -1232,112 +967,28 @@ export default defineComponent({
     const editConfig = (record) => {
       isEdit.value = true;
       activeConfigTab.value = 'basic';
-      // 处理 schedule_config
-      let scheduleTime = null;
-      let scheduleDays = [];
 
-      // 设置默认值
-      const defaultSchedule = {
-        scheduleMode: 'simple',
-        scheduleTimeType: 'points',
-        scheduleTimePoints: [],
-        scheduleStartTime: null,
-        scheduleEndTime: null,
-        scheduleInterval: 5,
-        scheduleDateType: 'weekday',
-        scheduleAdvWeekdays: [],
-        scheduleMonthdays: [],
-        scheduleSpecificDates: [],
-        scheduleDuration: 10,
-        scheduleMaxExecutions: -1,
-        scheduleIdleTimeout: 0
-      };
-
-      if (record.frequency === 'scheduled' && record.schedule_config) {
-        const config = record.schedule_config;
-
-        // 设置模式
-        if (config.mode) {
-          defaultSchedule.scheduleMode = config.mode;
-        }
-
-        // 设置时长
-        if (config.duration) {
-          defaultSchedule.scheduleDuration = config.duration;
-        }
-
-        if (config.mode === 'simple' || !config.mode) {
-          // 简单模式
-          // 解析时间字符串 "HH:MM" 为 Date 对象
-          if (config.time) {
-            const [hours, minutes] = config.time.split(':').map(Number);
-            const date = new Date();
-            date.setHours(hours, minutes, 0, 0);
-            scheduleTime = date;
-          }
-          // 设置星期几
-          scheduleDays = config.days || [];
-        } else {
-          // 高级模式
-          defaultSchedule.scheduleTimeType = config.timeType || 'points';
-          defaultSchedule.scheduleDateType = config.dateType || 'weekday';
-          defaultSchedule.scheduleMaxExecutions = config.maxExecutions !== undefined ? config.maxExecutions : -1;
-          defaultSchedule.scheduleIdleTimeout = config.idleTimeout || 0;
-
-          // 时间设置
-          if (config.timeType === 'points' && config.timePoints && config.timePoints.length > 0) {
-            // 多时间点
-            defaultSchedule.scheduleTimePoints = config.timePoints.map(timeStr => {
-              const [hours, minutes] = timeStr.split(':').map(Number);
-              const date = new Date();
-              date.setHours(hours, minutes, 0, 0);
-              return date;
-            });
-          } else if (config.timeType === 'range') {
-            // 时间范围
-            if (config.startTime) {
-              const [startH, startM] = config.startTime.split(':').map(Number);
-              const startDate = new Date();
-              startDate.setHours(startH, startM, 0, 0);
-              defaultSchedule.scheduleStartTime = startDate;
-            }
-
-            if (config.endTime) {
-              const [endH, endM] = config.endTime.split(':').map(Number);
-              const endDate = new Date();
-              endDate.setHours(endH, endM, 0, 0);
-              defaultSchedule.scheduleEndTime = endDate;
-            }
-
-            defaultSchedule.scheduleInterval = config.interval || 5;
-          }
-
-          // 日期设置
-          if (config.dateType === 'weekday') {
-            defaultSchedule.scheduleAdvWeekdays = config.weekdays || [];
-          } else if (config.dateType === 'monthday') {
-            defaultSchedule.scheduleMonthdays = config.monthdays || [];
-          } else if (config.dateType === 'specific' && config.specificDates && config.specificDates.length > 0) {
-            defaultSchedule.scheduleSpecificDates = config.specificDates.map(dateStr => new Date(dateStr));
-          }
-        }
-      }
+      const frequency = record.frequency === 'scheduled' ? 'realtime' : record.frequency;
+      applyRuntimeConfig(record.schedule_config);
 
       Object.assign(formState, {
         config_id: record.config_id,
         device_id: record.device_id,
+        stream_type: record.stream_type || deviceList.value.find(d => d.device_id === record.device_id)?.stream_type || 'main',
         models_id: record.models_id,
         enabled: record.enabled,
         sensitivity: record.sensitivity,
         target_classes: record.target_classes || [],
-        frequency: record.frequency,
+        frequency,
         save_mode: record.save_mode,
         save_duration: record.save_duration,
-        max_storage_days: record.max_storage_days,
-        scheduleTime: scheduleTime,
-        scheduleDays: scheduleDays,
-        ...defaultSchedule
+        max_storage_days: record.max_storage_days
       });
+
+      if (record.frequency === 'scheduled') {
+        ElMessage.warning('该配置原为定时检测，已按实时检测打开，请确认生效时段后保存');
+      }
+
       updateTargetClasses(record.models_id, { preserveSelection: true });
       modalVisible.value = true;
     };
@@ -1357,76 +1008,14 @@ export default defineComponent({
                 sensitivity: formState.sensitivity,
                 target_classes: formState.target_classes,
                 frequency: formState.frequency,
+                stream_type: formState.stream_type,
                 save_mode: formState.save_mode,
                 save_duration: formState.save_duration,
-                max_storage_days: formState.max_storage_days
-              };
-
-              // 如果是定时检测，添加定时配置
-              if (formState.frequency === 'scheduled') {
-                let scheduleConfig = {
-                  mode: formState.scheduleMode,
-                  duration: formState.scheduleDuration
-                };
-
-                if (formState.scheduleMode === 'simple') {
-                  // 简单模式配置
-                  const timeObj = formState.scheduleTime;
-                  const hours = timeObj.getHours().toString().padStart(2, '0');
-                  const minutes = timeObj.getMinutes().toString().padStart(2, '0');
-
-                  scheduleConfig = {
-                    ...scheduleConfig,
-                    time: `${hours}:${minutes}`,
-                    days: formState.scheduleDays
-                  };
-                } else {
-                  // 高级模式配置
-                  scheduleConfig = {
-                    ...scheduleConfig,
-                    timeType: formState.scheduleTimeType,
-                    dateType: formState.scheduleDateType,
-                    maxExecutions: formState.scheduleMaxExecutions,
-                    idleTimeout: formState.scheduleIdleTimeout
-                  };
-
-                  // 根据时间类型配置
-                  if (formState.scheduleTimeType === 'points') {
-                    // 多时间点
-                    scheduleConfig.timePoints = formState.scheduleTimePoints.map(time => {
-                      const h = time.getHours().toString().padStart(2, '0');
-                      const m = time.getMinutes().toString().padStart(2, '0');
-                      return `${h}:${m}`;
-                    });
-                  } else {
-                    // 时间范围
-                    const startTimeObj = formState.scheduleStartTime;
-                    const endTimeObj = formState.scheduleEndTime;
-
-                    if (startTimeObj && endTimeObj) {
-                      const startH = startTimeObj.getHours().toString().padStart(2, '0');
-                      const startM = startTimeObj.getMinutes().toString().padStart(2, '0');
-                      const endH = endTimeObj.getHours().toString().padStart(2, '0');
-                      const endM = endTimeObj.getMinutes().toString().padStart(2, '0');
-
-                      scheduleConfig.startTime = `${startH}:${startM}`;
-                      scheduleConfig.endTime = `${endH}:${endM}`;
-                      scheduleConfig.interval = formState.scheduleInterval;
-                    }
-                  }
-
-                  // 根据日期类型配置
-                  if (formState.scheduleDateType === 'weekday') {
-                    scheduleConfig.weekdays = formState.scheduleAdvWeekdays;
-                  } else if (formState.scheduleDateType === 'monthday') {
-                    scheduleConfig.monthdays = formState.scheduleMonthdays;
-                  } else if (formState.scheduleDateType === 'specific') {
-                    scheduleConfig.specificDates = formState.scheduleSpecificDates.map(date => formatDate(date));
-                  }
+                max_storage_days: formState.max_storage_days,
+                schedule_config: {
+                  runtime: buildRuntimeConfig()
                 }
-
-                submitData.schedule_config = scheduleConfig;
-              }
+              };
 
               if (isEdit.value) {
                 // 更新配置
@@ -1434,8 +1023,8 @@ export default defineComponent({
                 ElMessage.success('配置更新成功');
               } else {
                 // 创建配置
-                // 如果是新建，需要添加设备ID
                 submitData.device_id = formState.device_id;
+                submitData.stream_type = formState.stream_type;
                 await detectionConfigApi.createConfig(submitData);
                 ElMessage.success('配置创建成功');
               }
@@ -1450,8 +1039,6 @@ export default defineComponent({
           } else {
             if (!formState.device_id || !formState.models_id) {
               activeConfigTab.value = 'basic';
-            } else if (formState.frequency === 'scheduled') {
-              activeConfigTab.value = 'schedule';
             } else {
               activeConfigTab.value = 'save';
             }
@@ -1536,81 +1123,6 @@ export default defineComponent({
       }).catch(() => { });
     };
 
-    // 新增定时设置处理方法
-    const handleScheduleModeChange = (mode) => {
-      // 切换模式时，保留相关设置
-      if (mode === 'advanced' && formState.scheduleAdvWeekdays.length === 0 && formState.scheduleDays.length > 0) {
-        // 从简单模式切换到高级模式，将简单模式的星期几设置转移到高级模式
-        formState.scheduleAdvWeekdays = [...formState.scheduleDays];
-      } else if (mode === 'simple' && formState.scheduleDays.length === 0 && formState.scheduleAdvWeekdays.length > 0) {
-        // 从高级模式切换到简单模式，将高级模式的星期几设置转移到简单模式
-        formState.scheduleDays = [...formState.scheduleAdvWeekdays];
-      }
-    };
-
-    // 添加时间点
-    const addTimePoint = () => {
-      const now = new Date();
-      now.setHours(now.getHours(), 0, 0, 0); // 设置为当前小时整点
-      formState.scheduleTimePoints.push(now);
-    };
-
-    // 移除时间点
-    const removeTimePoint = (index) => {
-      formState.scheduleTimePoints.splice(index, 1);
-    };
-
-    // 格式化日期为字符串
-    const formatDate = (date) => {
-      if (!date) return '';
-      const year = date.getFullYear();
-      const month = String(date.getMonth() + 1).padStart(2, '0');
-      const day = String(date.getDate()).padStart(2, '0');
-      return `${year}-${month}-${day}`;
-    };
-
-    // 星期几选择辅助方法
-    const selectAllWeekdays = () => {
-      if (formState.scheduleMode === 'simple') {
-        formState.scheduleDays = ['0', '1', '2', '3', '4', '5', '6'];
-      } else {
-        formState.scheduleAdvWeekdays = ['0', '1', '2', '3', '4', '5', '6'];
-      }
-    };
-
-    const selectWorkdays = () => {
-      if (formState.scheduleMode === 'simple') {
-        formState.scheduleDays = ['1', '2', '3', '4', '5'];
-      } else {
-        formState.scheduleAdvWeekdays = ['1', '2', '3', '4', '5'];
-      }
-    };
-
-    const selectWeekends = () => {
-      if (formState.scheduleMode === 'simple') {
-        formState.scheduleDays = ['0', '6'];
-      } else {
-        formState.scheduleAdvWeekdays = ['0', '6'];
-      }
-    };
-
-    const clearWeekdays = () => {
-      if (formState.scheduleMode === 'simple') {
-        formState.scheduleDays = [];
-      } else {
-        formState.scheduleAdvWeekdays = [];
-      }
-    };
-
-    // 每月日期选择辅助方法
-    const selectMonthdays = (days) => {
-      formState.scheduleMonthdays = days;
-    };
-
-    const clearMonthdays = () => {
-      formState.scheduleMonthdays = [];
-    };
-
     // 目标类别选择辅助方法
     const selectAllClasses = () => {
       formState.target_classes = targetClasses.value.map(item => item.value);
@@ -1646,7 +1158,9 @@ export default defineComponent({
       targetClasses,
       formatDateTime,
       formatSensitivity,
-      sensitivityMarks,
+      sensitivityPresets,
+      isSensitivityPresetActive,
+      handleDeviceChange,
       setInterestArea,
       updateTargetClasses,
       getModelTypeName,
@@ -1665,21 +1179,9 @@ export default defineComponent({
       toggleEnabled,
       handleDeleteConfig,
       getScheduleDetail,
-      handleScheduleModeChange,
-      addTimePoint,
-      removeTimePoint,
-      formatDate,
-      selectAllWeekdays,
-      selectWorkdays,
-      selectWeekends,
-      clearWeekdays,
-      selectMonthdays,
-      clearMonthdays,
       selectAllClasses,
       clearAllClasses,
-      scheduleActiveTab,
       activeConfigTab,
-      handleFrequencyChange,
       // 分页相关
       currentPage,
       pageSize,
@@ -1798,8 +1300,39 @@ export default defineComponent({
 
 .form-row {
   display: flex;
-  gap: 20px;
+  gap: 16px;
   flex-wrap: wrap;
+}
+
+.form-row-three {
+  align-items: flex-start;
+}
+
+.form-row-three .form-item {
+  flex: 1;
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+.form-row-three .form-item-classes {
+  flex: 1.2;
+}
+
+.form-row-three .sensitivity-item {
+  flex: 0 0 240px;
+  max-width: 260px;
+}
+
+.form-item-device {
+  flex: 1;
+  min-width: 280px;
+  margin-bottom: 0;
+}
+
+.form-item-stream {
+  flex: 0 0 160px;
+  max-width: 180px;
+  margin-bottom: 0;
 }
 
 .form-item-small {
@@ -1841,61 +1374,153 @@ export default defineComponent({
   margin-right: 2px;
 }
 
-/* 灵敏度滑块 */
+/* 灵敏度控件 */
 .sensitivity-item :deep(.el-form-item__content) {
   width: 100%;
 }
 
-.sensitivity-container {
-  width: 100%;
-  box-sizing: border-box;
-  padding: 4px 18px 34px;
-}
-
-.sensitivity-header {
+.sensitivity-control {
   display: flex;
-  justify-content: flex-end;
-  margin-bottom: 4px;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
 }
 
-.sensitivity-current {
-  font-size: 13px;
+.sensitivity-input {
+  width: 100%;
+}
+
+.sensitivity-input :deep(.el-input-number) {
+  width: 100%;
+}
+
+.sensitivity-input :deep(.el-input__wrapper) {
+  min-height: 32px;
+  box-sizing: border-box;
+}
+
+.sensitivity-presets {
+  display: flex;
+  gap: 4px;
+  width: 100%;
+}
+
+.sensitivity-preset {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid #dcdfe6;
+  background: #fff;
+  color: #606266;
+  border-radius: 4px;
+  padding: 0 4px;
+  height: 28px;
+  line-height: 26px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.sensitivity-preset:hover {
   color: #409eff;
+  border-color: #c6e2ff;
+}
+
+.sensitivity-preset.active {
+  color: #409eff;
+  border-color: #409eff;
+  background: #ecf5ff;
   font-weight: 500;
 }
 
-.sensitivity-container :deep(.el-slider) {
+/* 目标类别标签行 */
+.form-item-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   width: 100%;
+  gap: 8px;
 }
 
-.sensitivity-container :deep(.el-slider__runway) {
-  margin: 14px 0 22px;
+.label-extra {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-weight: normal;
 }
 
-.sensitivity-container :deep(.el-slider__marks) {
-  width: calc(100% + 8px);
-  left: -4px;
-}
-
-.sensitivity-container :deep(.el-slider__marks-text) {
-  margin-top: 10px;
-  color: #606266;
+.label-extra .selected-count {
   font-size: 12px;
-  white-space: nowrap;
+  color: #909399;
+  margin-left: 4px;
 }
 
-/* 目标类别选择 */
+/* 配置分区 */
+.config-section-block {
+  margin-bottom: 20px;
+}
+
+.config-section-block:last-child {
+  margin-bottom: 0;
+}
+
+.config-section-title {
+  margin-bottom: 14px;
+  padding-left: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #303133;
+  line-height: 1;
+  border-left: 3px solid #409eff;
+}
+
+.runtime-panel {
+  padding: 16px;
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  background: #fcfcfd;
+}
+
+.runtime-mode-row {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 16px 24px;
+  margin-bottom: 16px;
+}
+
+.runtime-mode-item,
+.runtime-interval-item {
+  margin-bottom: 0;
+}
+
+.runtime-mode-item :deep(.el-form-item__content),
+.runtime-interval-item :deep(.el-form-item__content) {
+  line-height: 32px;
+}
+
+.mode-radio-group {
+  flex-wrap: nowrap;
+}
+
+.runtime-schedule-item {
+  margin-bottom: 0;
+}
+
+.runtime-schedule-item :deep(.el-form-item__content) {
+  display: block;
+}
+
+.range-sep {
+  color: #909399;
+  font-size: 13px;
+}
+
 .select-hint {
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-top: 8px;
   font-size: 12px;
-}
-
-.hint-buttons {
-  display: flex;
-  gap: 10px;
 }
 
 .selected-count {
@@ -2286,6 +1911,11 @@ export default defineComponent({
   font-size: 12px;
   color: #909399;
   line-height: 1.5;
+}
+
+.hint-buttons {
+  display: flex;
+  gap: 10px;
 }
 
 .schedule-tab-alert {

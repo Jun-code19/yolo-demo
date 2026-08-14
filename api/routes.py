@@ -17,6 +17,7 @@ import base64
 import uuid
 import json
 import io
+import re
 import pandas as pd
 from pathlib import Path
 from sqlalchemy.exc import SQLAlchemyError
@@ -718,6 +719,16 @@ class ModelResponse(ModelBase):
     class Config:
         from_attributes = True
 
+
+def _build_model_download_filename(models_name: str, file_suffix: str) -> str:
+    """将模型名称转为安全的下载文件名，并保留原始扩展名"""
+    safe_name = re.sub(r'[\\/:*?"<>|\s]+', '_', (models_name or 'model').strip()).strip('._')
+    safe_name = safe_name or 'model'
+    suffix = file_suffix if file_suffix.startswith('.') else f'.{file_suffix}'
+    if safe_name.lower().endswith(suffix.lower()):
+        return safe_name
+    return f'{safe_name}{suffix}'
+
 # 模型管理API
 @router.get("/models/", response_model=List[ModelResponse], tags=["检测模型"])
 def get_models(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
@@ -732,6 +743,28 @@ def get_model(models_id: str, db: Session = Depends(get_db)):
     if not model:
         raise HTTPException(status_code=404, detail="Model not found")
     return model
+
+@router.get("/models/{models_id}/download", tags=["检测模型"])
+def download_model(
+    models_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """下载模型文件，文件名使用模型名称"""
+    model = db.query(DetectionModel).filter(DetectionModel.models_id == models_id).first()
+    if not model:
+        raise HTTPException(status_code=404, detail="Model not found")
+
+    file_path = Path(model.file_path)
+    if not file_path.is_file():
+        raise HTTPException(status_code=404, detail="Model file not found on server")
+
+    download_filename = _build_model_download_filename(model.models_name, file_path.suffix)
+    return FileResponse(
+        path=str(file_path),
+        media_type="application/octet-stream",
+        filename=download_filename,
+    )
 
 @router.post("/models/", response_model=ModelResponse, tags=["检测模型"])
 async def upload_model(
@@ -1008,10 +1041,11 @@ class DetectionConfigBase(BaseModel):
     sensitivity: float = 0.5
     target_classes: Optional[List[str]] = []
     frequency: Optional[str] = "realtime"
+    stream_type: Optional[str] = "main"
     save_mode: Optional[str] = "none"
     save_duration: int = 10
     max_storage_days: int = 30
-    schedule_config: Optional[Dict[str, Any]] = None  # 定时检测配置
+    schedule_config: Optional[Dict[str, Any]] = None  # 运行时段配置
 
 class DetectionConfigCreate(DetectionConfigBase):
     pass
@@ -1022,11 +1056,12 @@ class DetectionConfigUpdate(BaseModel):
     sensitivity: Optional[float] = None
     target_classes: Optional[List[str]] = None
     frequency: Optional[str] = None
+    stream_type: Optional[str] = None
     save_mode: Optional[str] = None
     save_duration: Optional[int] = None
     max_storage_days: Optional[int] = None
     area_coordinates:Optional[AreaCoordinates] = None
-    schedule_config: Optional[Dict[str, Any]] = None  # 定时检测配置
+    schedule_config: Optional[Dict[str, Any]] = None  # 运行时段配置
 
 class DetectionConfigResponse(DetectionConfigBase):
     config_id: str
@@ -1142,6 +1177,7 @@ async def get_detection_configs(
             "sensitivity": config.sensitivity,
             "target_classes": config.target_classes if config.target_classes else [],
             "frequency": config.frequency.value if hasattr(config.frequency, "value") else config.frequency,
+            "stream_type": getattr(config, "stream_type", None) or "main",
             "save_mode": config.save_mode.value if hasattr(config.save_mode, "value") else config.save_mode,
             "save_duration": config.save_duration,
             "max_storage_days": config.max_storage_days,
@@ -1165,8 +1201,8 @@ async def get_detection_configs_stats(db: Session = Depends(get_db)):
         total_configs = db.query(DetectionConfig).count()
         enabled_configs = db.query(DetectionConfig).filter(DetectionConfig.enabled == True).count()
         disabled_configs = total_configs - enabled_configs
-        scheduled_configs = db.query(DetectionConfig).filter(
-            DetectionConfig.frequency == DetectionFrequency.scheduled
+        manual_configs = db.query(DetectionConfig).filter(
+            DetectionConfig.frequency == DetectionFrequency.manual
         ).count()
         realtime_configs = db.query(DetectionConfig).filter(
             DetectionConfig.frequency == DetectionFrequency.realtime
@@ -1178,7 +1214,7 @@ async def get_detection_configs_stats(db: Session = Depends(get_db)):
                 "total_configs": total_configs,
                 "enabled_configs": enabled_configs,
                 "disabled_configs": disabled_configs,
-                "scheduled_configs": scheduled_configs,
+                "manual_configs": manual_configs,
                 "realtime_configs": realtime_configs
             }
         }
@@ -1209,6 +1245,7 @@ async def get_detection_config(
         "sensitivity": config.sensitivity,
         "target_classes": config.target_classes if config.target_classes else [],
         "frequency": config.frequency.value if hasattr(config.frequency, "value") else config.frequency,
+        "stream_type": getattr(config, "stream_type", None) or "main",
         "save_mode": config.save_mode.value if hasattr(config.save_mode, "value") else config.save_mode,
         "save_duration": config.save_duration,
         "max_storage_days": config.max_storage_days,
@@ -1245,9 +1282,12 @@ async def create_detection_config(
     except ValueError:
         raise HTTPException(status_code=400, detail="无效的频率或保存模式值")
     
-    # 验证定时检测配置
-    if config.frequency == "scheduled" and not config.schedule_config:
-        raise HTTPException(status_code=400, detail="定时检测需要提供时间配置")
+    if config.frequency == "scheduled":
+        raise HTTPException(status_code=400, detail="定时检测已移除，请使用实时检测或抽帧检测")
+
+    stream_type = (config.stream_type or "main").strip()
+    if stream_type not in ("main", "sub"):
+        raise HTTPException(status_code=400, detail="无效的码流类型，有效值: main, sub")
     
     # 创建配置记录
     db_config = DetectionConfig(
@@ -1258,6 +1298,7 @@ async def create_detection_config(
         sensitivity=config.sensitivity,
         target_classes=config.target_classes,
         frequency=frequency_enum,
+        stream_type=stream_type,
         save_mode=save_mode_enum,
         save_duration=config.save_duration,
         max_storage_days=config.max_storage_days,
@@ -1265,7 +1306,7 @@ async def create_detection_config(
         updated_at=datetime.now()
     )
     
-    # 添加定时检测配置
+    # 添加运行时段等配置
     if config.schedule_config:
         db_config.schedule_config = config.schedule_config
     
@@ -1283,6 +1324,7 @@ async def create_detection_config(
         "sensitivity": db_config.sensitivity,
         "target_classes": db_config.target_classes if db_config.target_classes else [],
         "frequency": db_config.frequency.value if hasattr(db_config.frequency, "value") else db_config.frequency,
+        "stream_type": getattr(db_config, "stream_type", None) or "main",
         "save_mode": db_config.save_mode.value if hasattr(db_config.save_mode, "value") else db_config.save_mode,
         "save_duration": db_config.save_duration,
         "max_storage_days": db_config.max_storage_days,
@@ -1324,21 +1366,22 @@ async def update_detection_config(
     
     if config_update.target_classes is not None:
         db_config.target_classes = config_update.target_classes
+
+    if config_update.stream_type is not None:
+        stream_type = config_update.stream_type.strip()
+        if stream_type not in ("main", "sub"):
+            raise HTTPException(status_code=400, detail="无效的码流类型，有效值: main, sub")
+        db_config.stream_type = stream_type
     
     if config_update.frequency is not None:
         try:
+            if config_update.frequency == "scheduled":
+                raise HTTPException(status_code=400, detail="定时检测已移除，请使用实时检测或抽帧检测")
             db_config.frequency = DetectionFrequency(config_update.frequency) if isinstance(config_update.frequency, str) else config_update.frequency
-            # 如果切换到定时检测，但没有提供定时配置，检查是否存在
-            if config_update.frequency == "scheduled" and not config_update.schedule_config:
-                if not hasattr(db_config, 'schedule_config') or not db_config.schedule_config:
-                    raise HTTPException(status_code=400, detail="定时检测需要提供时间配置")
-            # 如果切换到非定时检测，清除定时配置
-            elif config_update.frequency != "scheduled" and hasattr(db_config, 'schedule_config'):
-                db_config.schedule_config = None
         except ValueError:
             raise HTTPException(status_code=400, detail="无效的频率值")
     
-    # 更新定时检测配置
+    # 更新运行时段等配置
     if config_update.schedule_config is not None:
         db_config.schedule_config = config_update.schedule_config
     
@@ -1374,6 +1417,7 @@ async def update_detection_config(
         "sensitivity": db_config.sensitivity,
         "target_classes": db_config.target_classes if db_config.target_classes else [],
         "frequency": db_config.frequency.value if hasattr(db_config.frequency, "value") else db_config.frequency,
+        "stream_type": getattr(db_config, "stream_type", None) or "main",
         "save_mode": db_config.save_mode.value if hasattr(db_config.save_mode, "value") else db_config.save_mode,
         "save_duration": db_config.save_duration,
         "max_storage_days": db_config.max_storage_days,

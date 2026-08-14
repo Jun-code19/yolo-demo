@@ -30,6 +30,7 @@ from src.tracker import ObjectTracker
 # 导入数据推送模块
 from src.data_pusher import data_pusher
 from src.rtsp_url import build_rtsp_url
+from src.detection_runtime import is_within_active_period, get_frame_interval
 
 logger = logging.getLogger(__name__)
 # 导入GPU解码器
@@ -46,7 +47,8 @@ class DetectionTask:
     """优化后的检测任务类"""
     
     def __init__(self, device_id: str, device_name: str, device_ip: str, config_id: str, model_path: str, 
-                 confidence: float, models_type: str, is_gpu: bool, target_class: List[str], save_mode: SaveMode, area_coordinates:Optional[dict]=None):
+                 confidence: float, models_type: str, is_gpu: bool, target_class: List[str],                  save_mode: SaveMode, area_coordinates:Optional[dict]=None,
+                 stream_type: str = 'main', frequency: str = 'realtime', runtime_config: Optional[dict] = None):
         self.device_id = device_id
         self.device_name = device_name
         self.device_ip = device_ip
@@ -60,7 +62,11 @@ class DetectionTask:
         self.area_coordinates = area_coordinates  #点坐标值，前端生成的归一化坐标  
         self.class_colors = {}  # 用于存储每个类别的固定颜色
         self.class_names = None  # 用于存储类别名称
-        self.stream_type = None
+        self.stream_type = stream_type or 'main'
+        self.frequency = frequency or 'realtime'
+        self.runtime_config = runtime_config or {}
+        self.frame_interval = get_frame_interval(self.runtime_config)
+        self.last_detection_time = 0.0
 
         self.stop_event = threading.Event()
         self.model = None
@@ -169,16 +175,22 @@ class DetectionTask:
     def connect_to_camera(self): # 连接到RTSP摄像机
         """连接到RTSP摄像机"""
         try:
+            if self.connected or self.cap or self.ffmpeg_decoder:
+                self.release_camera_connection("重新连接前释放")
+
             db = SessionLocal()
             device = db.query(Device).filter(Device.device_id == self.device_id).first()
+            config = db.query(DetectionConfig).filter(DetectionConfig.config_id == self.config_id).first()
             db.close()
             
             if not device:
                 logger.error(f"设备信息不存在: {self.device_id}")
                 return False
 
-            rtsp_url = build_rtsp_url(device)
-            self.stream_type = device.stream_type
+            if config and getattr(config, 'stream_type', None):
+                self.stream_type = config.stream_type or 'main'
+
+            rtsp_url = build_rtsp_url(device, stream_type=self.stream_type)
 
             # 优先使用GPU解码器
             if self.use_gpu_decoder:
@@ -211,15 +223,60 @@ class DetectionTask:
             logger.error(f"连接摄像机时出错: {e}")
             return False
 
+    def _is_streaming_allowed(self) -> bool:
+        """当前是否处于允许拉流/检测的生效时段"""
+        return is_within_active_period(datetime.now(), self.runtime_config)
+
+    def release_camera_connection(self, reason: str = "") -> None:
+        """释放摄像机连接并清空帧缓冲"""
+        with self.lock:
+            self.frame_buffer.clear()
+
+        if self.cap:
+            try:
+                self.cap.release()
+            except Exception as e:
+                logger.warning(f"释放 OpenCV 连接失败: {self.device_id}, {e}")
+            self.cap = None
+
+        if self.ffmpeg_decoder:
+            try:
+                self.ffmpeg_decoder.stop()
+            except Exception as e:
+                logger.warning(f"释放解码器失败: {self.device_id}, {e}")
+            self.ffmpeg_decoder = None
+
+        if self.connected:
+            suffix = f" ({reason})" if reason else ""
+            logger.info(f"已断开摄像机拉流: {self.device_id}{suffix}")
+
+        self.connected = False
+        self.reconnect_attempts = 0
+
     def read_frame(self): # 从摄像机读取帧的线程函数
-        if not self.connect_to_camera():
-            logger.error(f"无法启动检测任务 {self.config_id}，摄像机连接失败")
-            return
+        """从摄像机读取帧的线程函数"""
         error_count = 0
         last_reconnect_time = time.time()
-        """从摄像机读取帧的线程函数"""
+        schedule_paused = False
+
         while not self.stop_event.is_set():
             try:
+                if not self._is_streaming_allowed():
+                    if self.connected or self.cap or self.ffmpeg_decoder:
+                        self.release_camera_connection("生效时段外暂停拉流")
+                    if not schedule_paused:
+                        schedule_paused = True
+                        logger.info(f"生效时段外，暂停拉流: {self.device_id}")
+                    time.sleep(1.0)
+                    continue
+
+                if schedule_paused:
+                    schedule_paused = False
+                    error_count = 0
+                    last_reconnect_time = time.time()
+                    self.reconnect_attempts = 0
+                    logger.info(f"进入生效时段，恢复拉流: {self.device_id}")
+
                 # 改进重连逻辑，添加退避策略
                 if not self.connected or error_count > 30:
                     current_time = time.time()
@@ -308,6 +365,10 @@ class DetectionTask:
             
             while not self.stop_event.is_set():
                 try:
+                    if not is_within_active_period(datetime.now(), self.runtime_config):
+                        time.sleep(0.5)
+                        continue
+
                     # 性能监控和动态调整
                     current_time = time.time()
                     if current_time - last_performance_check > self.performance_check_interval:
@@ -325,7 +386,12 @@ class DetectionTask:
 
                     # 优化：每skip_frame_count帧执行一次检测，减少计算负担
                     frame_count += 1
-                    if frame_count % skip_frame_count == 0:
+                    if self.frequency == 'manual':
+                        now_ts = time.time()
+                        should_detect = now_ts - self.last_detection_time >= self.frame_interval
+                    else:
+                        should_detect = frame_count % skip_frame_count == 0
+                    if should_detect:
                          # 执行检测
                         detect_frame = frame_rgb.copy()
                         # img_result = frame_rgb.copy() 保留如果保存不带检测结果的帧，可以用于调试 _process_detection_events                 
@@ -363,10 +429,13 @@ class DetectionTask:
                                     detect_frame = self.display_detection_results(detect_frame, results[0], show_boxes=True)
                                     self._process_detection_events(detect_frame, detections, speed, cooldown_period)
 
+                            if self.frequency == 'manual':
+                                self.last_detection_time = time.time()
+
                             if not self.clients:
                                 continue  # 没有客户端连接，跳过下面步骤
                             else:
-                                self.broadcast_img_result(detect_frame, detections) # 向WebSocket客户端推送检测结果                                                               
+                                self.broadcast_img_result(detect_frame, detections) # 向WebSocket客户端推送检测结果
                             
                         except Exception as e:
                             logger.error(f"模型推理过程中出错: {e}")
@@ -564,18 +633,7 @@ class DetectionTask:
             if self.thread.is_alive():
                 logger.warning(f"检测线程未能及时停止: {self.config_id}")
 
-        # 释放摄像头资源
-        if self.cap:
-            self.cap.release()
-            logger.info(f"OpenCV摄像头资源已释放: {self.config_id}")
-            
-        # 释放GPU解码器资源
-        if self.ffmpeg_decoder:
-            try:
-                self.ffmpeg_decoder.stop()
-                logger.info(f"GPU解码器资源已释放: {self.config_id}")
-            except Exception as e:
-                logger.error(f"释放GPU解码器资源失败: {e}")
+        self.release_camera_connection("任务停止")
     
     # 保存检测事件到数据库并存储图像/视频
     def _process_detection_events(self, img_result, detections, speed, cooldown_period): # 处理检测事件

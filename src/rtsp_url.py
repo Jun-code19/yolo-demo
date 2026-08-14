@@ -81,7 +81,7 @@ def get_rtsp_template_for_device(device: Any) -> str:
     return custom_url or DAHUA_RTSP_TEMPLATE
 
 
-def build_rtsp_url(device: Any) -> str:
+def build_rtsp_url(device: Any, stream_type: Optional[str] = None) -> str:
     """
     构建设备 RTSP 地址。
 
@@ -96,7 +96,7 @@ def build_rtsp_url(device: Any) -> str:
     mode = (_get_attr(device, "rtsp_url_mode") or "dahua").lower()
     custom_url = (_get_attr(device, "rtsp_url") or "").strip()
 
-    stream_type = _get_attr(device, "stream_type", "main") or "main"
+    stream_type = stream_type or _get_attr(device, "stream_type", "main") or "main"
     subtype = 1 if stream_type == "sub" else 0
     device_type = _get_attr(device, "device_type", "camera") or "camera"
 

@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from api.routes import router
 from api.heatmap_routes import heatmap_router
 from src.database import Base, engine
-from src.db_migrations import ensure_device_rtsp_columns
+from src.db_migrations import ensure_device_rtsp_columns, ensure_detection_config_stream_type
 import uvicorn
 import logging
 import asyncio
@@ -15,6 +15,7 @@ logger = logging.getLogger("api")
 # 创建数据库表
 Base.metadata.create_all(bind=engine)
 ensure_device_rtsp_columns(engine)
+ensure_detection_config_stream_type(engine)
 
 # 创建FastAPI应用
 app = FastAPI(

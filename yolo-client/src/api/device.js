@@ -215,6 +215,13 @@ export default {
   toggleModelActive(modelId, active) {
     return apiClient.put(`/models/${modelId}/toggle?active=${active}`);
   },
+
+  downloadModel(modelId) {
+    return apiClient.get(`/models/${modelId}/download`, {
+      responseType: 'blob',
+      timeout: 30 * 60 * 1000,
+    });
+  },
   
   // 获取完整仪表盘概览数据
   getComprehensiveDashboardOverview() {

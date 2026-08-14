@@ -12,11 +12,6 @@ from ultralytics import YOLO # 导入YOLO模型
 import torch # 导入torch模块
 from sqlalchemy.orm import Session # 导入数据库会话
 
-from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.triggers.cron import CronTrigger
-from apscheduler.jobstores.memory import MemoryJobStore
-from pytz import utc
-
 # 导入数据推送模块
 from src.data_pusher import data_pusher
 # 导入人群分析模块
@@ -27,8 +22,9 @@ from src.database import (
     DetectionModel, ExternalEvent,SmartEvent, Base, engine, get_db, ListenerType
 )
 
+from src.detection_runtime import extract_runtime_config
 from src.run_detection_task import DetectionTask
-from src.db_migrations import ensure_device_rtsp_columns
+from src.db_migrations import ensure_device_rtsp_columns, ensure_detection_config_stream_type
 
 # 导入认证模块
 from api.auth import get_current_user, User
@@ -48,13 +44,6 @@ from src.listeners.http_listener import HTTPListener
 # 配置日志
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-# 初始化 APScheduler
-scheduler = BackgroundScheduler(timezone=utc)
-# 配置APScheduler日志
-logging.getLogger('apscheduler').setLevel(logging.WARNING)
-scheduler.add_jobstore(MemoryJobStore(), 'default')
-scheduler.start()
 
 # 注册监听器类型
 def register_listener_types():
@@ -77,7 +66,6 @@ class DetectionServer:
     def __init__(self):
         self.tasks = {}  # 存储所有检测任务，格式: {config_id: DetectionTask}
         self.models_cache = {}  # 缓存已加载的模型，格式: {model_path: model}
-        self.scheduled_jobs = {}  # 存储所有定时任务，格式: {config_id: job_id}
         self.cleanup_task = None  # 全局清理任务
         self.max_concurrent_tasks = 50 # 最大并发任务数
         # 资源监控相关属性
@@ -115,22 +103,12 @@ class DetectionServer:
             
             # 检查频率
             if config.frequency.value == "scheduled":
-                # 对于定时检测，只设置定时任务，不立即启动检测
-                result = await self.schedule_detection(config, db)
-                
-                # 将配置标记为已启用（即使没有立即启动）
-                config.enabled = True
-                config.updated_at = datetime.now()
-                db.commit()
-                
-                # 记录成功日志
-                log_detection_action(config_id, config.device_id, "schedule", "success", "设置定时检测任务成功", user_id)
-                
-                return result
+                log_detection_action(config_id, config.device_id, "start", "failed", "定时检测已移除，请改为实时检测或抽帧检测", user_id)
+                return {"status": "error", "message": "定时检测已移除，请编辑配置并改为实时检测或抽帧检测"}
             elif config.frequency.value == "manual":
-                # 对于手动触发，不自动启动任务
-                logger.info(f"配置为手动触发模式，不自动启动: {config_id}")
-                return {"status": "success", "message": "配置为手动触发模式，请手动启动检测"}
+                await self._create_and_start_task(config, model, db)
+                log_detection_action(config_id, config.device_id, "start", "success", "启动抽帧检测任务成功", user_id)
+                return {"status": "success", "message": "抽帧检测任务已启动"}
             
             # 实时检测直接启动任务
             await self._create_and_start_task(config, model, db)
@@ -156,16 +134,6 @@ class DetectionServer:
                 device_id = config.device_id
         except Exception:
             pass
-        
-        # 停止定时任务（如果需要）
-        if remove_scheduled_jobs and config_id in self.scheduled_jobs:
-            for job_id in self.scheduled_jobs[config_id]:
-                try:
-                    scheduler.remove_job(job_id)
-                except Exception as e:
-                    logger.error(f"移除任务失败 {job_id}: {e}")
-            del self.scheduled_jobs[config_id]
-            log_detection_action(config_id, device_id, "unschedule", "success", "已移除定时检测任务", user_id)
         
         # 停止检测任务
         # if config_id not in self.tasks:
@@ -208,25 +176,21 @@ class DetectionServer:
         enabled_configs = db.query(DetectionConfig).filter(DetectionConfig.enabled.is_(True)).all()
         
         started_count = 0
-        scheduled_count = 0
+        skipped_count = 0
         
         for config in enabled_configs:
             try:
                 if config.frequency.value == "scheduled":
-                    # 对于定时检测，只设置定时任务
-                    result = await self.schedule_detection(config, db)
-                    if result.get("status") == "success":
-                        scheduled_count += 1
-                elif config.frequency.value == "realtime":
-                    # 实时检测直接启动
+                    skipped_count += 1
+                    logger.warning(f"跳过已废弃的定时检测配置: {config.config_id}")
+                elif config.frequency.value in ("realtime", "manual"):
                     result = await self.start_detection(config.config_id, db)
                     if result.get("status") == "success":
                         started_count += 1
-                # 手动触发的任务不自动启动
             except Exception as e:
                 logger.error(f"启动任务 {config.config_id} 失败: {str(e)}")
         
-        logger.info(f"已启动 {started_count} 个实时检测任务，设置 {scheduled_count} 个定时检测任务")
+        logger.info(f"已启动 {started_count} 个检测任务，跳过 {skipped_count} 个废弃定时配置")
     
     # 处理检测预览WebSocket连接
     async def handle_preview(self, websocket: WebSocket, config_id: str):
@@ -325,6 +289,8 @@ class DetectionServer:
             logger.info(f"使用缓存的模型: {model_path}")
         
         # 创建检测任务
+        frequency_value = config.frequency.value if hasattr(config.frequency, "value") else config.frequency
+        runtime_config = extract_runtime_config(config.schedule_config)
         task = DetectionTask(
             device_id=config.device_id,
             device_name=device.device_name,
@@ -336,7 +302,10 @@ class DetectionServer:
             is_gpu=model.is_gpu,
             target_class=config.target_classes,
             save_mode=config.save_mode,
-            area_coordinates=config.area_coordinates
+            area_coordinates=config.area_coordinates,
+            stream_type=getattr(config, 'stream_type', None) or 'main',
+            frequency=frequency_value,
+            runtime_config=runtime_config,
         )
         
         # 如果模型已缓存，直接设置
@@ -413,299 +382,6 @@ class DetectionServer:
             
         return True
     
-    # 设置定时检测任务
-    async def schedule_detection(self, config: DetectionConfig, db: Session):
-        """设置定时检测任务"""
-        config_id = config.config_id
-        
-        # 如果已有定时任务，先移除
-        if config_id in self.scheduled_jobs:
-            for job_id in self.scheduled_jobs[config_id]:
-                try:
-                    scheduler.remove_job(job_id)
-                except Exception as e:
-                    logger.error(f"移除任务失败 {job_id}: {e}")
-            del self.scheduled_jobs[config_id]
-        
-        # 检查是否有定时配置
-        if not hasattr(config, 'schedule_config') or not config.schedule_config:
-            logger.error(f"定时检测配置不存在: {config_id}")
-            return {"status": "error", "message": "定时检测配置不存在"}
-        
-        try:
-            # 解析定时配置
-            schedule_config = config.schedule_config
-            job_ids = []
-            
-            # 设置执行时长（分钟）
-            duration_minutes = schedule_config.get('duration', 10)
-            
-            # 简单模式
-            if schedule_config.get('mode', 'simple') == 'simple':
-                time_str = schedule_config.get('time', '')
-                days = schedule_config.get('days', [])
-                
-                if not time_str or not days:
-                    logger.error(f"定时配置无效: {config_id}")
-                    return {"status": "error", "message": "定时配置无效"}
-                
-                # 提取小时和分钟
-                hour, minute = map(int, time_str.split(':'))
-                
-                # 创建定时任务
-                job_id = f"scheduled_detection_{config_id}_simple"
-                
-                # 添加任务到调度器
-                # 这里通过 cron 表达式设置，星期几的格式为 0-6 对应周日到周六
-                days_str = ','.join(days)
-                job = scheduler.add_job(
-                    self.run_scheduled_detection_wrapper,
-                    CronTrigger(hour=hour, minute=minute, day_of_week=days_str),
-                    args=[config_id, duration_minutes],
-                    id=job_id,
-                    replace_existing=True
-                )
-                
-                job_ids.append(job_id)
-                logger.info(f"定时检测任务已设置: {config_id}, 时间: {hour}:{minute}, 日期: {days_str}")
-            
-            # 高级模式
-            else:
-                # 获取时间类型
-                time_type = schedule_config.get('timeType', 'points')
-                date_type = schedule_config.get('dateType', 'weekday')
-                
-                # 获取执行控制参数
-                max_executions = schedule_config.get('maxExecutions', -1)
-                idle_timeout = schedule_config.get('idleTimeout', 0)
-                
-                # 时间点模式
-                if time_type == 'points':
-                    time_points = schedule_config.get('timePoints', [])
-                    if not time_points:
-                        logger.error(f"未提供时间点: {config_id}")
-                        return {"status": "error", "message": "未提供时间点"}
-                    
-                    # 添加每个时间点的任务
-                    for i, time_str in enumerate(time_points):
-                        if not time_str:
-                            continue
-                            
-                        # 提取小时和分钟
-                        hour, minute = map(int, time_str.split(':'))
-                        
-                        # 创建 cron 表达式
-                        cron_kwargs = {'hour': hour, 'minute': minute}
-                        
-                        # 添加日期条件
-                        if date_type == 'weekday':
-                            weekdays = schedule_config.get('weekdays', [])
-                            if weekdays:
-                                cron_kwargs['day_of_week'] = ','.join(weekdays)
-                        elif date_type == 'monthday':
-                            monthdays = schedule_config.get('monthdays', [])
-                            if monthdays:
-                                cron_kwargs['day'] = ','.join(map(str, monthdays))
-                        elif date_type == 'specific':
-                            # 特定日期使用不同的方式处理（后面实现）
-                            pass
-                        
-                        # 创建任务 ID
-                        job_id = f"scheduled_detection_{config_id}_points_{i}"
-                        
-                        if date_type != 'specific':
-                            # 添加定时任务
-                            job = scheduler.add_job(
-                                self.run_scheduled_detection_wrapper,
-                                CronTrigger(**cron_kwargs),
-                                args=[config_id, duration_minutes, max_executions, idle_timeout],
-                                id=job_id,
-                                replace_existing=True
-                            )
-                            job_ids.append(job_id)
-                            logger.info(f"时间点定时任务已设置: {config_id}, {cron_kwargs}")
-                        else:
-                            # 处理特定日期
-                            specific_dates = schedule_config.get('specificDates', [])
-                            for date_str in specific_dates:
-                                try:
-                                    # 解析日期
-                                    date_obj = datetime.strptime(date_str, '%Y-%m-%d')
-                                    # 设置时间
-                                    run_date = date_obj.replace(hour=hour, minute=minute)
-                                    # 如果日期已过，跳过
-                                    if run_date < datetime.now():
-                                        continue
-                                    # 创建任务 ID
-                                    date_job_id = f"{job_id}_{date_str}"
-                                    # 添加定时任务
-                                    job = scheduler.add_job(
-                                        self.run_scheduled_detection_wrapper,
-                                        'date',
-                                        run_date=run_date,
-                                        args=[config_id, duration_minutes, max_executions, idle_timeout],
-                                        id=date_job_id,
-                                        replace_existing=True
-                                    )
-                                    job_ids.append(date_job_id)
-                                    logger.info(f"特定日期定时任务已设置: {config_id}, {run_date}")
-                                except Exception as e:
-                                    logger.error(f"特定日期任务设置失败: {date_str}, {e}")
-                
-                # 时间范围模式
-                elif time_type == 'range':
-                    start_time = schedule_config.get('startTime', '')
-                    end_time = schedule_config.get('endTime', '')
-                    interval = schedule_config.get('interval', 5)
-                    
-                    if not start_time or not end_time:
-                        logger.error(f"未提供有效的时间范围: {config_id}")
-                        return {"status": "error", "message": "未提供有效的时间范围"}
-                    
-                    # 解析开始和结束时间
-                    start_hour, start_minute = map(int, start_time.split(':'))
-                    end_hour, end_minute = map(int, end_time.split(':'))
-                    
-                    # 如果是跨天时间范围，处理时更复杂，这里假设不跨天
-                    if start_hour > end_hour or (start_hour == end_hour and start_minute > end_minute):
-                        logger.warning(f"开始时间晚于结束时间，可能是跨天时间段: {config_id}")
-                        
-                    # 计算间隔总分钟数
-                    start_mins = start_hour * 60 + start_minute
-                    end_mins = end_hour * 60 + end_minute
-                    if end_mins <= start_mins:  # 处理跨天情况
-                        end_mins += 24 * 60
-                    
-                    # 计算每个时间点
-                    current_mins = start_mins
-                    time_points = []
-                    while current_mins < end_mins:
-                        hour = (current_mins // 60) % 24
-                        minute = current_mins % 60
-                        time_points.append((hour, minute))
-                        current_mins += interval
-                    
-                    # 创建每个时间点的任务
-                    for i, (hour, minute) in enumerate(time_points):
-                        # 创建 cron 表达式
-                        cron_kwargs = {'hour': hour, 'minute': minute}
-                        
-                        # 添加日期条件
-                        if date_type == 'weekday':
-                            weekdays = schedule_config.get('weekdays', [])
-                            if weekdays:
-                                cron_kwargs['day_of_week'] = ','.join(weekdays)
-                        elif date_type == 'monthday':
-                            monthdays = schedule_config.get('monthdays', [])
-                            if monthdays:
-                                cron_kwargs['day'] = ','.join(map(str, monthdays))
-                        
-                        # 创建任务 ID
-                        job_id = f"scheduled_detection_{config_id}_range_{i}"
-                        
-                        if date_type != 'specific':
-                            # 添加定时任务
-                            job = scheduler.add_job(
-                                self.run_scheduled_detection_wrapper,
-                                CronTrigger(**cron_kwargs),
-                                args=[config_id, duration_minutes, max_executions, idle_timeout],
-                                id=job_id,
-                                replace_existing=True
-                            )
-                            job_ids.append(job_id)
-                            logger.info(f"时间范围定时任务已设置: {config_id}, {hour}:{minute}")
-                        else:
-                            # 处理特定日期
-                            specific_dates = schedule_config.get('specificDates', [])
-                            for date_str in specific_dates:
-                                try:
-                                    # 解析日期
-                                    date_obj = datetime.strptime(date_str, '%Y-%m-%d')
-                                    # 设置时间
-                                    run_date = date_obj.replace(hour=hour, minute=minute)
-                                    # 如果日期已过，跳过
-                                    if run_date < datetime.now():
-                                        continue
-                                    # 创建任务 ID
-                                    date_job_id = f"{job_id}_{date_str}"
-                                    # 添加定时任务
-                                    job = scheduler.add_job(
-                                        self.run_scheduled_detection_wrapper,
-                                        'date',
-                                        run_date=run_date,
-                                        args=[config_id, duration_minutes, max_executions, idle_timeout],
-                                        id=date_job_id,
-                                        replace_existing=True
-                                    )
-                                    job_ids.append(date_job_id)
-                                    logger.info(f"特定日期时间范围任务已设置: {config_id}, {run_date}")
-                                except Exception as e:
-                                    logger.error(f"特定日期任务设置失败: {date_str}, {e}")
-                
-            # 记录定时任务
-            self.scheduled_jobs[config_id] = job_ids
-            
-            return {"status": "success", "message": f"定时检测任务已设置: {len(job_ids)}个时间点"}
-        
-        except Exception as e:
-            logger.error(f"设置定时检测任务失败: {str(e)}")
-            return {"status": "error", "message": f"设置定时检测任务失败: {str(e)}"}
-    
-    # 首先添加同步包装器函数
-    def run_scheduled_detection_wrapper(self, config_id, duration_minutes, max_executions=-1, idle_timeout=0):
-        """调度器可调用的同步包装函数，用于执行异步的_run_scheduled_detection方法"""
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            return loop.run_until_complete(self._run_scheduled_detection(config_id, duration_minutes, max_executions, idle_timeout))
-        finally:
-            loop.close()
-   
-    # 执行定时检测任务
-    async def _run_scheduled_detection(self, config_id: str, duration_minutes: int, max_executions=-1, idle_timeout=0):
-        """执行定时检测任务"""
-        logger.info(f"开始执行定时检测任务: {config_id}")
-        
-        # 创建数据库会话
-        db = SessionLocal()
-        try:
-            # 获取检测配置
-            config = db.query(DetectionConfig).filter(DetectionConfig.config_id == config_id).first()
-            if not config:
-                logger.error(f"未找到检测配置: {config_id}")
-                log_detection_action(config_id, "unknown", "auto_start", "failed", "未找到检测配置")
-                return
-            
-            # 获取模型信息
-            model = db.query(DetectionModel).filter(DetectionModel.models_id == config.models_id).first()
-            if not model:
-                logger.error(f"未找到模型: {config.models_id}")
-                log_detection_action(config_id, config.device_id, "auto_start", "failed", f"未找到模型: {config.models_id}")
-                return
-            
-            # 创建并启动检测任务
-            await self._create_and_start_task(config, model, db, reset_enabled=False)
-            # 记录自动启动日志
-            log_detection_action(config_id, config.device_id, "auto_start", "success", f"定时任务自动启动检测: 持续{duration_minutes}分钟")
-            
-            # 任务执行一段时间后自动停止（例如duration_minutes分钟）
-            await asyncio.sleep(duration_minutes * 60)
-            
-            # 停止任务，但不清除定时任务
-            if config_id in self.tasks:
-                await self.stop_detection(config_id, db, remove_scheduled_jobs=False)
-                # 记录自动停止日志
-                log_detection_action(config_id, config.device_id, "auto_stop", "success", f"定时任务自动停止，运行了{duration_minutes}分钟")
-                logger.info(f"定时检测任务已自动停止: {config_id}")
-        
-        except Exception as e:
-            logger.error(f"执行定时检测任务失败: {str(e)}")
-            # 记录错误日志
-            device_id = config.device_id if 'config' in locals() and hasattr(config, 'device_id') else "unknown"
-            log_detection_action(config_id, device_id, "auto_start", "failed", f"执行定时检测任务失败: {str(e)}")
-        finally:
-            db.close()
-
     async def start_global_cleanup_task(self):#启动全局清理任务
         """启动全局清理任务"""
         if self.cleanup_task is None or self.cleanup_task.done():
@@ -1043,6 +719,7 @@ async def lifespan(app: FastAPI):
     # 创建数据库表（如果不存在）
     Base.metadata.create_all(bind=engine)
     ensure_device_rtsp_columns(engine)
+    ensure_detection_config_stream_type(engine)
     
     # 1. 注册数据监听器类型
     try:

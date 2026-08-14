@@ -124,7 +124,8 @@ class DetectionConfig(Base):
     save_duration = Column(Integer, default=10)
     max_storage_days = Column(Integer, default=30)
     area_coordinates = Column(JSONB)  # 新增字段，用于存储区域坐标
-    schedule_config = Column(JSONB)  # 定时检测配置
+    schedule_config = Column(JSONB)  # 运行时段等配置（schedule_config.runtime）
+    stream_type = Column(String(10), default="main")  # 码流类型，main或sub（按检测配置独立设置）
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
     created_by = Column(String(64), ForeignKey('users.user_id'))

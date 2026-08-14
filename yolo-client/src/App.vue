@@ -136,20 +136,6 @@ const openDashboard = () => {
             <template #title>实时检测</template>
           </el-menu-item>
 
-          <el-menu-item index="/video">
-            <el-icon>
-              <VideoPlay />
-            </el-icon>
-            <template #title>视频检测</template>
-          </el-menu-item>
-
-          <el-menu-item index="/image">
-            <el-icon>
-              <Picture />
-            </el-icon>
-            <template #title>图片检测</template>
-          </el-menu-item>
-
           <el-menu-item index="/detection/config">
             <el-icon>
               <Tools />
@@ -180,12 +166,32 @@ const openDashboard = () => {
           <template #title>视频设备</template>
         </el-menu-item>
 
-        <el-menu-item index="/models">
-          <el-icon>
-            <DataLine />
-          </el-icon>
-          <template #title>模型管理</template>
-        </el-menu-item>
+        <el-sub-menu index="models">
+          <template #title>
+            <el-icon>
+              <DataLine />
+            </el-icon>
+            <span>模型管理</span>
+          </template>
+          <el-menu-item index="/models/list">
+            <el-icon>
+              <List />
+            </el-icon>
+            <template #title>模型列表</template>
+          </el-menu-item>
+          <el-menu-item index="/models/image">
+            <el-icon>
+              <Picture />
+            </el-icon>
+            <template #title>图片验证</template>
+          </el-menu-item>
+          <el-menu-item index="/models/video">
+            <el-icon>
+              <VideoPlay />
+            </el-icon>
+            <template #title>视频验证</template>
+          </el-menu-item>
+        </el-sub-menu>
 
         <el-menu-item index="/push/config">
           <el-icon>
