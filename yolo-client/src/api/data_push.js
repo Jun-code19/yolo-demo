@@ -84,9 +84,20 @@ export const dataPushApi = {
       return apiClient.post(`/data_push/test/${pushId}`);
     },
     
-    // 获取推送统计信息
+    // 获取推送统计信息（检测服务内存计数）
     getPushStats() {
       return apiClient.get('/data_push/stats');
+    },
+
+    // 获取推送执行记录
+    getPushLogs(params = {}) {
+      return axios.get('/api/v1/data_push/logs', {
+        params,
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: localStorage.getItem('token') ? `Bearer ${localStorage.getItem('token')}` : ''
+        }
+      });
     },
 
     // 获取推送概览统计

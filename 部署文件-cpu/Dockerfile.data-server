@@ -26,9 +26,12 @@ RUN ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \
 
 COPY pip.conf /etc/pip.conf
 
-# 复制并安装依赖
+# 复制并安装依赖（先固定 numpy，再重装 pandas 避免 ABI 不兼容）
 COPY requirements.base.txt requirements.data-server.txt ./
-RUN pip install --no-cache-dir -r requirements.base.txt -r requirements.data-server.txt
+RUN pip install --no-cache-dir "numpy==1.26.4" \
+    && pip install --no-cache-dir -r requirements.base.txt -r requirements.data-server.txt \
+    && pip install --no-cache-dir --force-reinstall --no-deps "pandas==2.0.3" \
+    && pip install --no-cache-dir "pandas==2.0.3"
 
 # 复制项目文件
 COPY . .

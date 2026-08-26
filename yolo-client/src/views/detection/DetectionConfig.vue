@@ -92,13 +92,21 @@
         </el-form-item>
 
         <el-form-item label="模型">
-          <el-select v-model="filterForm.models_id" placeholder="选择模型" style="width: 220px" filterable clearable>
+          <el-select
+            v-model="filterForm.models_id"
+            placeholder="选择模型"
+            style="width: 220px"
+            filterable
+            clearable
+            teleported
+          >
             <el-option
               v-for="model in filterModelList"
               :key="model.models_id"
               :label="`${model.models_name} (${getModelTypeName(model.models_type)})`"
               :value="model.models_id"
             />
+            <template #empty>暂无模型，请先在模型管理上传</template>
           </el-select>
         </el-form-item>
 
@@ -138,10 +146,21 @@
     <el-card class="main-card">
       <!-- 配置列表 -->
       <el-table :data="configList" v-loading="loading" style="width: 100%">
-        <!-- 设备名称列 -->
-        <el-table-column label="设备" prop="device_id" sortable min-width="120">
+        <!-- 配置类型 / 设备 / 分组列 -->
+        <el-table-column label="类型" prop="config_mode" min-width="80">
           <template #default="scope">
-            {{ getDeviceName(scope.row.device_id) }}
+            <el-tag :type="scope.row.config_mode === 'group' ? 'warning' : 'info'" size="small">
+              {{ scope.row.config_mode === 'group' ? '按分组' : '按设备' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+
+        <el-table-column label="设备/分组" prop="device_id" sortable min-width="140">
+          <template #default="scope">
+            <span v-if="scope.row.config_mode === 'group'">
+              {{ scope.row.group_name || scope.row.group_id || '-' }}
+            </span>
+            <span v-else>{{ getDeviceName(scope.row.device_id) }}</span>
           </template>
         </el-table-column>
 
@@ -183,16 +202,24 @@
         <el-table-column label="灵敏度" prop="sensitivity" min-width="80">
         </el-table-column>
 
-        <!-- 检测频率列 -->
+        <!-- 检测方式列 -->
         <el-table-column label="检测方式" prop="frequency" min-width="100">
           <template #default="scope">
             <el-tag :type="getFrequencyType(scope.row.frequency)">
-              {{ getFrequencyLabel(scope.row.frequency) }}
+              {{ scope.row.config_mode === 'group' ? '分组轮询' : getFrequencyLabel(scope.row.frequency) }}
             </el-tag>
           </template>
         </el-table-column>
 
-        <el-table-column label="运行时段" prop="schedule_config" min-width="220">
+        <el-table-column label="推理模式" min-width="110">
+          <template #default="scope">
+            <el-tag :type="getPipelineModeType(scope.row)" size="small">
+              {{ getPipelineModeLabel(scope.row) }}
+            </el-tag>
+          </template>
+        </el-table-column>
+
+        <el-table-column label="运行时段" prop="schedule_config" min-width="120">
           <template #default="scope">
             {{ getScheduleDetail(scope.row) }}
           </template>
@@ -210,7 +237,8 @@
         <!-- 区域设置列 -->
         <el-table-column label="智能方案" prop="area_coordinates" min-width="150">
           <template #default="scope">
-            <el-tag>
+            <el-tag v-if="scope.row.config_mode === 'group'" type="info">不适用</el-tag>
+            <el-tag v-else>
               {{ getAreaTypeLabel(scope.row.area_coordinates) }}
             </el-tag>
           </template>
@@ -237,10 +265,14 @@
         <el-table-column label="操作" min-width="230" fixed="right">
           <template #default="scope">
             <el-button-group>
-              <el-button type="warning" size="small" @click="scope.row.enabled ? null : setInterestArea(scope.row)"
-                :disabled="scope.row.enabled"> <!-- 禁用按钮 -->
+              <el-button
+                type="warning"
+                size="small"
+                @click="scope.row.enabled ? null : setInterestArea(scope.row)"
+                :disabled="scope.row.enabled || scope.row.config_mode === 'group'"
+              >
                 智能
-              </el-button><!-- 设置感兴趣区域按钮 -->
+              </el-button>
               <el-button type="primary" size="small" @click="scope.row.enabled ? null : editConfig(scope.row)"
                 :disabled="scope.row.enabled"> <!-- 禁用按钮 -->
                 编辑
@@ -289,9 +321,19 @@
             <div class="section-container">
               <div class="form-section">
                 <div class="config-section-block">
-                  <div class="config-section-title">设备与模型</div>
+                  <div class="config-section-title">配置类型</div>
+                  <el-form-item label="检测范围" prop="config_mode" class="form-item">
+                    <el-radio-group v-model="formState.config_mode" :disabled="isEdit" class="mode-radio-group">
+                      <el-radio-button value="device">按设备</el-radio-button>
+                      <el-radio-button value="group">按分组</el-radio-button>
+                    </el-radio-group>
+                  </el-form-item>
+                </div>
+
+                <div class="config-section-block">
+                  <div class="config-section-title">{{ formState.config_mode === 'group' ? '分组与模型' : '设备与模型' }}</div>
                   <div class="form-grid">
-                  <div class="form-row">
+                  <div class="form-row" v-if="formState.config_mode === 'device'">
                     <el-form-item label="设备" prop="device_id" class="form-item form-item-device">
                       <el-select
                         v-model="formState.device_id"
@@ -314,7 +356,7 @@
                       </el-select>
                     </el-form-item>
 
-                    <el-form-item label="码流" prop="stream_type" class="form-item form-item-stream">
+                    <el-form-item label="码流" prop="stream_type" class="form-item form-item-stream" v-if="formState.config_mode === 'device'">
                       <el-select v-model="formState.stream_type" placeholder="请选择码流" :disabled="!formState.device_id">
                         <el-option label="主码流" value="main" />
                         <el-option label="辅码流" value="sub" />
@@ -322,9 +364,76 @@
                     </el-form-item>
                   </div>
 
+                  <div class="form-row" v-else>
+                    <el-form-item label="设备分组" prop="group_id" class="form-item form-item-device">
+                      <el-select
+                        v-model="formState.group_id"
+                        placeholder="请选择设备分组"
+                        :disabled="isEdit"
+                        filterable
+                        popper-append-to-body
+                      >
+                        <el-option
+                          v-for="group in deviceGroups"
+                          :key="group.group_id"
+                          :label="group.group_name"
+                          :value="group.group_id"
+                        />
+                      </el-select>
+                    </el-form-item>
+                  </div>
+
+                  <div class="form-row form-row-group-settings" v-if="formState.config_mode === 'group'">
+                    <el-form-item label="主取帧方式" class="form-item">
+                      <el-select v-model="formState.group_settings.frame_source_primary" placeholder="优先">
+                        <el-option label="API 截图" value="snapshot" />
+                        <el-option label="RTSP 单帧" value="rtsp" />
+                      </el-select>
+                    </el-form-item>
+                    <el-form-item label="备用取帧" class="form-item">
+                      <el-select v-model="formState.group_settings.frame_source_fallback" placeholder="备用">
+                        <el-option label="API 截图" value="snapshot" />
+                        <el-option label="RTSP 单帧" value="rtsp" />
+                      </el-select>
+                    </el-form-item>
+                    <el-form-item label="设备间隔" class="form-item form-item-compact-number">
+                      <div class="input-with-unit">
+                        <el-input-number
+                          v-model="formState.group_settings.device_interval_sec"
+                          :min="0.2"
+                          :max="3600"
+                          :step="0.5"
+                          :precision="1"
+                          controls-position="right"
+                        />
+                        <span class="unit-label">秒/台</span>
+                      </div>
+                    </el-form-item>
+                    <el-form-item label="整轮间隔" class="form-item form-item-compact-number">
+                      <div class="input-with-unit">
+                        <el-input-number
+                          v-model="formState.group_settings.group_round_interval_sec"
+                          :min="0"
+                          :max="86400"
+                          :step="1"
+                          :precision="1"
+                          controls-position="right"
+                        />
+                        <span class="unit-label">秒/轮</span>
+                      </div>
+                    </el-form-item>
+                  </div>
+
                   <div class="form-row form-row-three">
                     <el-form-item label="检测模型" prop="models_id" class="form-item">
-                      <el-select v-model="formState.models_id" placeholder="请选择检测模型" @change="updateTargetClasses" filterable popper-append-to-body>
+                      <el-select
+                        v-model="formState.models_id"
+                        placeholder="请选择检测模型"
+                        @change="updateTargetClasses"
+                        filterable
+                        teleported
+                        popper-class="config-model-select-popper"
+                      >
                         <el-option v-for="model in modelList" :key="model.models_id"
                           :label="`${model.models_name} (${getModelTypeName(model.models_type)})`" :value="model.models_id">
                           <div class="model-option">
@@ -358,7 +467,7 @@
                       </el-select>
                     </el-form-item>
 
-                    <el-form-item label="检测灵敏度" prop="sensitivity" class="form-item sensitivity-item">
+                    <el-form-item label="置信度阈值" prop="sensitivity" class="form-item sensitivity-item">
                       <div class="sensitivity-control">
                         <el-input-number
                           v-model="formState.sensitivity"
@@ -386,9 +495,224 @@
                   </div>
                   </div>
                 </div>
+              </div>
+            </div>
+          </el-tab-pane>
 
-                <div class="config-section-block">
-                  <div class="config-section-title">运行策略</div>
+          <el-tab-pane label="推理链路" name="pipeline">
+            <div class="section-container">
+              <div class="form-section">
+                <el-alert type="info" show-icon :closable="false" style="margin-bottom: 16px">
+                  <template #title>
+                    YOLO 负责实时初筛；VLM 在后台异步复检或语义分析，<strong>仅 VLM 确认后才写入事件</strong>，可显著降低误报。
+                  </template>
+                </el-alert>
+
+                <el-alert
+                  v-if="pipelineSmartConflict"
+                  type="warning"
+                  show-icon
+                  :closable="false"
+                  style="margin-bottom: 16px"
+                >
+                  <template #title>
+                    当前配置已启用智能方案（{{ smartSchemeSummary }}），与 VLM 推理链路<strong>互斥</strong>。
+                    运行时将以智能方案为准，VLM 不会生效。如需使用 VLM，请清空智能方案或改选「仅 YOLO」。
+                  </template>
+                </el-alert>
+
+                <el-form-item label="推理模式">
+                  <el-radio-group
+                    v-model="formState.pipelineMode"
+                    class="mode-radio-group"
+                    @change="handlePipelineModeChange"
+                  >
+                    <el-radio-button value="yolo_only">仅 YOLO</el-radio-button>
+                    <el-radio-button value="yolo_then_verify">YOLO + 复检</el-radio-button>
+                    <el-radio-button value="yolo_then_analyze">YOLO + 行为分析</el-radio-button>
+                  </el-radio-group>
+                </el-form-item>
+
+                <template v-if="formState.pipelineMode !== 'yolo_only'">
+                  <div class="form-row form-row-two">
+                    <el-form-item label="VLM 模型" class="form-item">
+                      <el-select
+                        v-model="formState.vlmModelId"
+                        placeholder="请先在模型管理注册 VLM"
+                        filterable
+                        teleported
+                        style="width: 100%"
+                      >
+                        <el-option
+                          v-for="m in vlmModels"
+                          :key="m.model_id"
+                          :label="m.model_name"
+                          :value="m.model_id"
+                        />
+                      </el-select>
+                      <p v-if="!vlmModels.length" class="field-hint">
+                        暂无 VLM 模型，请前往
+                        <el-link type="primary" @click="router.push('/models/vlm')">模型管理 · VLM 大模型</el-link>
+                      </p>
+                    </el-form-item>
+
+                    <el-form-item label="Prompt 模板" class="form-item">
+                      <el-select
+                        v-model="formState.pipelinePromptId"
+                        teleported
+                        style="width: 100%"
+                        @change="handlePipelinePromptChange"
+                      >
+                        <el-option
+                          v-for="p in vlmPrompts"
+                          :key="p.prompt_id"
+                          :label="p.name"
+                          :value="p.prompt_id"
+                        />
+                      </el-select>
+                      <p v-if="currentPipelinePromptDesc" class="field-hint">{{ currentPipelinePromptDesc }}</p>
+                    </el-form-item>
+                  </div>
+
+                  <el-form-item
+                    v-if="formState.pipelinePromptId === 'custom_freeform_v1'"
+                    label="自定义 Prompt"
+                  >
+                    <el-input
+                      v-model="formState.pipelinePromptOverride"
+                      type="textarea"
+                      :rows="8"
+                      :placeholder="pipelineCustomPromptPlaceholder"
+                    />
+                    <p class="field-hint">
+                      填写后将<strong>完全覆盖</strong>上方模板。可用 <code>{alert_labels}</code> 插入告警标签。
+                    </p>
+                  </el-form-item>
+
+                  <el-form-item v-if="formState.pipelineMode === 'yolo_then_analyze'" label="告警标签">
+                    <el-select
+                      v-model="formState.pipelineAlertLabels"
+                      multiple
+                      filterable
+                      allow-create
+                      teleported
+                      placeholder="如 fire、fighting、smoking"
+                      style="width: 100%"
+                    >
+                      <el-option
+                        v-for="label in suggestedPipelineLabels"
+                        :key="label"
+                        :label="label"
+                        :value="label"
+                      />
+                    </el-select>
+                    <p class="field-hint">切换 Prompt 模板时会自动填充默认告警标签，也可手动增删。</p>
+                  </el-form-item>
+
+                  <div class="form-row pipeline-limit-row">
+                    <el-form-item
+                      v-if="formState.pipelineMode === 'yolo_then_verify'"
+                      label="复检置信阈值"
+                      class="form-item pipeline-confidence-item"
+                    >
+                      <el-input-number
+                        v-model="formState.pipelineRejectBelow"
+                        :min="0.1"
+                        :max="1"
+                        :step="0.05"
+                        :precision="2"
+                        controls-position="right"
+                        style="width: 100%"
+                      />
+                    </el-form-item>
+                    <el-form-item
+                      v-if="formState.pipelineMode === 'yolo_then_analyze'"
+                      label="最低置信度"
+                      class="form-item pipeline-confidence-item"
+                    >
+                      <el-input-number
+                        v-model="formState.pipelineMinConfidence"
+                        :min="0.1"
+                        :max="1"
+                        :step="0.05"
+                        :precision="2"
+                        controls-position="right"
+                        style="width: 100%"
+                      />
+                    </el-form-item>
+                    <el-form-item label="VLM 冷却（秒）" class="form-item">
+                      <el-input-number
+                        v-model="formState.pipelineCooldownSec"
+                        :min="5"
+                        :max="600"
+                        controls-position="right"
+                        style="width: 100%"
+                      />
+                    </el-form-item>
+                    <el-form-item label="每分钟上限" class="form-item">
+                      <el-input-number
+                        v-model="formState.pipelineMaxCallsPerMinute"
+                        :min="1"
+                        :max="60"
+                        controls-position="right"
+                        style="width: 100%"
+                      />
+                    </el-form-item>
+                  </div>
+                  <p
+                    v-if="formState.pipelineMode === 'yolo_then_verify'"
+                    class="field-hint pipeline-limit-hint"
+                  >
+                    复检置信阈值：VLM 返回 verified=true 且置信度 ≥ 此值才写入事件，默认 0.6。
+                  </p>
+
+                  <div class="pipeline-image-block">
+                    <el-form-item label="送 VLM 图像范围" class="pipeline-image-scope-item">
+                      <el-radio-group v-model="formState.pipelineContext">
+                        <el-radio-button value="crop">目标裁剪</el-radio-button>
+                        <el-radio-button value="crop_with_margin">裁剪+边距</el-radio-button>
+                        <el-radio-button value="full_frame">整帧</el-radio-button>
+                      </el-radio-group>
+                    </el-form-item>
+
+                    <el-form-item
+                      v-if="formState.pipelineContext === 'crop_with_margin'"
+                      label="裁剪边距"
+                      class="pipeline-margin-item"
+                    >
+                      <div class="margin-ratio-control">
+                        <div class="margin-ratio-row">
+                          <el-slider
+                            v-model="formState.pipelineMarginRatio"
+                            :min="5"
+                            :max="50"
+                            :step="5"
+                            :format-tooltip="(v) => `${v}%`"
+                            class="margin-ratio-slider"
+                          />
+                          <el-input-number
+                            v-model="formState.pipelineMarginRatio"
+                            :min="5"
+                            :max="50"
+                            :step="5"
+                            controls-position="right"
+                            class="margin-ratio-input"
+                          />
+                        </div>
+                        <span class="unit-label">相对目标框各边扩展比例</span>
+                      </div>
+                    </el-form-item>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </el-tab-pane>
+
+          <el-tab-pane label="运行策略" name="runtime">
+            <div class="section-container">
+              <div class="form-section">
+                <div class="config-section-block" v-if="formState.config_mode === 'device'">
+                  <div class="config-section-title">检测调度</div>
                   <div class="runtime-panel">
                     <div class="runtime-mode-row">
                       <el-form-item label="检测方式" prop="frequency" class="runtime-mode-item">
@@ -415,6 +739,21 @@
                       </el-form-item>
                     </div>
                     <el-form-item label="生效时段" class="runtime-schedule-item">
+                      <WeeklyTimeSchedule v-model="formState.weeklySchedule" />
+                    </el-form-item>
+                  </div>
+                </div>
+
+                <div class="config-section-block" v-else>
+                  <div class="config-section-title">分组轮询</div>
+                  <div class="runtime-panel">
+                    <el-alert
+                      type="info"
+                      :closable="false"
+                      show-icon
+                      title="实时轮询：依次对组内每台摄像头取一帧并执行普通检测。"
+                    />
+                    <el-form-item label="生效时段" class="runtime-schedule-item" style="margin-top: 16px">
                       <WeeklyTimeSchedule v-model="formState.weeklySchedule" />
                     </el-form-item>
                   </div>
@@ -478,13 +817,14 @@
 </template>
 
 <script>
-import { defineComponent, ref, reactive, onMounted, h } from 'vue';
+import { defineComponent, ref, reactive, onMounted, h, computed } from 'vue';
 import { useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { Plus, Delete, Edit, VideoPause, VideoPlay, Operation, CircleCloseFilled, Files, VideoCamera, CircleCheckFilled, Clock, Setting, CircleClose, Search, Refresh } from '@element-plus/icons-vue';
 import deviceApi from '@/api/device'
 import dayjs from 'dayjs';
 import { detectionConfigApi } from '@/api/detection';
+import { vlmInspectionApi } from '@/api/vlm_inspection';
 import { startDetection, stopDetection } from '@/api/detection_server';
 import WeeklyTimeSchedule from '@/components/WeeklyTimeSchedule.vue';
 import {
@@ -495,6 +835,7 @@ import {
   scheduleFromBackend,
   scheduleToBackend
 } from '@/utils/weeklySchedule';
+import { getScenarioSummaryLabel } from '@/utils/smartScenarios';
 
 export default defineComponent({
   name: 'DetectionConfig',
@@ -526,8 +867,11 @@ export default defineComponent({
     // 表格数据
     const configList = ref([]);
     const deviceList = ref([]);
+    const deviceGroups = ref([]);
     const modelList = ref([]);
     const filterModelList = ref([]);
+    const vlmModels = ref([]);
+    const vlmPrompts = ref([]);
     const targetClasses = ref([]); // 用于存储目标类别
 
     // 分页相关
@@ -599,7 +943,15 @@ export default defineComponent({
     // 表单状态
     const formState = reactive({
       config_id: null,
+      config_mode: 'device',
       device_id: null,
+      group_id: null,
+      group_settings: {
+        frame_source_primary: 'snapshot',
+        frame_source_fallback: 'rtsp',
+        device_interval_sec: 1.0,
+        group_round_interval_sec: 0
+      },
       stream_type: 'main',
       models_id: null,
       enabled: true,
@@ -610,8 +962,160 @@ export default defineComponent({
       save_duration: 10,
       max_storage_days: 30,
       frameInterval: 5,
-      weeklySchedule: createFullWeekSchedule()
+      weeklySchedule: createFullWeekSchedule(),
+      pipelineMode: 'yolo_only',
+      vlmModelId: '',
+      pipelinePromptId: 'yolo_verify_v1',
+      pipelinePromptOverride: '',
+      pipelineAlertLabels: [],
+      pipelineMinConfidence: 0.7,
+      pipelineRejectBelow: 0.6,
+      pipelineCooldownSec: 15,
+      pipelineMaxCallsPerMinute: 6,
+      pipelineContext: 'crop_with_margin',
+      pipelineMarginRatio: 15
     });
+
+    const defaultPipelineAlertLabels = ['fire', 'smoke', 'fight', 'fall', 'smoking', 'swimming', 'red_top', 'blue_top'];
+
+    const pipelineCustomPromptPlaceholder = `请根据实际画面分析，关注告警项：{alert_labels}
+
+规则：
+- 命中关注项时 findings 写入对应 label，confidence 0.85~1.0
+- 未命中时 findings 为 []，needs_alert 为 false
+- 只输出 JSON，不要 markdown`;
+
+    const currentPipelinePromptDesc = computed(() => {
+      const p = vlmPrompts.value.find(item => item.prompt_id === formState.pipelinePromptId);
+      return p?.description || '';
+    });
+
+    const suggestedPipelineLabels = computed(() => {
+      const p = vlmPrompts.value.find(item => item.prompt_id === formState.pipelinePromptId);
+      const fromPrompt = p?.default_alert_labels || [];
+      return [...new Set([...fromPrompt, ...defaultPipelineAlertLabels])];
+    });
+
+    const editingAreaCoordinates = ref(null);
+    const originalPipelineJson = ref('');
+    const wasEnabledBeforeEdit = ref(false);
+
+    const hasSmartSchemeConfigured = (areaCoordinates) => {
+      if (!areaCoordinates || !Object.keys(areaCoordinates).length) return false;
+      if (areaCoordinates.version === 2 || Array.isArray(areaCoordinates.scenarios)) {
+        const scenarios = (areaCoordinates.scenarios || []).filter(item => item.enabled !== false);
+        return scenarios.length > 0;
+      }
+      return !!areaCoordinates.analysisType && areaCoordinates.analysisType !== 'none';
+    };
+
+    const pipelineSmartConflict = computed(() => (
+      formState.config_mode === 'device' &&
+      formState.pipelineMode !== 'yolo_only' &&
+      hasSmartSchemeConfigured(editingAreaCoordinates.value)
+    ));
+
+    const smartSchemeSummary = computed(() => {
+      if (!editingAreaCoordinates.value) return '已配置';
+      return getAreaTypeLabel(editingAreaCoordinates.value);
+    });
+
+    const handlePipelinePromptChange = (promptId) => {
+      const p = vlmPrompts.value.find(item => item.prompt_id === promptId);
+      if (formState.pipelineMode === 'yolo_then_analyze' && p?.default_alert_labels?.length) {
+        formState.pipelineAlertLabels = [...p.default_alert_labels];
+      }
+      if (promptId !== 'custom_freeform_v1') {
+        formState.pipelinePromptOverride = '';
+      }
+    };
+
+    const handlePipelineModeChange = (mode) => {
+      if (mode === 'yolo_then_analyze') {
+        if (formState.pipelinePromptId === 'yolo_verify_v1' || formState.pipelinePromptId === 'custom_freeform_v1') {
+          formState.pipelinePromptId = 'general_patrol_v1';
+          formState.pipelinePromptOverride = '';
+        }
+        handlePipelinePromptChange(formState.pipelinePromptId);
+      } else if (mode === 'yolo_then_verify') {
+        formState.pipelinePromptId = 'yolo_verify_v1';
+        formState.pipelinePromptOverride = '';
+      } else if (mode === 'yolo_only') {
+        formState.pipelinePromptOverride = '';
+      }
+    };
+
+    const resetPipelineDefaults = () => {
+      formState.pipelineMode = 'yolo_only';
+      formState.vlmModelId = '';
+      formState.pipelinePromptId = 'yolo_verify_v1';
+      formState.pipelinePromptOverride = '';
+      formState.pipelineAlertLabels = [];
+      formState.pipelineMinConfidence = 0.7;
+      formState.pipelineRejectBelow = 0.6;
+      formState.pipelineCooldownSec = 15;
+      formState.pipelineMaxCallsPerMinute = 6;
+      formState.pipelineContext = 'crop_with_margin';
+      formState.pipelineMarginRatio = 15;
+    };
+
+    const buildInferencePipeline = () => {
+      if (formState.pipelineMode === 'yolo_only') {
+        return { mode: 'yolo_only' };
+      }
+      const pipeline = {
+        mode: formState.pipelineMode,
+        vlm_model_id: formState.vlmModelId || null,
+        prompt_id: formState.pipelinePromptId,
+        min_confidence: formState.pipelineMinConfidence,
+        alert_labels: formState.pipelineAlertLabels || [],
+        trigger: {
+          cooldown_sec: formState.pipelineCooldownSec,
+          max_calls_per_minute: formState.pipelineMaxCallsPerMinute,
+          context: formState.pipelineContext,
+          margin_ratio: (formState.pipelineMarginRatio || 15) / 100
+        }
+      };
+      if (formState.pipelineMode === 'yolo_then_verify') {
+        pipeline.prompt_id = formState.pipelinePromptId || 'yolo_verify_v1';
+        pipeline.verify = {
+          reject_below: formState.pipelineRejectBelow ?? 0.6
+        };
+      } else if (formState.pipelineMode === 'yolo_then_analyze') {
+        pipeline.prompt_id = formState.pipelinePromptId || 'general_patrol_v1';
+      }
+      if (formState.pipelinePromptOverride?.trim()) {
+        pipeline.prompt_override = formState.pipelinePromptOverride.trim();
+      }
+      return pipeline;
+    };
+
+    const applyInferencePipeline = (scheduleConfig) => {
+      resetPipelineDefaults();
+      const pipeline = scheduleConfig?.inference_pipeline;
+      if (!pipeline || !pipeline.mode || pipeline.mode === 'yolo_only') {
+        return;
+      }
+      formState.pipelineMode = pipeline.mode;
+      formState.vlmModelId = pipeline.vlm_model_id || '';
+      formState.pipelinePromptId = pipeline.prompt_id || 'yolo_verify_v1';
+      formState.pipelinePromptOverride = pipeline.prompt_override || '';
+      formState.pipelineAlertLabels = pipeline.alert_labels?.length
+        ? [...pipeline.alert_labels]
+        : (() => {
+            const p = vlmPrompts.value.find(item => item.prompt_id === formState.pipelinePromptId);
+            return p?.default_alert_labels?.length ? [...p.default_alert_labels] : [];
+          })();
+      formState.pipelineMinConfidence = pipeline.min_confidence ?? 0.7;
+      formState.pipelineRejectBelow = pipeline.verify?.reject_below ?? 0.6;
+      formState.pipelineCooldownSec = pipeline.trigger?.cooldown_sec ?? 15;
+      formState.pipelineMaxCallsPerMinute = pipeline.trigger?.max_calls_per_minute ?? 6;
+      formState.pipelineContext = pipeline.trigger?.context || 'crop_with_margin';
+      const marginRatio = pipeline.trigger?.margin_ratio;
+      formState.pipelineMarginRatio = marginRatio != null
+        ? Math.round(Number(marginRatio) * 100)
+        : 15;
+    };
 
     const resetRuntimeDefaults = () => {
       formState.frameInterval = 5;
@@ -708,6 +1212,7 @@ export default defineComponent({
       const typeMap = {
         'object_detection': '目标检测',
         'smart_behavior': '智能行为',
+        'smart_person': '人员场景',
         'smart_counting': '智能人数统计',
         'segmentation': '图像分割',
         'keypoint': '关键点检测',
@@ -721,6 +1226,10 @@ export default defineComponent({
     const getAreaTypeLabel = (areaCoordinates) => {
       if (!areaCoordinates || Object.keys(areaCoordinates).length === 0) {
         return '未设置';
+      }
+
+      if (areaCoordinates.version === 2 || Array.isArray(areaCoordinates.scenarios)) {
+        return getScenarioSummaryLabel(areaCoordinates);
       }
 
       let result = '';
@@ -796,6 +1305,27 @@ export default defineComponent({
         manual: 'info'
       };
       return map[frequency] || '';
+    };
+
+    const getPipelineModeLabel = (row) => {
+      const pipeline = row.schedule_config?.inference_pipeline;
+      const mode = pipeline?.mode || 'yolo_only';
+      const labels = {
+        yolo_only: '仅 YOLO',
+        yolo_then_verify: 'YOLO+复检',
+        yolo_then_analyze: 'YOLO+分析'
+      };
+      if (mode === 'yolo_only') return labels.yolo_only;
+      const base = labels[mode] || mode;
+      if (!pipeline?.vlm_model_id) return `${base}(未配VLM)`;
+      return base;
+    };
+
+    const getPipelineModeType = (row) => {
+      const mode = row.schedule_config?.inference_pipeline?.mode || 'yolo_only';
+      if (mode === 'yolo_only') return 'info';
+      if (!row.schedule_config?.inference_pipeline?.vlm_model_id) return 'warning';
+      return 'success';
     };
 
     const getScheduleDetail = (row) => {
@@ -914,29 +1444,68 @@ export default defineComponent({
       }
     };
 
+    const normalizeModelList = (payload) => {
+      if (Array.isArray(payload)) return payload;
+      if (Array.isArray(payload?.data)) return payload.data;
+      return [];
+    };
+
+    const isDetectionModel = (model) => (model?.models_type || '').toLowerCase() !== 'vlm';
+
     // 加载模型列表
     const loadModelList = async () => {
       try {
         const response = await deviceApi.getModels();
-        filterModelList.value = response.data || [];
-        modelList.value = filterModelList.value.filter(model => model.is_active);
+        const allModels = normalizeModelList(response?.data).filter(isDetectionModel);
+        filterModelList.value = allModels;
+        // 配置表单优先展示可用模型；若无激活模型则展示全部，避免下拉为空
+        const activeModels = allModels.filter((model) => model.is_active !== false);
+        modelList.value = activeModels.length ? activeModels : allModels;
       } catch (error) {
-        ElMessage.error('获取模型列表失败: ' + error.message);
+        filterModelList.value = [];
+        modelList.value = [];
+        ElMessage.error('获取模型列表失败: ' + (error.message || '请确认 data_server 已启动'));
+      }
+    };
+
+    const loadDeviceGroups = async () => {
+      try {
+        const response = await deviceApi.getDeviceGroups();
+        deviceGroups.value = response.data?.data || [];
+      } catch (error) {
+        ElMessage.error('获取设备分组失败: ' + error.message);
+      }
+    };
+
+    const loadVlmResources = async () => {
+      try {
+        const [modelsRes, promptsRes] = await Promise.all([
+          vlmInspectionApi.getAvailableVlmModels(),
+          vlmInspectionApi.getPrompts()
+        ]);
+        vlmModels.value = modelsRes.data || [];
+        vlmPrompts.value = promptsRes.data || [];
+      } catch (error) {
+        console.warn('加载 VLM 资源失败', error);
       }
     };
 
     // 初始化
     onMounted(() => {
       loadDeviceList();
+      loadDeviceGroups();
       loadModelList();
+      loadVlmResources();
       reloadConfigList();
     });
 
     // 显示添加模态框
-    const showAddModal = () => {
+    const showAddModal = async () => {
       isEdit.value = false;
       activeConfigTab.value = 'basic';
       resetForm();
+      await loadModelList();
+      await loadVlmResources();
       modalVisible.value = true;
     };
 
@@ -944,7 +1513,15 @@ export default defineComponent({
     const resetForm = () => {
       Object.assign(formState, {
         config_id: null,
+        config_mode: 'device',
         device_id: null,
+        group_id: null,
+        group_settings: {
+          frame_source_primary: 'snapshot',
+          frame_source_fallback: 'rtsp',
+          device_interval_sec: 1.0,
+          group_round_interval_sec: 0
+        },
         stream_type: 'main',
         models_id: null,
         enabled: false,
@@ -956,6 +1533,10 @@ export default defineComponent({
         max_storage_days: 30
       });
       resetRuntimeDefaults();
+      resetPipelineDefaults();
+      editingAreaCoordinates.value = null;
+      originalPipelineJson.value = '';
+      wasEnabledBeforeEdit.value = false;
 
       if (formRef.value) {
         formRef.value.clearValidate();
@@ -964,16 +1545,32 @@ export default defineComponent({
     };
 
     // 编辑配置
-    const editConfig = (record) => {
+    const editConfig = async (record) => {
       isEdit.value = true;
       activeConfigTab.value = 'basic';
+      await loadModelList();
+      await loadVlmResources();
 
       const frequency = record.frequency === 'scheduled' ? 'realtime' : record.frequency;
       applyRuntimeConfig(record.schedule_config);
+      applyInferencePipeline(record.schedule_config);
+      editingAreaCoordinates.value = record.area_coordinates || null;
+      originalPipelineJson.value = JSON.stringify(
+        record.schedule_config?.inference_pipeline || { mode: 'yolo_only' }
+      );
+      wasEnabledBeforeEdit.value = !!record.enabled;
 
       Object.assign(formState, {
         config_id: record.config_id,
+        config_mode: record.config_mode || 'device',
         device_id: record.device_id,
+        group_id: record.group_id,
+        group_settings: {
+          frame_source_primary: record.group_settings?.frame_source_primary || 'snapshot',
+          frame_source_fallback: record.group_settings?.frame_source_fallback || 'rtsp',
+          device_interval_sec: record.group_settings?.device_interval_sec ?? 1.0,
+          group_round_interval_sec: record.group_settings?.group_round_interval_sec ?? 0
+        },
         stream_type: record.stream_type || deviceList.value.find(d => d.device_id === record.device_id)?.stream_type || 'main',
         models_id: record.models_id,
         enabled: record.enabled,
@@ -1001,30 +1598,77 @@ export default defineComponent({
             submitLoading.value = true;
 
             try {
+              if (
+                formState.pipelineMode !== 'yolo_only' &&
+                !formState.vlmModelId
+              ) {
+                ElMessage.warning('推理链路已启用 VLM，请选择 VLM 模型');
+                activeConfigTab.value = 'pipeline';
+                submitLoading.value = false;
+                return;
+              }
+              if (
+                formState.pipelinePromptId === 'custom_freeform_v1' &&
+                !formState.pipelinePromptOverride?.trim()
+              ) {
+                ElMessage.warning('已选择自定义 Prompt，请填写自定义内容');
+                activeConfigTab.value = 'pipeline';
+                submitLoading.value = false;
+                return;
+              }
+
               // 准备提交的数据
               const submitData = {
                 models_id: formState.models_id,
                 enabled: false,
                 sensitivity: formState.sensitivity,
                 target_classes: formState.target_classes,
-                frequency: formState.frequency,
-                stream_type: formState.stream_type,
                 save_mode: formState.save_mode,
                 save_duration: formState.save_duration,
                 max_storage_days: formState.max_storage_days,
                 schedule_config: {
-                  runtime: buildRuntimeConfig()
+                  runtime: buildRuntimeConfig(),
+                  inference_pipeline: buildInferencePipeline()
                 }
               };
 
-              if (isEdit.value) {
-                // 更新配置
-                await detectionConfigApi.updateConfig(formState.config_id, submitData);
-                ElMessage.success('配置更新成功');
+              if (formState.config_mode === 'group') {
+                submitData.config_mode = 'group';
+                submitData.group_id = formState.group_id;
+                submitData.group_settings = { ...formState.group_settings };
+                submitData.frequency = 'realtime';
               } else {
-                // 创建配置
-                submitData.device_id = formState.device_id;
+                submitData.config_mode = 'device';
+                submitData.frequency = formState.frequency;
                 submitData.stream_type = formState.stream_type;
+              }
+
+              if (isEdit.value) {
+                if (formState.config_mode === 'group') {
+                  submitData.group_settings = { ...formState.group_settings };
+                }
+                await detectionConfigApi.updateConfig(formState.config_id, submitData);
+                const newPipelineJson = JSON.stringify(buildInferencePipeline());
+                const pipelineChanged = newPipelineJson !== originalPipelineJson.value;
+                ElMessage.success('配置更新成功');
+                if (pipelineChanged) {
+                  ElMessage.warning(
+                    wasEnabledBeforeEdit.value
+                      ? '推理链路已变更，请先停止再启动检测任务后才会生效'
+                      : '推理链路已保存，启动检测任务后才会按新配置运行'
+                  );
+                }
+              } else {
+                submitData.config_mode = formState.config_mode;
+                if (formState.config_mode === 'group') {
+                  submitData.group_id = formState.group_id;
+                  submitData.group_settings = { ...formState.group_settings };
+                  submitData.frequency = 'realtime';
+                } else {
+                  submitData.device_id = formState.device_id;
+                  submitData.stream_type = formState.stream_type;
+                  submitData.frequency = formState.frequency;
+                }
                 await detectionConfigApi.createConfig(submitData);
                 ElMessage.success('配置创建成功');
               }
@@ -1037,7 +1681,9 @@ export default defineComponent({
               submitLoading.value = false;
             }
           } else {
-            if (!formState.device_id || !formState.models_id) {
+            if (formState.config_mode === 'group' && !formState.group_id) {
+              activeConfigTab.value = 'basic';
+            } else if (formState.config_mode === 'device' && (!formState.device_id || !formState.models_id)) {
               activeConfigTab.value = 'basic';
             } else {
               activeConfigTab.value = 'save';
@@ -1081,15 +1727,17 @@ export default defineComponent({
     };
 
     const buildDeleteConfirmMessage = (record) => {
-      const deviceName = getDeviceName(record.device_id);
+      const targetLabel = record.config_mode === 'group'
+        ? (record.group_name || record.group_id || '分组')
+        : getDeviceName(record.device_id);
       const modelName = getModelName(record.models_id);
 
       return h('div', { class: 'delete-confirm-message' }, [
         h('p', { class: 'delete-confirm-line' }, '确认删除以下检测配置及其关联数据吗？'),
         h('p', { class: 'delete-confirm-line delete-confirm-tip' }, '关联数据包括：检测事件、检测日志、性能记录配置等。'),
         h('p', { class: 'delete-confirm-line delete-confirm-devices' }, [
-          h('span', { class: 'delete-confirm-label' }, '设备：'),
-          h('span', deviceName)
+          h('span', { class: 'delete-confirm-label' }, record.config_mode === 'group' ? '分组：' : '设备：'),
+          h('span', targetLabel)
         ]),
         h('p', { class: 'delete-confirm-line delete-confirm-devices' }, [
           h('span', { class: 'delete-confirm-label' }, '模型：'),
@@ -1144,12 +1792,24 @@ export default defineComponent({
     };
 
     return {
+      router,
       getAreaTypeLabel,
       loading,
       submitLoading,
       configList,
       deviceList,
+      deviceGroups,
       modelList,
+      filterModelList,
+      vlmModels,
+      vlmPrompts,
+      currentPipelinePromptDesc,
+      suggestedPipelineLabels,
+      pipelineCustomPromptPlaceholder,
+      handlePipelinePromptChange,
+      handlePipelineModeChange,
+      pipelineSmartConflict,
+      smartSchemeSummary,
       modalVisible,
       isEdit,
       formRef,
@@ -1170,6 +1830,8 @@ export default defineComponent({
       getPushLabel,
       getFrequencyLabel,
       getFrequencyType,
+      getPipelineModeLabel,
+      getPipelineModeType,
       getSaveModeLabel,
       getSaveModeType,
       showAddModal,
@@ -1321,6 +1983,35 @@ export default defineComponent({
 .form-row-three .sensitivity-item {
   flex: 0 0 240px;
   max-width: 260px;
+}
+
+.form-row-group-settings {
+  flex-wrap: nowrap;
+  align-items: flex-start;
+}
+
+.form-row-group-settings .form-item {
+  flex: 1;
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+.form-row-group-settings .form-item-compact-number {
+  flex: 0 0 148px;
+  max-width: 160px;
+}
+
+.form-row-group-settings .input-with-unit {
+  flex-wrap: nowrap;
+}
+
+.form-row-group-settings .input-with-unit .el-input-number {
+  width: 100%;
+}
+
+.form-row-group-settings .unit-label {
+  white-space: nowrap;
+  font-size: 12px;
 }
 
 .form-item-device {
@@ -1903,7 +2594,11 @@ export default defineComponent({
   max-height: 58vh;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 4px 8px 12px 4px;
+  padding: 4px 12px 24px 4px;
+}
+
+:global(.config-model-select-popper) {
+  z-index: 1000001 !important;
 }
 
 .field-hint {
@@ -1911,6 +2606,81 @@ export default defineComponent({
   font-size: 12px;
   color: #909399;
   line-height: 1.5;
+}
+
+.margin-ratio-control {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.margin-ratio-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+}
+
+.margin-ratio-slider {
+  flex: 1;
+  min-width: 0;
+}
+
+.margin-ratio-slider :deep(.el-slider__runway) {
+  margin: 0;
+}
+
+.margin-ratio-input {
+  flex: 0 0 112px;
+  width: 112px;
+}
+
+.margin-ratio-input :deep(.el-input-number) {
+  width: 100%;
+}
+
+.margin-ratio-control .unit-label {
+  font-size: 12px;
+  color: #909399;
+  line-height: 1.5;
+}
+
+.pipeline-limit-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  align-items: start;
+  margin-top: 4px;
+  margin-bottom: 4px;
+}
+
+.pipeline-limit-hint {
+  margin: 0 0 8px;
+}
+
+.pipeline-limit-row .form-item {
+  margin-bottom: 0;
+  min-width: 0;
+}
+
+.pipeline-limit-row :deep(.el-input-number) {
+  width: 100%;
+}
+
+.pipeline-image-block {
+  margin-top: 20px;
+  padding-top: 18px;
+  padding-bottom: 8px;
+  border-top: 1px solid #ebeef5;
+}
+
+.pipeline-image-block .pipeline-image-scope-item {
+  margin-bottom: 16px;
+}
+
+.pipeline-image-block .pipeline-margin-item {
+  margin-bottom: 0;
 }
 
 .hint-buttons {

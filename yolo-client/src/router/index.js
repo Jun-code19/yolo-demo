@@ -12,16 +12,6 @@ const routes = [
   {
     path: '/dashboard',
     name: 'Dashboard',
-    component: () => import('../views/Dashboard1.vue'),
-    meta: {
-      requiresAuth: false,
-      title: 'AI行为监测数据大屏',
-      layout: 'fullscreen'
-    }
-  },
-  {
-    path: '/dashboard1',
-    name: 'Dashboard1',
     component: () => import('../views/Dashboard.vue'),
     meta: {
       requiresAuth: false,
@@ -72,11 +62,11 @@ const routes = [
   },
   {
     path: '/video',
-    redirect: '/models/video'
+    redirect: '/models/list?tab=video'
   },
   {
     path: '/image',
-    redirect: '/models/image'
+    redirect: '/models/list?tab=image'
   },
   {
     path: '/models',
@@ -95,26 +85,25 @@ const routes = [
         component: () => import('../views/models/ModelList.vue'),
         meta: {
           requiresAuth: true,
-          title: '模型列表'
+          title: '本地模型'
+        }
+      },
+      {
+        path: 'vlm',
+        name: 'VlmManagement',
+        component: () => import('../views/models/VlmManagement.vue'),
+        meta: {
+          requiresAuth: true,
+          title: 'VLM 大模型'
         }
       },
       {
         path: 'image',
-        name: 'ModelImageValidation',
-        component: () => import('../views/models/ImageValidation.vue'),
-        meta: {
-          requiresAuth: true,
-          title: '图片验证'
-        }
+        redirect: { path: '/models/list', query: { tab: 'image' } }
       },
       {
         path: 'video',
-        name: 'ModelVideoValidation',
-        component: () => import('../views/models/VideoValidation.vue'),
-        meta: {
-          requiresAuth: true,
-          title: '视频验证'
-        }
+        redirect: { path: '/models/list', query: { tab: 'video' } }
       }
     ]
   },
@@ -164,21 +153,19 @@ const routes = [
   },
   {
     path: '/data-listeners',
-    name: 'DataListeners',
-    component: () => import('../views/dataPush/DataListeners.vue'),
+    name: 'DataListenerHub',
+    component: () => import('../views/dataPush/DataListenerHub.vue'),
     meta: {
       requiresAuth: true,
-      title: '数据监听器配置'
+      title: '事件监听'
     }
   },
   {
-    path:'/data-events',
-    name:'DataEvents',
-    component:()=>import('../views/dataPush/DataEvents.vue'),
-    meta:{
-      requiresAuth:true,
-      title:'数据事件'
-    }
+    path: '/data-events',
+    redirect: (to) => ({
+      path: '/data-listeners',
+      query: { ...to.query, tab: 'events' }
+    })
   },
   {
     path: '/crowd-analysis',
@@ -192,15 +179,31 @@ const routes = [
       },
       {
         path: 'create',
-        name: 'CreateCrowdAnalysis',
-        component: () => import('@/views/crowd-analysis/Create.vue'),
-        meta: { title: '创建人群分析任务', requiresAuth: true }
+        redirect: { name: 'CrowdAnalysis' }
       },
       {
         path: 'detail/:id',
         name: 'CrowdAnalysisDetail',
         component: () => import('@/views/crowd-analysis/Detail.vue'),
         meta: { title: '任务详情', requiresAuth: true }
+      }
+    ]
+  },
+  {
+    path: '/vlm-inspection',
+    component: () => import('@/views/vlm-inspection/Layout.vue'),
+    children: [
+      {
+        path: '',
+        name: 'VlmInspection',
+        component: () => import('@/views/vlm-inspection/List.vue'),
+        meta: { title: 'VLM 巡检', requiresAuth: true }
+      },
+      {
+        path: 'detail/:id',
+        name: 'VlmInspectionDetail',
+        component: () => import('@/views/vlm-inspection/Detail.vue'),
+        meta: { title: '巡检详情', requiresAuth: true }
       }
     ]
   },
@@ -234,21 +237,19 @@ const routes = [
   },
   {
     path: '/smart-schemes',
-    name: 'SmartSchemeManagement',
-    component: () => import('../views/smartScheme/SmartSchemeManagement.vue'),
+    name: 'SmartSchemeHub',
+    component: () => import('../views/smartScheme/SmartSchemeHub.vue'),
     meta: {
       requiresAuth: true,
-      title: '事件订阅管理'
+      title: '事件订阅'
     }
   },
   {
     path: '/smart-events',
-    name: 'SmartEvents',
-    component: () => import('../views/smartScheme/SmartEvents.vue'),
-    meta: {
-      requiresAuth: true,
-      title: '订阅事件管理'
-    }
+    redirect: (to) => ({
+      path: '/smart-schemes',
+      query: { ...to.query, tab: 'events' }
+    })
   }
 ]
 

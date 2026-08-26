@@ -210,7 +210,7 @@
       <div v-if="selectedConfigDetails">
         <el-descriptions :column="1" border>
           <el-descriptions-item label="配置ID">{{ selectedConfigDetails.config_id }}</el-descriptions-item>
-          <el-descriptions-item label="设备">{{ selectedConfigDetails.device_name }} - {{ selectedConfigDetails.device_id }}</el-descriptions-item>
+          <el-descriptions-item label="设备/分组">{{ getConfigDeviceLabel(selectedConfigDetails) }}</el-descriptions-item>
           <el-descriptions-item label="模型">{{ getModelTypeName(selectedConfigDetails.models_type) }} - {{ selectedConfigDetails.models_name }}</el-descriptions-item>
           <el-descriptions-item label="检测方式">
             {{ getFrequencyLabel(selectedConfigDetails.frequency) }}
@@ -284,9 +284,19 @@ const getFrameIntervalText = (config) => {
   return interval ? `${interval}秒/帧` : ''
 }
 
+const getConfigDeviceLabel = (config) => {
+  if (!config.device_id || config.config_mode === 'group') {
+    const groupName = config.group_name || config.group_id || '未命名分组'
+    return `分组-${groupName}`
+  }
+  return `${config.device_id}-${config.device_name || config.device_id}`
+}
+
 const getConfigOptionLabel = (config) => {
-  const base = `${config.device_id}-${config.device_name} - ${config.model_name}`
-  const mode = getFrequencyLabel(config.frequency)
+  const base = `${getConfigDeviceLabel(config)} - ${config.model_name}`
+  const mode = config.config_mode === 'group'
+    ? '分组轮询'
+    : getFrequencyLabel(config.frequency)
   const interval = config.frequency === 'manual' && config.schedule_config?.runtime?.frame_interval
     ? ` ${config.schedule_config.runtime.frame_interval}秒/帧`
     : ''
@@ -299,8 +309,11 @@ const loadConfigurations = async () => {
     const response = await detectionConfigApi.getConfigs({ skip: 0, limit: 500 })
     configs.value = response.data.data.map(config => ({
       config_id: config.config_id,
+      config_mode: config.config_mode || 'device',
       device_id: config.device_id,
-      device_name: config.device_name || config.device_id,
+      group_id: config.group_id,
+      group_name: config.group_name,
+      device_name: config.device_name || config.group_name || config.device_id,
       model_name: config.models_name || '默认模型',
       models_type: config.models_type,
       models_name: config.models_name,
@@ -595,6 +608,7 @@ const getModelTypeName = (type) => {
   const typeMap = {
     'object_detection': '目标检测',
     'smart_behavior': '智能行为',
+    'smart_person': '人员场景',
     'smart_counting': '智能人数统计',
     'segmentation': '图像分割',
     'keypoint': '关键点检测',

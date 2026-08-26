@@ -8,18 +8,23 @@
           返回列表
         </el-button>
         <div class="header-info">
-          <h2>{{ serverInfo?.name || '边缘服务器详情' }}</h2>
-          <p class="server-address">{{ serverInfo?.ip_address }}:{{ serverInfo?.port }}</p>
+          <h2>{{ serverInfo?.name || '边缘节点详情' }}</h2>
+          <p class="server-address">
+            {{ getPlatformLabel(serverInfo?.platform_type) }} · {{ serverInfo?.ip_address }}:{{ serverInfo?.port }}
+          </p>
         </div>
       </div>
       <div class="header-actions">
         <el-button @click="refreshData" :loading="refreshing" type="success">
           <el-icon><Refresh /></el-icon>
-          刷新数据
+          刷新状态
         </el-button>
-        <el-button @click="openServerLogin" type="primary">
+        <el-button @click="openAdminUrl" type="primary">
           <el-icon><Link /></el-icon>
-          登录服务器
+          {{ isMaisiNode ? '登录盒子' : (serverInfo?.platform_type === 'nodered' ? '打开编辑器' : '打开管理页') }}
+        </el-button>
+        <el-button v-if="dashboardUrl" @click="openDashboardUrl">
+          Dashboard
         </el-button>
       </div>
     </div>
@@ -31,7 +36,63 @@
       </div>
     </div>
 
-    <div v-else-if="!serverAPI" class="error-container">
+    <div v-else-if="serverInfo && !isMaisiNode" class="generic-node-panel">
+      <div class="status-card" :class="getStatusClass(serverInfo?.status)">
+        <div class="status-indicator" :class="serverInfo?.status"></div>
+        <div class="status-info">
+          <h3>节点状态</h3>
+          <p class="status-text">{{ getStatusText(serverInfo?.status) }}</p>
+          <div class="status-details">
+            <div class="detail-item">
+              <span class="label">最后检查:</span>
+              <span class="value">{{ formatTime(serverInfo?.last_checked) }}</span>
+            </div>
+            <div class="detail-item">
+              <span class="label">注册时间:</span>
+              <span class="value">{{ formatTime(serverInfo?.created_at) }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="info-card">
+        <div class="card-header">
+          <h3>访问地址</h3>
+        </div>
+        <div class="url-list">
+          <div class="url-item">
+            <span class="label">管理/编辑器</span>
+            <el-link type="primary" :href="adminUrl" target="_blank">{{ adminUrl }}</el-link>
+          </div>
+          <div class="url-item" v-if="dashboardUrl">
+            <span class="label">Dashboard</span>
+            <el-link type="primary" :href="dashboardUrl" target="_blank">{{ dashboardUrl }}</el-link>
+          </div>
+          <div class="url-item">
+            <span class="label">健康检查</span>
+            <span class="value mono">{{ healthCheckUrl }}</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="info-card integration-card" v-if="serverInfo?.platform_type === 'nodered'">
+        <div class="card-header">
+          <h3>与本平台集成</h3>
+        </div>
+        <ul class="integration-tips">
+          <li>上报事件：在 Node-RED 中使用 <strong>HTTP Request</strong> 节点 POST 到本平台的「外部事件 → 事件监听」HTTP 地址。</li>
+          <li>接收推送：在「数据推送器」中配置 HTTP 推送，目标填 Node-RED 的 <strong>HTTP In</strong> 节点 URL。</li>
+          <li>流程编辑建议在新窗口打开；Dashboard 可按需内嵌或外链。</li>
+        </ul>
+      </div>
+
+      <div class="info-card" v-if="serverInfo?.description">
+        <div class="card-header"><h3>备注</h3></div>
+        <p class="description-text">{{ serverInfo.description }}</p>
+      </div>
+    </div>
+
+    <div v-else-if="isMaisiNode && !serverAPI" class="error-container">
       <div class="error-card">
         <el-result
           icon="error"
@@ -45,7 +106,7 @@
       </div>
     </div>
 
-    <div v-else class="dashboard-grid">
+    <div v-else-if="isMaisiNode && serverAPI" class="dashboard-grid">
       <!-- 服务器状态卡片 -->
       <div class="status-card" :class="getStatusClass(serverInfo?.status)">
         <div class="status-indicator" :class="serverInfo?.status"></div>
@@ -449,12 +510,18 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { ArrowLeft, Refresh, Link, Loading, ZoomIn, Picture, InfoFilled } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
-import edgeServerAPI from '@/api/edge-server'
+import edgeServerAPI, {
+  getPlatformLabel,
+  getAdminUrl,
+  getDashboardUrl,
+  getHealthCheckUrl,
+  isMaisiPlatform
+} from '@/api/edge-server'
 
 const router = useRouter()
 const route = useRoute()
@@ -465,6 +532,11 @@ const refreshing = ref(false)
 const tabLoading = ref(false)
 const serverInfo = ref(null)
 const serverAPI = ref(null)
+
+const isMaisiNode = computed(() => isMaisiPlatform(serverInfo.value))
+const adminUrl = computed(() => serverInfo.value ? getAdminUrl(serverInfo.value) : '')
+const dashboardUrl = computed(() => serverInfo.value ? getDashboardUrl(serverInfo.value) : '')
+const healthCheckUrl = computed(() => serverInfo.value ? getHealthCheckUrl(serverInfo.value) : '')
 const systemData = reactive({
   version: null,
   system: null,
@@ -504,7 +576,7 @@ let dataRefreshTimer = null
 // 初始化
 onMounted(async () => {
   await loadServerInfo()
-  if (serverAPI.value) {
+  if (isMaisiNode.value && serverAPI.value) {
     await loadSystemData()
     await nextTick()
     initChart()
@@ -527,10 +599,11 @@ const loadServerInfo = async () => {
     const serverId = route.params.serverId
     const response = await edgeServerAPI.getServer(serverId)
     serverInfo.value = response
-    
-    // 创建服务器API实例
-    if (response.status === 'online') {
+
+    if (isMaisiPlatform(response) && response.status === 'online') {
       serverAPI.value = edgeServerAPI.createServerAPI(response.ip_address, response.port)
+    } else {
+      serverAPI.value = null
     }
   } catch (error) {
     // console.error('加载服务器信息失败:', error)
@@ -950,16 +1023,27 @@ const goBack = () => {
   router.push({ name: 'EdgeServers' })
 }
 
-const openServerLogin = () => {
+const openAdminUrl = () => {
   if (serverInfo.value) {
-    const loginUrl = `http://${serverInfo.value.ip_address}:${serverInfo.value.port}`
-    window.open(loginUrl, '_blank')
+    window.open(getAdminUrl(serverInfo.value), '_blank')
   }
+}
+
+const openDashboardUrl = () => {
+  const url = dashboardUrl.value
+  if (url) window.open(url, '_blank')
 }
 
 const refreshData = async () => {
   refreshing.value = true
   try {
+    if (serverInfo.value && !isMaisiNode.value) {
+      await edgeServerAPI.testAndUpdateServerStatus(serverInfo.value.id, serverInfo.value)
+      await loadServerInfo()
+      ElMessage.success('状态刷新成功')
+      return
+    }
+
     await loadSystemData()
     if (activeTab.value === 'engines') await loadEngines()
     if (activeTab.value === 'channels') await loadChannels()
@@ -1828,5 +1912,48 @@ const handleImageError = () => {
 
 .image-preview-dialog .el-picker-panel {
   z-index: 10002 !important;
+}
+
+.generic-node-panel {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 20px;
+  padding: 0 4px 24px;
+}
+
+.generic-node-panel .url-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.generic-node-panel .url-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.generic-node-panel .url-item .label {
+  color: #909399;
+  font-size: 13px;
+}
+
+.generic-node-panel .mono {
+  font-family: 'Monaco', 'Consolas', monospace;
+  color: #606266;
+  word-break: break-all;
+}
+
+.integration-tips {
+  margin: 0;
+  padding-left: 20px;
+  color: #606266;
+  line-height: 1.8;
+}
+
+.description-text {
+  margin: 0;
+  color: #606266;
+  line-height: 1.6;
 }
 </style> 

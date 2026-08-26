@@ -3,8 +3,8 @@
     <!-- 页面头部 -->
     <div class="page-header">
       <div class="header-left">
-        <h2>边缘AI设备管理</h2>
-        <p class="header-desc">管理和监控您的边缘AI计算设备</p>
+        <h2>边缘节点管理</h2>
+        <p class="header-desc">注册并监控迈思盒子、Node-RED 及其他边缘工作流节点</p>
       </div>
       <div class="header-actions">
         <el-button 
@@ -17,7 +17,7 @@
           刷新状态
         </el-button>
         <el-button type="primary" size="default" @click="showAddDialog" icon="Plus">
-          添加设备
+          添加节点
         </el-button>
       </div>
     </div>
@@ -36,18 +36,21 @@
         <!-- 服务器基本信息 -->
         <div class="server-header">
           <div class="server-name">{{ server.name }}</div>
-          <el-tag 
-            :type="getStatusType(server.status)" 
-            size="small"
-            :loading="server.status === 'checking'"
-          >
-            {{ getStatusText(server.status) }}
-          </el-tag>
+          <div class="server-tags">
+            <el-tag size="small" type="info">{{ getPlatformLabel(server.platform_type) }}</el-tag>
+            <el-tag 
+              :type="getStatusType(server.status)" 
+              size="small"
+              :loading="server.status === 'checking'"
+            >
+              {{ getStatusText(server.status) }}
+            </el-tag>
+          </div>
         </div>
 
         <div class="server-info">
           <div class="info-item">
-            <span class="label">IP地址:</span>
+            <span class="label">地址:</span>
             <span class="value">{{ server.ip_address }}:{{ server.port }}</span>
           </div>
           <div class="info-item" v-if="server.description">
@@ -60,8 +63,8 @@
           </div>
         </div>
 
-        <!-- 系统信息 -->
-        <div class="system-info" v-if="server.version_info || server.system_info">
+        <!-- 迈思盒子系统信息 -->
+        <div class="system-info" v-if="isMaisiPlatform(server) && (server.version_info || server.system_info)">
           <div v-if="server.device_info" class="info-item">
             <span class="label">设备序列号:</span>
             <span class="value">{{ server.device_info.deviceSN || 'N/A' }}</span>
@@ -80,6 +83,7 @@
         <div class="server-actions">
           <el-button-group>
             <el-button 
+              v-if="isMaisiPlatform(server)"
               size="small" 
               type="primary"
               @click="openServerDashboard(server)"
@@ -89,13 +93,28 @@
               监控面板
             </el-button>
             <el-button 
+              v-else
+              size="small" 
+              type="primary"
+              @click="openServerDashboard(server)"
+            >
+              <el-icon><Monitor /></el-icon>
+              节点详情
+            </el-button>
+            <el-button 
               size="small" 
               type="success"
-              @click="openServerLogin(server)"
-              :disabled="server.status !== 'online'"
+              @click="openAdminUrl(server)"
             >
               <el-icon><Link /></el-icon>
-              登录
+              {{ isMaisiPlatform(server) ? '登录' : (server.platform_type === 'nodered' ? '编辑器' : '管理页') }}
+            </el-button>
+            <el-button 
+              v-if="getDashboardUrl(server)"
+              size="small"
+              @click="openDashboardUrl(server)"
+            >
+              Dashboard
             </el-button>
           </el-button-group>
           
@@ -125,8 +144,8 @@
 
       <!-- 空状态 -->
       <div v-if="servers.length === 0 && !loading" class="empty-state">
-        <el-empty description="暂无服务器">
-          <el-button type="primary" @click="showAddDialog">添加第一台服务器</el-button>
+        <el-empty description="暂无边缘节点">
+          <el-button type="primary" @click="showAddDialog">添加第一个节点</el-button>
         </el-empty>
       </div>
     </div>
@@ -134,8 +153,8 @@
     <!-- 添加/编辑服务器对话框 -->
     <el-dialog
       v-model="dialogVisible"
-      :title="dialogMode === 'add' ? '添加服务器' : '编辑服务器'"
-      width="30%"
+      :title="dialogMode === 'add' ? '添加边缘节点' : '编辑边缘节点'"
+      width="520px"
       @close="resetDialog"
     >
       <el-form
@@ -144,14 +163,36 @@
         :rules="formRules"
         label-width="100px"
       >
-        <el-form-item label="服务器名称" prop="name">
-          <el-input v-model="form.name" placeholder="请输入服务器名称" />
+        <el-form-item label="平台类型" prop="platform_type">
+          <el-select v-model="form.platform_type" style="width: 100%" @change="onPlatformChange">
+            <el-option
+              v-for="(meta, key) in PLATFORM_TYPES"
+              :key="key"
+              :label="meta.label"
+              :value="key"
+            />
+          </el-select>
         </el-form-item>
-        <el-form-item label="IP地址" prop="ip">
-          <el-input v-model="form.ip" placeholder="请输入IP地址" />
+        <el-form-item label="节点名称" prop="name">
+          <el-input v-model="form.name" placeholder="请输入节点名称" />
+        </el-form-item>
+        <el-form-item label="主机地址" prop="ip">
+          <el-input v-model="form.ip" placeholder="IP 或域名，如 192.168.1.10 / nodered.local" />
         </el-form-item>
         <el-form-item label="端口" prop="port">
           <el-input-number v-model="form.port" :min="1" :max="65535" style="width: 100%" />
+        </el-form-item>
+        <el-form-item v-if="form.platform_type !== 'maisi'" label="管理地址">
+          <el-input v-model="form.admin_url" placeholder="留空则使用 http://主机:端口" />
+        </el-form-item>
+        <el-form-item v-if="form.platform_type !== 'maisi'" label="Dashboard">
+          <el-input
+            v-model="form.dashboard_url"
+            :placeholder="form.platform_type === 'nodered' ? '留空则使用 http://主机:端口/ui' : '可选 Dashboard 地址'"
+          />
+        </el-form-item>
+        <el-form-item v-if="form.platform_type !== 'maisi'" label="探活地址">
+          <el-input v-model="form.health_check_url" placeholder="留空则探测 http://主机:端口" />
         </el-form-item>
         <el-form-item label="描述">
           <el-input 
@@ -192,7 +233,14 @@ import {
   Connection,
   MoreFilled
 } from '@element-plus/icons-vue'
-import edgeServerAPI from '@/api/edge-server'
+import edgeServerAPI, {
+  PLATFORM_TYPES,
+  getPlatformLabel,
+  getDefaultPort,
+  getAdminUrl,
+  getDashboardUrl,
+  isMaisiPlatform
+} from '@/api/edge-server'
 
 const router = useRouter()
 
@@ -210,6 +258,10 @@ const form = reactive({
   name: '',
   ip: '',
   port: 80,
+  platform_type: 'maisi',
+  admin_url: '',
+  dashboard_url: '',
+  health_check_url: '',
   description: ''
 })
 
@@ -218,15 +270,15 @@ const formRef = ref()
 // 表单验证规则
 const formRules = {
   name: [
-    { required: true, message: '请输入服务器名称', trigger: 'blur' },
+    { required: true, message: '请输入节点名称', trigger: 'blur' },
     { min: 1, max: 100, message: '名称长度在 1 到 100 个字符', trigger: 'blur' }
   ],
   ip: [
-    { required: true, message: '请输入IP地址', trigger: 'blur' },
-    { 
-      pattern: /^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/, 
-      message: '请输入正确的IP地址格式', 
-      trigger: 'blur' 
+    { required: true, message: '请输入主机地址', trigger: 'blur' },
+    {
+      pattern: /^(([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)*[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?|((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?))$/,
+      message: '请输入正确的 IP 或域名',
+      trigger: 'blur'
     }
   ],
   port: [
@@ -257,7 +309,7 @@ const refreshAllServers = async () => {
     const promises = servers.value.map(async (server) => {
       server.status = 'checking'
       try {
-        await edgeServerAPI.testAndUpdateServerStatus(server.id, server.ip_address, server.port)
+        await edgeServerAPI.testAndUpdateServerStatus(server.id, server)
       } catch (error) {
         // console.error(`更新服务器 ${server.name} 状态失败:`, error)
       }
@@ -320,6 +372,10 @@ const editServer = (server) => {
     name: server.name,
     ip: server.ip_address,
     port: server.port,
+    platform_type: server.platform_type || 'maisi',
+    admin_url: server.admin_url || '',
+    dashboard_url: server.dashboard_url || '',
+    health_check_url: server.health_check_url || '',
     description: server.description || ''
   })
   dialogVisible.value = true
@@ -332,8 +388,12 @@ const testConnection = async () => {
     await formRef.value.validateField(['ip', 'port'])
     testing.value = true
     
-    const serverAPI = edgeServerAPI.createServerAPI(form.ip, form.port)
-    const result = await serverAPI.testConnection()
+    const result = await edgeServerAPI.testConnectionForServer({
+      ip_address: form.ip,
+      port: form.port,
+      platform_type: form.platform_type,
+      health_check_url: form.health_check_url || null
+    })
     
     if (result.success) {
       ElMessage.success('连接测试成功')
@@ -399,20 +459,28 @@ const deleteServer = async (server) => {
 }
 
 const openServerDashboard = (server) => {
-  if (server.status !== 'online') {
-    ElMessage.warning('服务器未在线，无法打开监控面板')
+  if (isMaisiPlatform(server) && server.status !== 'online') {
+    ElMessage.warning('节点未在线，无法打开监控面板')
     return
   }
-  
+
   router.push({
     name: 'EdgeServerDetail',
     params: { serverId: server.id }
   })
 }
 
-const openServerLogin = (server) => {
-  const loginUrl = `http://${server.ip_address}:${server.port}`
-  window.open(loginUrl, '_blank')
+const openAdminUrl = (server) => {
+  window.open(getAdminUrl(server), '_blank')
+}
+
+const openDashboardUrl = (server) => {
+  const url = getDashboardUrl(server)
+  if (url) window.open(url, '_blank')
+}
+
+const onPlatformChange = (platformType) => {
+  form.port = getDefaultPort(platformType)
 }
 
 const handleCommand = ({ action, server }) => {
@@ -431,7 +499,7 @@ const handleCommand = ({ action, server }) => {
 
 const testServerConnection = async (server) => {
   try {
-    const result = await edgeServerAPI.testAndUpdateServerStatus(server.id, server.ip_address, server.port)
+    const result = await edgeServerAPI.testAndUpdateServerStatus(server.id, server)
     if (result.success) {
       ElMessage.success('连接测试成功')
       await loadServers()
@@ -448,6 +516,10 @@ const resetForm = () => {
     name: '',
     ip: '',
     port: 80,
+    platform_type: 'maisi',
+    admin_url: '',
+    dashboard_url: '',
+    health_check_url: '',
     description: ''
   })
   if (formRef.value) {
@@ -562,6 +634,12 @@ onMounted(() => {
   0% { opacity: 1; }
   50% { opacity: 0.5; }
   100% { opacity: 1; }
+}
+
+.server-tags {
+  display: flex;
+  gap: 8px;
+  align-items: center;
 }
 
 .server-header {

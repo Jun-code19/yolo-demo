@@ -1,6 +1,6 @@
 <script setup>
 import { ref, reactive, onMounted, computed, onBeforeUnmount } from 'vue'
-import { HomeFilled, DataLine, VideoCamera, Fold, Expand, Picture, VideoPlay, Monitor, UserFilled, Connection, QuestionFilled, Tools, Cpu, Bell } from '@element-plus/icons-vue'
+import { HomeFilled, DataLine, VideoCamera, Fold, Expand, Picture, VideoPlay, Monitor, UserFilled, Connection, QuestionFilled, Tools, Cpu, Bell, SetUp, List, ChatDotRound } from '@element-plus/icons-vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import deviceApi from '@/api/device'
@@ -19,11 +19,6 @@ const showLogin = computed(() => {
 // 是否显示数据大屏
 const isDashboard = computed(() => {
   return route.path === '/dashboard'
-})
-
-// 是否显示数据大屏
-const isDashboard1 = computed(() => {
-  return route.path === '/dashboard1'
 })
 
 onMounted(async () => {
@@ -93,14 +88,13 @@ const openHelp = () => {
 
 // 打开数据大屏
 const openDashboard = () => {
-  window.open('/dashboard1', '_blank')
+  window.open('/dashboard', '_blank')
 }
 </script>
 
 <template>
   <!-- 数据大屏独立显示 -->
   <router-view v-if="isDashboard"></router-view>
-  <router-view v-if="isDashboard1"></router-view>
 
   <!-- 使用路由系统显示登录页或主应用界面 -->
   <router-view v-else-if="showLogin"></router-view>
@@ -159,6 +153,13 @@ const openDashboard = () => {
           <template #title>人群分析</template>
         </el-menu-item>
 
+        <el-menu-item index="/vlm-inspection">
+          <el-icon>
+            <Monitor />
+          </el-icon>
+          <template #title>VLM 巡检</template>
+        </el-menu-item>
+
         <el-menu-item index="/devices">
           <el-icon>
             <VideoCamera />
@@ -177,19 +178,13 @@ const openDashboard = () => {
             <el-icon>
               <List />
             </el-icon>
-            <template #title>模型列表</template>
+            <template #title>本地模型</template>
           </el-menu-item>
-          <el-menu-item index="/models/image">
+          <el-menu-item index="/models/vlm">
             <el-icon>
-              <Picture />
+              <ChatDotRound />
             </el-icon>
-            <template #title>图片验证</template>
-          </el-menu-item>
-          <el-menu-item index="/models/video">
-            <el-icon>
-              <VideoPlay />
-            </el-icon>
-            <template #title>视频验证</template>
+            <template #title>VLM 大模型</template>
           </el-menu-item>
         </el-sub-menu>
 
@@ -197,51 +192,27 @@ const openDashboard = () => {
           <el-icon>
             <Connection />
           </el-icon>
-          <template #title>数据推送器</template>
+          <template #title>推送配置</template>
         </el-menu-item>
 
-        <el-sub-menu index="data-listener">
+        <el-sub-menu index="external-events">
           <template #title>
             <el-icon>
-              <Cpu />
+              <Bell />
             </el-icon>
-            <span>事件监听</span>
+            <span>监听/订阅</span>
           </template>
           <el-menu-item index="/data-listeners">
             <el-icon>
-              <Tools />
-            </el-icon>
-            <template #title>监听管理</template>
-          </el-menu-item>
-
-          <el-menu-item index="/data-events">
-            <el-icon>
-              <Bell />
-            </el-icon>
-            <template #title>监听事件</template>
-          </el-menu-item>
-        </el-sub-menu>
-
-        <el-sub-menu index="smart-scheme">
-          <template #title>
-            <el-icon>
               <Cpu />
             </el-icon>
-            <span>事件订阅</span>
-          </template>
-
+            <template #title>事件监听</template>
+          </el-menu-item>
           <el-menu-item index="/smart-schemes">
             <el-icon>
-              <Tools />
+              <Connection />
             </el-icon>
-            <template #title>订阅管理</template>
-          </el-menu-item>
-
-          <el-menu-item index="/smart-events">
-            <el-icon>
-              <Bell />
-            </el-icon>
-            <template #title>订阅事件</template>
+            <template #title>事件订阅</template>
           </el-menu-item>
         </el-sub-menu>
 
@@ -249,7 +220,7 @@ const openDashboard = () => {
           <el-icon>
             <Monitor />
           </el-icon>
-          <template #title>边缘AI设备</template>
+          <template #title>边缘节点</template>
         </el-menu-item>
 
         <el-menu-item index="/system">

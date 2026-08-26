@@ -1,13 +1,16 @@
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Query
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
-from src.database import get_db, Device, User, SysLog, DetectionModel, DetectionConfig, DetectionEvent, DetectionPerformance, SaveMode, EventStatus, DetectionFrequency, DetectionLog, CrowdAnalysisJob,CrowdAnalysisResult, DataPushConfig, EdgeServer,ExternalEvent,ListenerConfig,SmartEvent
+from src.database import get_db, Device, DeviceGroup, User, SysLog, DetectionModel, DetectionConfig, DetectionEvent, DetectionPerformance, SaveMode, EventStatus, DetectionFrequency, DetectionLog, CrowdAnalysisJob,CrowdAnalysisResult, DataPushConfig, DataPushLog, EdgeServer,ExternalEvent,ListenerConfig,SmartEvent, SmartScheme, VlmInspectionJob, VlmInspectionFinding
 from src.rtsp_url import build_rtsp_url, RTSP_URL_PRESETS
 from pydantic import BaseModel, Field, validator
 from fastapi.security import OAuth2PasswordRequestForm
 from api.auth import authenticate_user, create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES, get_current_user, check_admin_permission, get_password_hash, verify_password
 from api.logger import log_action
+from src.env_loader import load_env_file, get_detect_server_url
+
+load_env_file()
 from passlib.context import CryptContext
 from fastapi.responses import FileResponse, Response, StreamingResponse
 import requests
@@ -31,7 +34,8 @@ class Point(BaseModel):
     y: float
 
 class Coordinates(BaseModel):
-    points: Optional[List[Point]] = None  # 使用 Point 模型来表示坐标点
+    enabled: Optional[bool] = None
+    points: Optional[List[Point]] = None  # 归一化多边形顶点
 
 class DeviceCreate(BaseModel):
     device_id: str
@@ -45,8 +49,10 @@ class DeviceCreate(BaseModel):
     stream_type: Optional[str] = "main"
     rtsp_url_mode: Optional[str] = "dahua"
     rtsp_url: Optional[str] = None
+    monitor_method: Optional[str] = "auto"
     location: Optional[str] = None
     area: Optional[str] = None
+    group_id: Optional[str] = None
 
 class DeviceResponse(BaseModel):
     device_id: str
@@ -60,8 +66,11 @@ class DeviceResponse(BaseModel):
     stream_type: Optional[str] = "main"
     rtsp_url_mode: Optional[str] = "dahua"
     rtsp_url: Optional[str] = None
+    monitor_method: Optional[str] = "auto"
     location: Optional[str] = None
     area: Optional[str] = None
+    group_id: Optional[str] = None
+    group_name: Optional[str] = None
     status: bool
     last_heartbeat: Optional[datetime]
     area_coordinates:Optional[Coordinates] = None
@@ -80,8 +89,10 @@ class DeviceUpdate(BaseModel):
     stream_type: Optional[str] = None
     rtsp_url_mode: Optional[str] = None
     rtsp_url: Optional[str] = None
+    monitor_method: Optional[str] = None
     location: Optional[str] = None
     area: Optional[str] = None
+    group_id: Optional[str] = None
     area_coordinates:Optional[Coordinates] = None
 
 # 设备管理API
@@ -113,6 +124,7 @@ def get_devices(
     ip_address: Optional[str] = None,
     location: Optional[str] = None,
     area: Optional[str] = None,
+    group_id: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
     """
@@ -148,16 +160,33 @@ def get_devices(
     
     if area:
         query = query.filter(Device.area.ilike(f"%{area}%"))
+
+    if group_id:
+        if group_id == "__ungrouped__":
+            query = query.filter(Device.group_id.is_(None))
+        else:
+            query = query.filter(Device.group_id == group_id)
     
     # 获取总数（应用筛选条件后的）
     total_count = query.count()
     
     # 应用分页
-    result = query.order_by(Device.ip_address.desc()).offset(skip).limit(limit).all()
+    result = (
+        query.options(joinedload(Device.device_group))
+        .order_by(Device.ip_address.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+
+    def enrich_device(device: Device):
+        data = {c.name: getattr(device, c.name) for c in device.__table__.columns}
+        data["group_name"] = device.device_group.group_name if device.device_group else None
+        return data
     
     # 返回包含总数的响应
     return {
-        "data": result,
+        "data": [enrich_device(d) for d in result],
         "total": total_count,
         "filters": {
             "device_type": device_type,
@@ -177,41 +206,30 @@ def get_device(device_id: str, db: Session = Depends(get_db)):
     return device
 
 @router.get("/alldevices/status", tags=["设备管理"])
-def update_device_status(db: Session = Depends(get_db)):
+async def update_device_status(db: Session = Depends(get_db)):
+    from src.device_monitor import check_device_online
+    from src.device_monitor_config import load_device_monitor_config
+
+    config = load_device_monitor_config(db)
+    offline_threshold = int(config.get("offline_threshold", 3))
     devices = db.query(Device).all()
+
     for device in devices:
         try:
-            # 构建HTTP请求URL
-            api_url = f"http://{device.ip_address}/cgi-bin/api/tcpConnect/tcpTest"
-            # 发送HTTP请求
-            headers = {
-                "Content-Type": "application/json",
-                "User-Agent": "DeviceMonitor/1.0"
-            }           
-            # 按照文档格式构造请求体
-            payload = {
-                "Ip": device.ip_address,  # 根据文档示例，这里应为服务器IP
-                "Port": 80
-            }
-            # 发送POST请求（文档要求POST方法）
-            response = requests.post(
-                url=api_url,
-                data=json.dumps(payload),  # 确保JSON序列化
-                headers=headers,
-                timeout=3
-            )
-            # 严格的状态码检查
-            print(f"异常状态码: {response.status_code}, 响应内容: {response.text}")
-            if response.status_code == 200 or response.status_code == 401 or response.status_code == 404:
-                # 解析响应体               
+            is_online = await check_device_online(device, db)
+            if is_online:
+                device.offline_count = 0
                 device.status = True
                 device.last_heartbeat = datetime.now()
+                device.last_online_time = datetime.now()
             else:
+                device.offline_count = (device.offline_count or 0) + 1
+                if device.offline_count >= offline_threshold:
+                    device.status = False
+        except Exception:
+            device.offline_count = (device.offline_count or 0) + 1
+            if device.offline_count >= offline_threshold:
                 device.status = False
-        except requests.exceptions.RequestException as e:
-            device.status = False            
-        except json.JSONDecodeError:
-            device.status = False
 
     db.commit()
     return {"message": "Status updated successfully"}
@@ -824,26 +842,49 @@ async def upload_model(
         except json.JSONDecodeError:
             raise HTTPException(status_code=400, detail="Invalid parameters JSON")
     
-    # 加载模型并获取类别
-    try:      
-        rtsp_service_url = "http://detect-server:8000/api/v2/model/load"
-        # rtsp_service_url = "http://127.0.0.1:8000/api/v2/model/load"
-        response = requests.post(rtsp_service_url, json={
-            "model_path": str(file_path)
-        }, timeout=10)
+    # 通过检测服务加载模型并获取类别（Docker: detect-server:8000；本地 .env 可覆盖）
+    detect_server_url = get_detect_server_url()
+    try:
+        response = requests.post(
+            f"{detect_server_url}/api/v2/model/load",
+            json={
+                "model_path": str(file_path),
+                "models_type": models_type,
+                "parameters": models_params,
+            },
+            timeout=120,
+        )
         if response.status_code != 200:
-            raise HTTPException(status_code=500, detail=f"模型加载失败: {response.text}")
-        # 解析响应以获取类别信息
-        classes = response.json().get("classes", {})  # 假设响应包含一个名为"classes"的字段
+            detail = (response.text or "").strip()
+            try:
+                body = response.json()
+                detail = body.get("detail") or body.get("message") or detail
+                if isinstance(detail, list):
+                    detail = "; ".join(str(x) for x in detail)
+            except Exception:
+                pass
+            if os.path.exists(file_path):
+                os.remove(file_path)
+            raise HTTPException(status_code=500, detail=f"模型加载失败: {detail}")
+
+        classes = response.json().get("classes") or {}
         if not classes:
+            if os.path.exists(file_path):
+                os.remove(file_path)
             raise HTTPException(status_code=500, detail="模型加载成功，但未返回类别信息")
+    except HTTPException:
+        raise
+    except requests.exceptions.ConnectionError:
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        raise HTTPException(
+            status_code=503,
+            detail="模型加载失败: 检测服务未启动，请先运行 base_detect_server.py（端口 8000）",
+        )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"模型加载失败: {str(e)}")
-    # try:
-    #     model = YOLO(file_path)  # 加载模型
-    #     classes = model.names  # 获取类别名称
-    # except Exception as e:
-    #     raise HTTPException(status_code=500, detail=f"模型加载失败: {str(e)}")
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        raise HTTPException(status_code=500, detail=f"模型加载失败: {e}")
 
     # 创建数据库记录
     db_model = DetectionModel(
@@ -1011,7 +1052,43 @@ class occupancyArea(BaseModel):
     name: Optional[str] = None # 区域名称
     id: Optional[str] = None # 区域ID
 
+class SmartScenario(BaseModel):
+    """v2 多场景配置项"""
+    class Config:
+        extra = 'allow'
+
+    id: Optional[str] = None
+    catalogType: Optional[str] = None
+    type: Optional[str] = None
+    name: Optional[str] = None
+    enabled: Optional[bool] = True
+    points: Optional[List[Point]] = None
+    occupancyAreas: Optional[List[occupancyArea]] = None
+    params: Optional[Dict[str, Any]] = None
+    behaviorType: Optional[str] = None
+    behaviorSubtype: Optional[str] = None
+    behaviorDirection: Optional[str] = None
+    countingType: Optional[str] = None
+    countingInterval: Optional[int] = None
+    flowDirection: Optional[str] = None
+    flowPeriod: Optional[str] = None
+    maxCapacity: Optional[int] = None
+    enableAlert: Optional[bool] = None
+    alertThreshold: Optional[int] = None
+    smoothWindow: Optional[int] = None
+    decreaseHoldFrames: Optional[int] = None
+    countBias: Optional[int] = None
+    countScale: Optional[float] = None
+    countPointMode: Optional[str] = None
+    countMinHits: Optional[int] = None
+    pushLabel: Optional[str] = None
+
 class AreaCoordinates(BaseModel):
+    class Config:
+        extra = 'allow'
+
+    version: Optional[int] = None
+    scenarios: Optional[List[SmartScenario]] = None
     alertThreshold: Optional[int] = None # 报警阈值
     analysisType: Optional[str] = None # 分析类型 counting/behavior
     countingInterval: Optional[int] = None # 计数间隔
@@ -1035,7 +1112,10 @@ class AreaCoordinates(BaseModel):
     countMinHits: Optional[int] = None # 计数最小命中数
 # 添加检测配置的Pydantic模型
 class DetectionConfigBase(BaseModel):
-    device_id: str
+    config_mode: Optional[str] = "device"
+    device_id: Optional[str] = None
+    group_id: Optional[str] = None
+    group_settings: Optional[Dict[str, Any]] = None
     models_id: str
     enabled: bool = False
     sensitivity: float = 0.5
@@ -1045,6 +1125,7 @@ class DetectionConfigBase(BaseModel):
     save_mode: Optional[str] = "none"
     save_duration: int = 10
     max_storage_days: int = 30
+    area_coordinates: Optional[Dict[str, Any]] = None
     schedule_config: Optional[Dict[str, Any]] = None  # 运行时段配置
 
 class DetectionConfigCreate(DetectionConfigBase):
@@ -1060,8 +1141,9 @@ class DetectionConfigUpdate(BaseModel):
     save_mode: Optional[str] = None
     save_duration: Optional[int] = None
     max_storage_days: Optional[int] = None
-    area_coordinates:Optional[AreaCoordinates] = None
+    area_coordinates: Optional[Dict[str, Any]] = None
     schedule_config: Optional[Dict[str, Any]] = None  # 运行时段配置
+    group_settings: Optional[Dict[str, Any]] = None
 
 class DetectionConfigResponse(DetectionConfigBase):
     config_id: str
@@ -1074,7 +1156,8 @@ class DetectionConfigResponse(DetectionConfigBase):
 
 class DetectionConfigInfoResponse(DetectionConfigBase):
     config_id: str
-    device_name: str
+    device_name: Optional[str] = None
+    group_name: Optional[str] = None
     models_name: str
     models_type: str
     created_at: datetime
@@ -1083,6 +1166,72 @@ class DetectionConfigInfoResponse(DetectionConfigBase):
 
     class Config:
         from_attributes = True
+
+
+def _normalize_group_settings(settings: Optional[dict]) -> dict:
+    defaults = {
+        "frame_source_primary": "snapshot",
+        "frame_source_fallback": "rtsp",
+        "device_interval_sec": 1.0,
+        "group_round_interval_sec": 0.0,
+    }
+    merged = {**defaults, **(settings or {})}
+    for key in ("frame_source_primary", "frame_source_fallback"):
+        if merged[key] not in ("snapshot", "rtsp"):
+            merged[key] = defaults[key]
+    try:
+        merged["device_interval_sec"] = max(0.2, float(merged.get("device_interval_sec") or 1.0))
+    except (TypeError, ValueError):
+        merged["device_interval_sec"] = 1.0
+    try:
+        merged["group_round_interval_sec"] = max(0.0, float(merged.get("group_round_interval_sec") or 0))
+    except (TypeError, ValueError):
+        merged["group_round_interval_sec"] = 0.0
+    return merged
+
+
+def _serialize_detection_config(config: DetectionConfig, include_device_fields: bool = False) -> dict:
+    config_mode = getattr(config, "config_mode", None) or "device"
+    area_coordinates = config.area_coordinates or {}
+    payload = {
+        "config_id": config.config_id,
+        "config_mode": config_mode,
+        "device_id": config.device_id,
+        "group_id": getattr(config, "group_id", None),
+        "group_settings": getattr(config, "group_settings", None) or _normalize_group_settings(None),
+        "models_id": config.models_id,
+        "enabled": config.enabled,
+        "sensitivity": config.sensitivity,
+        "target_classes": config.target_classes if config.target_classes else [],
+        "frequency": config.frequency.value if hasattr(config.frequency, "value") else config.frequency,
+        "stream_type": getattr(config, "stream_type", None) or "main",
+        "save_mode": config.save_mode.value if hasattr(config.save_mode, "value") else config.save_mode,
+        "save_duration": config.save_duration,
+        "max_storage_days": config.max_storage_days,
+        "area_coordinates": area_coordinates,
+        "schedule_config": config.schedule_config,
+        "created_at": config.created_at,
+        "updated_at": config.updated_at,
+        "created_by": config.created_by,
+    }
+    if include_device_fields:
+        device = config.device
+        group = getattr(config, "device_group", None)
+        payload.update({
+            "device_name": device.device_name if device else (group.group_name if group else ""),
+            "group_name": group.group_name if group else None,
+            "models_name": config.model.models_name if config.model else "",
+            "models_type": config.model.models_type if config.model else "",
+        })
+        if device:
+            payload.update({
+                "device_type": device.device_type,
+                "ip_address": device.ip_address,
+                "port": device.port,
+                "username": device.username,
+                "password": device.password,
+            })
+    return payload
 
 class BoundingBoxItem(BaseModel):
     bbox: List[float]
@@ -1136,12 +1285,19 @@ async def get_detection_configs(
     """
     获取检测配置列表，可按设备、模型、启用状态和检测频率筛选
     """
-    query = db.query(DetectionConfig).join(Device).join(DetectionModel)
+    query = (
+        db.query(DetectionConfig)
+        .options(
+            joinedload(DetectionConfig.device),
+            joinedload(DetectionConfig.device_group),
+            joinedload(DetectionConfig.model),
+        )
+    )
     
     if device_id:
         query = query.filter(DetectionConfig.device_id == device_id)
     if device_name:
-        query = query.filter(Device.device_name.ilike(f"%{device_name}%"))
+        query = query.join(Device, isouter=True).filter(Device.device_name.ilike(f"%{device_name}%"))
     if models_id:
         query = query.filter(DetectionConfig.models_id == models_id)
     if enabled is not None:
@@ -1155,39 +1311,7 @@ async def get_detection_configs(
   
     configs = query.offset(skip).limit(limit).all()
     
-    # 数据转换，确保枚举值被正确处理
-    result = []
-    for config in configs:
-
-        area_coordinates = config.area_coordinates or {}  # 确保不为 None
-
-        config_dict = {
-            "config_id": config.config_id,
-            "device_id": config.device_id,
-            "device_name": config.device.device_name,
-            "device_type": config.device.device_type,
-            "ip_address": config.device.ip_address,
-            "port": config.device.port,
-            "username": config.device.username,
-            "password": config.device.password,
-            "models_id": config.models_id,
-            "models_name": config.model.models_name,
-            "models_type": config.model.models_type,
-            "enabled": config.enabled,
-            "sensitivity": config.sensitivity,
-            "target_classes": config.target_classes if config.target_classes else [],
-            "frequency": config.frequency.value if hasattr(config.frequency, "value") else config.frequency,
-            "stream_type": getattr(config, "stream_type", None) or "main",
-            "save_mode": config.save_mode.value if hasattr(config.save_mode, "value") else config.save_mode,
-            "save_duration": config.save_duration,
-            "max_storage_days": config.max_storage_days,
-            "area_coordinates": area_coordinates,
-            "schedule_config": config.schedule_config,
-            "created_at": config.created_at,
-            "updated_at": config.updated_at,
-            "created_by": config.created_by
-        }
-        result.append(config_dict)
+    result = [_serialize_detection_config(config, include_device_fields=True) for config in configs]
     
     return {
         "data": result,
@@ -1207,6 +1331,9 @@ async def get_detection_configs_stats(db: Session = Depends(get_db)):
         realtime_configs = db.query(DetectionConfig).filter(
             DetectionConfig.frequency == DetectionFrequency.realtime
         ).count()
+        group_configs = db.query(DetectionConfig).filter(
+            DetectionConfig.config_mode == "group"
+        ).count()
 
         return {
             "status": "success",
@@ -1215,7 +1342,8 @@ async def get_detection_configs_stats(db: Session = Depends(get_db)):
                 "enabled_configs": enabled_configs,
                 "disabled_configs": disabled_configs,
                 "manual_configs": manual_configs,
-                "realtime_configs": realtime_configs
+                "realtime_configs": realtime_configs,
+                "group_configs": group_configs,
             }
         }
     except Exception as e:
@@ -1229,32 +1357,20 @@ async def get_detection_config(
     """
     获取单个检测配置详情
     """
-    config = db.query(DetectionConfig).join(Device).join(DetectionModel).filter(DetectionConfig.config_id == config_id).first()
+    config = (
+        db.query(DetectionConfig)
+        .options(
+            joinedload(DetectionConfig.device),
+            joinedload(DetectionConfig.device_group),
+            joinedload(DetectionConfig.model),
+        )
+        .filter(DetectionConfig.config_id == config_id)
+        .first()
+    )
     if not config:
         raise HTTPException(status_code=404, detail="检测配置不存在")
     
-    # 数据转换，确保枚举值被正确处理
-    config_dict = {
-        "config_id": config.config_id,
-        "device_id": config.device_id,
-        "device_name": config.device.device_name,
-        "models_id": config.models_id,
-        "models_name": config.model.models_name,
-        "models_type": config.model.models_type,
-        "enabled": config.enabled,
-        "sensitivity": config.sensitivity,
-        "target_classes": config.target_classes if config.target_classes else [],
-        "frequency": config.frequency.value if hasattr(config.frequency, "value") else config.frequency,
-        "stream_type": getattr(config, "stream_type", None) or "main",
-        "save_mode": config.save_mode.value if hasattr(config.save_mode, "value") else config.save_mode,
-        "save_duration": config.save_duration,
-        "max_storage_days": config.max_storage_days,
-        "created_at": config.created_at,
-        "updated_at": config.updated_at,
-        "created_by": config.created_by
-    }
-    
-    return config_dict
+    return _serialize_detection_config(config, include_device_fields=True)
 
 # 创建检测配置
 @router.post("/detection/configs", response_model=DetectionConfigResponse, tags=["检测配置"])
@@ -1265,11 +1381,10 @@ async def create_detection_config(
     """
     创建新的检测配置
     """
-    # 检查设备是否存在
-    device = db.query(Device).filter(Device.device_id == config.device_id).first()
-    if not device:
-        raise HTTPException(status_code=400, detail="设备不存在")
-    
+    config_mode = (config.config_mode or "device").strip()
+    if config_mode not in ("device", "group"):
+        raise HTTPException(status_code=400, detail="无效的配置类型")
+
     # 检查模型是否存在
     model = db.query(DetectionModel).filter(DetectionModel.models_id == config.models_id).first()
     if not model:
@@ -1288,11 +1403,37 @@ async def create_detection_config(
     stream_type = (config.stream_type or "main").strip()
     if stream_type not in ("main", "sub"):
         raise HTTPException(status_code=400, detail="无效的码流类型，有效值: main, sub")
+
+    device_id = config.device_id
+    group_id = config.group_id
+    group_settings = None
+
+    if config_mode == "group":
+        if not group_id:
+            raise HTTPException(status_code=400, detail="分组检测必须选择设备分组")
+        group = db.query(DeviceGroup).filter(DeviceGroup.group_id == group_id).first()
+        if not group:
+            raise HTTPException(status_code=400, detail="设备分组不存在")
+        device_id = None
+        frequency_enum = DetectionFrequency.realtime
+        group_settings = _normalize_group_settings(config.group_settings)
+        if config.area_coordinates:
+            raise HTTPException(status_code=400, detail="分组检测不支持智能方案/区域配置")
+    else:
+        if not device_id:
+            raise HTTPException(status_code=400, detail="单设备检测必须选择设备")
+        device = db.query(Device).filter(Device.device_id == device_id).first()
+        if not device:
+            raise HTTPException(status_code=400, detail="设备不存在")
+        group_id = None
     
     # 创建配置记录
     db_config = DetectionConfig(
         config_id=str(uuid.uuid4()),
-        device_id=config.device_id,
+        config_mode=config_mode,
+        device_id=device_id,
+        group_id=group_id,
+        group_settings=group_settings,
         models_id=config.models_id,
         enabled=config.enabled,
         sensitivity=config.sensitivity,
@@ -1309,31 +1450,15 @@ async def create_detection_config(
     # 添加运行时段等配置
     if config.schedule_config:
         db_config.schedule_config = config.schedule_config
+    if config_mode == "device" and config.area_coordinates:
+        db_config.area_coordinates = config.area_coordinates
     
     db.add(db_config)
     db.commit()
     db.refresh(db_config)
     
     log_action(db, current_user.user_id, 'create_detection_config', db_config.config_id, f"Created detection config {db_config.config_id}")
-    # 转换返回数据
-    config_dict = {
-        "config_id": db_config.config_id,
-        "device_id": db_config.device_id,
-        "models_id": db_config.models_id,
-        "enabled": db_config.enabled,
-        "sensitivity": db_config.sensitivity,
-        "target_classes": db_config.target_classes if db_config.target_classes else [],
-        "frequency": db_config.frequency.value if hasattr(db_config.frequency, "value") else db_config.frequency,
-        "stream_type": getattr(db_config, "stream_type", None) or "main",
-        "save_mode": db_config.save_mode.value if hasattr(db_config.save_mode, "value") else db_config.save_mode,
-        "save_duration": db_config.save_duration,
-        "max_storage_days": db_config.max_storage_days,
-        "created_at": db_config.created_at,
-        "updated_at": db_config.updated_at,
-        "created_by": db_config.created_by
-    }
-    
-    return config_dict
+    return _serialize_detection_config(db_config)
 
 # 更新检测配置
 @router.put("/detection/configs/{config_id}", response_model=DetectionConfigResponse, tags=["检测配置"])
@@ -1349,6 +1474,8 @@ async def update_detection_config(
     db_config = db.query(DetectionConfig).filter(DetectionConfig.config_id == config_id).first()
     if not db_config:
         raise HTTPException(status_code=404, detail="检测配置不存在")
+
+    config_mode = getattr(db_config, "config_mode", None) or "device"
     
     # 更新模型ID（如果提供）
     if config_update.models_id is not None:
@@ -1377,9 +1504,14 @@ async def update_detection_config(
         try:
             if config_update.frequency == "scheduled":
                 raise HTTPException(status_code=400, detail="定时检测已移除，请使用实时检测或抽帧检测")
+            if config_mode == "group" and config_update.frequency != "realtime":
+                raise HTTPException(status_code=400, detail="分组检测仅支持实时检测")
             db_config.frequency = DetectionFrequency(config_update.frequency) if isinstance(config_update.frequency, str) else config_update.frequency
         except ValueError:
             raise HTTPException(status_code=400, detail="无效的频率值")
+    
+    if config_update.group_settings is not None and config_mode == "group":
+        db_config.group_settings = _normalize_group_settings(config_update.group_settings)
     
     # 更新运行时段等配置
     if config_update.schedule_config is not None:
@@ -1397,8 +1529,10 @@ async def update_detection_config(
     if config_update.max_storage_days is not None:
         db_config.max_storage_days = config_update.max_storage_days
 
-    if config_update.area_coordinates is not None:  
-        db_config.area_coordinates = config_update.area_coordinates.dict()
+    if config_update.area_coordinates is not None:
+        if config_mode == "group":
+            raise HTTPException(status_code=400, detail="分组检测不支持智能方案/区域配置")
+        db_config.area_coordinates = config_update.area_coordinates
     
     # 更新时间戳
     db_config.updated_at = datetime.now()
@@ -1408,25 +1542,7 @@ async def update_detection_config(
     db.refresh(db_config)
     
     log_action(db, current_user.user_id, 'update_detection_config', db_config.config_id, f"Updated detection config {db_config.config_id}")
-    # 转换返回数据
-    config_dict = {
-        "config_id": db_config.config_id,
-        "device_id": db_config.device_id,
-        "models_id": db_config.models_id,
-        "enabled": db_config.enabled,
-        "sensitivity": db_config.sensitivity,
-        "target_classes": db_config.target_classes if db_config.target_classes else [],
-        "frequency": db_config.frequency.value if hasattr(db_config.frequency, "value") else db_config.frequency,
-        "stream_type": getattr(db_config, "stream_type", None) or "main",
-        "save_mode": db_config.save_mode.value if hasattr(db_config.save_mode, "value") else db_config.save_mode,
-        "save_duration": db_config.save_duration,
-        "max_storage_days": db_config.max_storage_days,
-        "created_at": db_config.created_at,
-        "updated_at": db_config.updated_at,
-        "created_by": db_config.created_by
-    }
-    
-    return config_dict
+    return _serialize_detection_config(db_config)
 
 @router.put("/detection/configs/{config_id}/toggle", tags=["检测配置"])
 def toggle_detection_active(config_id: str, enabled: bool, db: Session = Depends(get_db),
@@ -1908,6 +2024,58 @@ async def delete_detection_event(
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"删除检测事件失败: {str(e)}")
+
+# 批量更新检测事件状态
+@router.put("/detection/events/batch-update", tags=["检测事件"])
+async def batch_update_detection_events(
+    request_data: Dict[str, Any],
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """批量更新检测事件状态"""
+    try:
+        event_ids = request_data.get("event_ids") or []
+        status_value = request_data.get("status")
+        if not event_ids:
+            raise HTTPException(status_code=400, detail="请提供要更新的事件ID列表")
+        if not status_value:
+            raise HTTPException(status_code=400, detail="请提供目标状态")
+        try:
+            new_status = getattr(EventStatus, status_value)
+        except AttributeError:
+            raise HTTPException(status_code=400, detail="无效的状态值")
+
+        events = db.query(DetectionEvent).filter(DetectionEvent.event_id.in_(event_ids)).all()
+        if not events:
+            raise HTTPException(status_code=404, detail="未找到要更新的事件")
+
+        now = datetime.now()
+        updated_count = 0
+        for event in events:
+            event.status = new_status
+            event.viewed_by = current_user.username
+            event.viewed_at = now
+            updated_count += 1
+
+        db.commit()
+        log_action(
+            db,
+            current_user.user_id,
+            "batch_update_detection_events",
+            "批量更新",
+            f"批量更新检测事件状态为 {status_value}，共 {updated_count} 个",
+        )
+        return {
+            "status": "success",
+            "message": f"批量更新完成，成功更新 {updated_count} 个事件",
+            "updated_count": updated_count,
+            "total_requested": len(event_ids),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"批量更新检测事件失败: {str(e)}")
 
 # 批量删除检测事件
 @router.post("/detection/events/batch-delete", tags=["检测事件"])
@@ -2761,6 +2929,56 @@ async def list_push_configs(
         logger.error(f"获取推送配置列表失败: {e}")
         raise HTTPException(status_code=500, detail=f"获取推送配置列表失败: {str(e)}")
 
+
+@router.get("/data_push/logs", tags=["数据推送"])
+async def list_push_logs_v1(
+    push_id: Optional[str] = None,
+    status: Optional[str] = None,
+    skip: int = 0,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+):
+    """查询推送执行记录（持久化）"""
+    try:
+        query = db.query(DataPushLog)
+        if push_id:
+            query = query.filter(DataPushLog.push_id == push_id)
+        if status in ("success", "failure"):
+            query = query.filter(DataPushLog.status == status)
+
+        total = query.count()
+        rows = (
+            query.order_by(DataPushLog.created_at.desc())
+            .offset(skip)
+            .limit(min(limit, 200))
+            .all()
+        )
+        return {
+            "status": "success",
+            "data": [
+                {
+                    "log_id": row.log_id,
+                    "push_id": row.push_id,
+                    "push_name": row.push_name,
+                    "push_method": row.push_method,
+                    "status": row.status,
+                    "target_summary": row.target_summary,
+                    "message": row.message,
+                    "tags": row.tags or [],
+                    "config_id": row.config_id,
+                    "duration_ms": row.duration_ms,
+                    "payload_preview": row.payload_preview,
+                    "is_test": row.is_test,
+                    "created_at": row.created_at.isoformat() if row.created_at else None,
+                }
+                for row in rows
+            ],
+            "total": total,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"查询推送记录失败: {str(e)}")
+
+
 # 系统状态监控API
 @router.get("/system/status", tags=["系统管理"])
 def get_system_status(db: Session = Depends(get_db)):
@@ -2950,6 +3168,58 @@ def get_comprehensive_dashboard_overview(db: Session = Depends(get_db)):
         # 7. 检测任务统计
         total_detection_configs = db.query(DetectionConfig).count()
         active_detection_configs = db.query(DetectionConfig).filter(DetectionConfig.enabled == True).count()
+
+        vlm_pipeline_configs = 0
+        active_vlm_pipeline_configs = 0
+        pipeline_mode_distribution = {
+            "yolo_only": 0,
+            "yolo_then_verify": 0,
+            "yolo_then_analyze": 0,
+        }
+        for cfg in db.query(DetectionConfig.schedule_config, DetectionConfig.enabled).all():
+            schedule_config, enabled = cfg
+            pipeline = (schedule_config or {}).get("inference_pipeline") or {}
+            mode = pipeline.get("mode") or "yolo_only"
+            if mode not in pipeline_mode_distribution:
+                mode = "yolo_only"
+            pipeline_mode_distribution[mode] += 1
+            if mode in ("yolo_then_verify", "yolo_then_analyze") and pipeline.get("vlm_model_id"):
+                vlm_pipeline_configs += 1
+                if enabled:
+                    active_vlm_pipeline_configs += 1
+
+        # 7b. VLM 模型与巡检任务
+        total_vlm_models = db.query(DetectionModel).filter(DetectionModel.models_type == "vlm").count()
+        active_vlm_models = db.query(DetectionModel).filter(
+            DetectionModel.models_type == "vlm",
+            DetectionModel.is_active.is_(True),
+        ).count()
+        total_vlm_inspection_jobs = db.query(VlmInspectionJob).count()
+        active_vlm_inspection_jobs = db.query(VlmInspectionJob).filter(VlmInspectionJob.is_active.is_(True)).count()
+        today_vlm_inspection_alerts = db.query(VlmInspectionFinding).filter(
+            VlmInspectionFinding.needs_alert.is_(True),
+            VlmInspectionFinding.timestamp >= today,
+        ).count()
+        total_vlm_inspection_alerts = db.query(VlmInspectionFinding).filter(
+            VlmInspectionFinding.needs_alert.is_(True)
+        ).count()
+
+        vlm_job_alert_stats = db.query(
+            VlmInspectionJob.job_name,
+            func.count(VlmInspectionFinding.finding_id).label("count"),
+        ).join(
+            VlmInspectionFinding, VlmInspectionFinding.job_id == VlmInspectionJob.job_id
+        ).filter(
+            VlmInspectionFinding.needs_alert.is_(True)
+        ).group_by(VlmInspectionJob.job_name).all()
+        vlm_job_alert_distribution = [
+            {"job_name": job_name, "count": count}
+            for job_name, count in vlm_job_alert_stats
+        ]
+        vlm_job_status_distribution = {
+            "active": active_vlm_inspection_jobs,
+            "inactive": max(total_vlm_inspection_jobs - active_vlm_inspection_jobs, 0),
+        }
         
         # 8. 检测事件统计（总数而非今日）
         total_detection_events = db.query(DetectionEvent).count()
@@ -2989,6 +3259,29 @@ def get_comprehensive_dashboard_overview(db: Session = Depends(get_db)):
         # 订阅事件统计
         total_scheme_events = db.query(SmartEvent).count()
         today_scheme_events = db.query(SmartEvent).filter(SmartEvent.created_at >= today).count()
+
+        scheme_event_stats = db.query(
+            SmartScheme.id,
+            Device.device_name,
+            SmartScheme.remarks,
+            func.count(SmartEvent.id).label("event_count"),
+        ).join(SmartEvent, SmartEvent.scheme_id == SmartScheme.id).join(
+            Device, Device.device_id == SmartScheme.camera_id
+        ).group_by(
+            SmartScheme.id, Device.device_name, SmartScheme.remarks
+        ).order_by(func.count(SmartEvent.id).desc()).limit(20).all()
+
+        scheme_event_distribution = []
+        for scheme_id, device_name, remarks, event_count in scheme_event_stats:
+            label = (remarks or device_name or scheme_id or "未命名订阅").strip()
+            if len(label) > 20:
+                label = f"{label[:20]}…"
+            scheme_event_distribution.append({
+                "scheme_id": scheme_id,
+                "scheme_name": label,
+                "device_name": device_name,
+                "count": int(event_count or 0),
+            })
 
         # 10. 用户统计
         total_users = db.query(User).count()
@@ -3076,7 +3369,10 @@ def get_comprehensive_dashboard_overview(db: Session = Depends(get_db)):
         def getModelTypeName(type):
             typeMap = {
                 'object_detection': '目标检测',
+                'yolo_verify': 'VLM 复检',
+                'yolo_analyze': 'VLM 行为分析',
                 'smart_behavior': '智能行为',
+                'smart_person': '人员场景',
                 'smart_counting': '智能人数统计',
                 'segmentation': '图像分割',
                 'keypoint': '关键点检测',
@@ -3084,7 +3380,28 @@ def get_comprehensive_dashboard_overview(db: Session = Depends(get_db)):
                 'face': '人脸识别',
                 'other': '其他类型'
             }
-            return typeMap[type] or type
+            return typeMap.get(type) or type
+        
+        def formatDetectionActivityContent(event, device_name):
+            meta = event.meta_data or {}
+            if event.event_type in ('yolo_verify', 'yolo_analyze'):
+                desc = meta.get('event_description') or getModelTypeName(event.event_type)
+                vlm_result = (meta.get('vlm') or {}).get('result') or {}
+                labels = vlm_result.get('alert_labels') or []
+                if labels:
+                    desc = f"{desc} [{', '.join(labels)}]"
+                return f"[VLM推理][{getModelTypeName(event.event_type)}][{device_name}] {desc}"
+            if event.event_type == 'object_detection':
+                count = meta.get('current_count', 0)
+            elif event.event_type == 'smart_behavior':
+                count = 1
+            elif event.event_type == 'smart_person':
+                count = meta.get('current_count', 1)
+            elif event.event_type == 'smart_counting':
+                count = meta.get('current_count', 0)
+            else:
+                count = meta.get('current_count', 0)
+            return f"[本地检测][{getModelTypeName(event.event_type)}][{device_name}]检测到:{count}个目标"
         
         def formatTimeAgo(timestamp):
             time_diff = datetime.now() - timestamp
@@ -3111,18 +3428,9 @@ def get_comprehensive_dashboard_overview(db: Session = Depends(get_db)):
                 event_type = "warning"
             elif event.status == EventStatus.archived:
                 event_type = "success"
-            
-            if event.event_type == 'object_detection':
-                count = event.meta_data.get('current_count', 0)
-            elif event.event_type == 'smart_behavior':
-                count = 1
-            elif event.event_type == 'smart_counting':
-                count = event.meta_data.get('current_count', 0)
-            else:
-                count = 0
 
             recent_activities.append({
-                "content": f"[本地检测][{getModelTypeName(event.event_type)}][{device_name}]检测到:{count}个目标",    
+                "content": formatDetectionActivityContent(event, device_name),
                 "timestamp": formatTimeAgo(event.created_at),
                 "type": event_type,
                 "event_id": event.event_id,
@@ -3193,6 +3501,14 @@ def get_comprehensive_dashboard_overview(db: Session = Depends(get_db)):
                 "active_crowd_jobs": active_crowd_jobs,
                 "total_detection_configs": total_detection_configs,
                 "active_detection_configs": active_detection_configs,
+                "vlm_pipeline_configs": vlm_pipeline_configs,
+                "active_vlm_pipeline_configs": active_vlm_pipeline_configs,
+                "total_vlm_models": total_vlm_models,
+                "active_vlm_models": active_vlm_models,
+                "total_vlm_inspection_jobs": total_vlm_inspection_jobs,
+                "active_vlm_inspection_jobs": active_vlm_inspection_jobs,
+                "today_vlm_inspection_alerts": today_vlm_inspection_alerts,
+                "total_vlm_inspection_alerts": total_vlm_inspection_alerts,
                 "total_users": total_users,
                 "total_system_logs": total_system_logs,
                 "total_detection_logs": total_detection_logs
@@ -3211,7 +3527,8 @@ def get_comprehensive_dashboard_overview(db: Session = Depends(get_db)):
                 },
                 "scheme_events":{
                     "total":total_scheme_events,
-                    "today": today_scheme_events
+                    "today": today_scheme_events,
+                    "scheme_distribution": scheme_event_distribution,
                 }
             },
             "distributions": {
@@ -3223,6 +3540,21 @@ def get_comprehensive_dashboard_overview(db: Session = Depends(get_db)):
             "crowd_analysis": {
                 "total_results": total_crowd_results,
                 "job_distribution": crowd_job_distribution
+            },
+            "inference_pipeline": {
+                "mode_distribution": pipeline_mode_distribution,
+            },
+            "vlm_inspection": {
+                "total_jobs": total_vlm_inspection_jobs,
+                "active_jobs": active_vlm_inspection_jobs,
+                "today_alerts": today_vlm_inspection_alerts,
+                "total_alerts": total_vlm_inspection_alerts,
+                "total_vlm_models": total_vlm_models,
+                "active_vlm_models": active_vlm_models,
+                "vlm_pipeline_configs": vlm_pipeline_configs,
+                "active_vlm_pipeline_configs": active_vlm_pipeline_configs,
+                "job_status_distribution": vlm_job_status_distribution,
+                "job_alert_distribution": vlm_job_alert_distribution,
             },
             "performance": {
                 "accuracy": accuracy,
@@ -3241,9 +3573,13 @@ def get_comprehensive_dashboard_overview(db: Session = Depends(get_db)):
 class EdgeServerBase(BaseModel):
     """边缘服务器基础模型"""
     name: str = Field(..., min_length=1, max_length=100, description="服务器名称")
-    ip_address: str = Field(..., description="IP地址")
+    ip_address: str = Field(..., description="IP地址或主机名")
     port: int = Field(default=80, ge=1, le=65535, description="端口号")
     description: Optional[str] = Field(None, description="服务器描述")
+    platform_type: str = Field(default="maisi", description="平台类型: maisi/nodered/custom")
+    admin_url: Optional[str] = Field(None, description="管理/编辑器地址")
+    dashboard_url: Optional[str] = Field(None, description="Dashboard 地址")
+    health_check_url: Optional[str] = Field(None, description="自定义健康检查地址")
     is_active: bool = Field(default=True, description="是否启用")
 
 class EdgeServerCreate(EdgeServerBase):
@@ -3253,9 +3589,13 @@ class EdgeServerCreate(EdgeServerBase):
 class EdgeServerUpdate(BaseModel):
     """更新边缘服务器模型"""
     name: Optional[str] = Field(None, min_length=1, max_length=100, description="服务器名称")
-    ip_address: Optional[str] = Field(None, description="IP地址")
+    ip_address: Optional[str] = Field(None, description="IP地址或主机名")
     port: Optional[int] = Field(None, ge=1, le=65535, description="端口号")
     description: Optional[str] = Field(None, description="服务器描述")
+    platform_type: Optional[str] = Field(None, description="平台类型: maisi/nodered/custom")
+    admin_url: Optional[str] = Field(None, description="管理/编辑器地址")
+    dashboard_url: Optional[str] = Field(None, description="Dashboard 地址")
+    health_check_url: Optional[str] = Field(None, description="自定义健康检查地址")
     is_active: Optional[bool] = Field(None, description="是否启用")
     status: Optional[str] = Field(None, description="状态")
     system_info: Optional[Dict[str, Any]] = Field(None, description="系统信息")
@@ -3313,6 +3653,10 @@ async def create_edge_server(
             ip_address=server_data.ip_address,
             port=server_data.port,
             description=server_data.description,
+            platform_type=server_data.platform_type or "maisi",
+            admin_url=server_data.admin_url,
+            dashboard_url=server_data.dashboard_url,
+            health_check_url=server_data.health_check_url,
             is_active=server_data.is_active,
             status="unknown"
         )

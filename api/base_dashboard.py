@@ -19,6 +19,7 @@ router = APIRouter(prefix="/dashboard", tags=["数据大屏"])
 event_type_map = {
     "object_detection": "目标检测",
     "smart_behavior": "智能行为",
+    "smart_person": "人员场景",
     "smart_counting": "智能人数统计",
     "segmentation": "图像分割",
     "keypoint": "关键点检测",

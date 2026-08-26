@@ -1,14 +1,15 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
 from typing import List, Optional, Dict
-from pydantic import BaseModel, validator
+from pydantic import BaseModel, field_validator, model_validator
 from datetime import datetime
 import uuid
 import logging
 import re
 
-from src.database import get_db, DetectionConfig, Device, CrowdAnalysisJob, DetectionModel, CrowdAnalysisResult
+from src.database import get_db, DetectionConfig, Device, DeviceGroup, CrowdAnalysisJob, DetectionModel, CrowdAnalysisResult
 from src.crowd_analyzer import crowd_analyzer
+from src.crowd_job_utils import build_crowd_job_response, snapshot_group_devices, resolve_crowd_job_devices
 from api.auth import get_current_user, User
 from api.logger import log_action
 # 配置日志
@@ -16,6 +17,36 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/crowd-analysis", tags=["人群分析"])
+
+DEFAULT_GROUP_SETTINGS = {
+    "frame_source_primary": "snapshot",
+    "frame_source_fallback": "rtsp",
+    "device_interval_sec": 1.0,
+}
+
+
+def _normalize_group_settings(settings: Optional[Dict]) -> Dict:
+    merged = {**DEFAULT_GROUP_SETTINGS, **(settings or {})}
+    return merged
+
+
+def _apply_device_source(db: Session, payload: Dict) -> Dict:
+    mode = payload.get("device_mode") or "manual"
+    if mode == "group":
+        group_id = payload.get("group_id")
+        group = db.query(DeviceGroup).filter(DeviceGroup.group_id == group_id).first()
+        if not group:
+            raise HTTPException(status_code=404, detail=f"设备分组不存在: {group_id}")
+        payload["device_ids"] = snapshot_group_devices(db, group_id)
+        payload["group_id"] = group_id
+    else:
+        payload["group_id"] = None
+        device_ids = payload.get("device_ids") or []
+        for device_id in device_ids:
+            device = db.query(Device).filter(Device.device_id == device_id).first()
+            if not device:
+                raise HTTPException(status_code=404, detail=f"设备不存在: {device_id}")
+    return payload
 
 # Pydantic模型
 class LocationInfo(BaseModel):
@@ -26,7 +57,11 @@ class LocationInfo(BaseModel):
 
 class AnalysisJobCreate(BaseModel):
     job_name: str
-    device_ids: List[str]
+    device_mode: Optional[str] = "manual"  # manual | group
+    group_id: Optional[str] = None
+    group_settings: Optional[Dict] = None
+    schedule_config: Optional[Dict] = None
+    device_ids: Optional[List[str]] = None
     models_id: str  # 指定分析任务使用的模型ID
     interval: Optional[int] = 300  # 默认5分钟
     cron_expression: Optional[str] = None
@@ -35,48 +70,59 @@ class AnalysisJobCreate(BaseModel):
     description: Optional[str] = None
     detect_classes: Optional[List[str]] = None
     confidence_threshold: Optional[float] = 0.5  # 置信度阈值，默认0.5
+    warning_threshold: Optional[int] = 0
+    warning_message: Optional[str] = None
     
-    @validator('job_name')
+    @field_validator('job_name')
+    @classmethod
     def validate_job_name(cls, v):
         if not v or not v.strip():
             raise ValueError("任务名称不能为空")
-        if len(v) > 100:  
+        if len(v) > 100:
             raise ValueError("任务名称过长，请控制在100个字符以内")
         return v
-    
-    @validator('device_ids')
-    def validate_device_ids(cls, v):
-        if not v or len(v) == 0:
-            raise ValueError("请至少选择一个监控设备")
+
+    @field_validator('confidence_threshold')
+    @classmethod
+    def validate_confidence_threshold(cls, v):
+        if v is not None and (v < 0.1 or v > 1.0):
+            raise ValueError("置信度阈值必须在0.1到1.0之间")
         return v
-    
-    @validator('interval')
-    def validate_interval(cls, v, values):
-        if 'cron_expression' not in values or not values['cron_expression']:
-            if v is None:
-                raise ValueError("请设置执行间隔")
-            if v < 60:
-                raise ValueError("执行间隔不能小于60秒")
-        return v
-    
-    @validator('cron_expression')
-    def validate_cron_expression(cls, v, values):
+
+    @field_validator('cron_expression')
+    @classmethod
+    def validate_cron_expression(cls, v):
         if v is not None and v.strip():
-            # 简单的cron表达式验证
-            cron_pattern = r'^(\*|[0-9,\-\/]+)\s+(\*|[0-9,\-\/]+)\s+(\*|[0-9,\-\/]+)\s+(\*|[0-9,\-\/]+)\s+(\*|[0-9,\-\/]+)$'
+            cron_pattern = (
+                r'^(\*|[0-9,\-\/]+)\s+(\*|[0-9,\-\/]+)\s+(\*|[0-9,\-\/]+)\s+'
+                r'(\*|[0-9,\-\/]+)\s+(\*|[0-9,\-\/]+)$'
+            )
             if not re.match(cron_pattern, v):
                 raise ValueError("无效的CRON表达式格式，正确格式如: */30 * * * *")
         return v
-    
-    @validator('confidence_threshold')
-    def validate_confidence_threshold(cls, v):
-        if v is not None:
-            if v < 0.1 or v > 1.0:
-                raise ValueError("置信度阈值必须在0.1到1.0之间")
-        return v
+
+    @model_validator(mode='after')
+    def validate_job_config(self):
+        mode = self.device_mode or "manual"
+        if mode == "group":
+            if not self.group_id:
+                raise ValueError("按分组模式需选择设备分组")
+        elif not self.device_ids:
+            raise ValueError("请至少选择一个监控设备")
+
+        if not self.cron_expression:
+            if self.interval is None:
+                raise ValueError("请设置执行间隔")
+            if self.interval < 60:
+                raise ValueError("执行间隔不能小于60秒")
+        return self
 
 class AnalysisJobUpdate(BaseModel):
     job_name: Optional[str] = None
+    device_mode: Optional[str] = None
+    group_id: Optional[str] = None
+    group_settings: Optional[Dict] = None
+    schedule_config: Optional[Dict] = None
     device_ids: Optional[List[str]] = None
     models_id: Optional[str] = None
     interval: Optional[int] = None
@@ -93,6 +139,10 @@ class AnalysisJobUpdate(BaseModel):
 class AnalysisJobResponse(BaseModel):
     job_id: str
     job_name: str
+    device_mode: Optional[str] = "manual"
+    group_id: Optional[str] = None
+    group_settings: Optional[Dict] = None
+    schedule_config: Optional[Dict] = None
     device_ids: List[str]
     models_id: str
     detect_classes: List[str]
@@ -102,6 +152,8 @@ class AnalysisJobResponse(BaseModel):
     tags: List[str]
     location_info: Dict
     description: Optional[str]
+    warning_threshold: Optional[int] = 0
+    warning_message: Optional[str] = None
     is_active: bool
     created_at: datetime
     last_run: Optional[datetime]
@@ -116,11 +168,8 @@ async def create_analysis_job(
     current_user: User = Depends(get_current_user)
 ):
     """创建新的人群分析任务并保存到数据库"""
-    # 验证设备ID是否存在
-    for device_id in job_data.device_ids:
-        device = db.query(Device).filter(Device.device_id == device_id).first()
-        if not device:
-            raise HTTPException(status_code=404, detail=f"设备不存在: {device_id}")          
+    payload = job_data.model_dump()
+    payload = _apply_device_source(db, payload)
 
     # 验证模型ID是否存在
     model = db.query(DetectionModel).filter(DetectionModel.models_id == job_data.models_id).first()
@@ -143,18 +192,23 @@ async def create_analysis_job(
     db_job = CrowdAnalysisJob(
         job_id=job_id,
         job_name=job_data.job_name,
-        device_ids=job_data.device_ids,
-        models_id=job_data.models_id,  # 添加模型ID
+        device_mode=payload.get("device_mode") or "manual",
+        group_id=payload.get("group_id"),
+        group_settings=_normalize_group_settings(payload.get("group_settings")),
+        schedule_config=payload.get("schedule_config") or {},
+        device_ids=payload.get("device_ids") or [],
+        models_id=job_data.models_id,
         interval=job_data.interval if job_data.cron_expression is None else None,
         cron_expression=job_data.cron_expression,
         tags=job_data.tags,
-        location_info=job_data.location_info.dict() if job_data.location_info else {},
+        location_info=job_data.location_info.model_dump() if job_data.location_info else {},
         description=job_data.description,
         created_at=datetime.now(),
         is_active=False,
         detect_classes=job_data.detect_classes,
         confidence_threshold=job_data.confidence_threshold,
-        # is_active=True
+        warning_threshold=job_data.warning_threshold or 0,
+        warning_message=job_data.warning_message,
     )
     
     try:
@@ -166,28 +220,7 @@ async def create_analysis_job(
         # 记录创建操作
         log_action(db, current_user.user_id, 'create_crowd_task', job_id, f"创建人群分析任务: {job_data.job_name}")
 
-        # 构建响应
-        response = {
-            "job_id": job_id,
-            "job_name": job_data.job_name,
-            "device_ids": job_data.device_ids,
-            "models_id": job_data.models_id,  # 添加模型ID
-            "detect_classes": db_job.detect_classes,
-            "confidence_threshold": db_job.confidence_threshold,
-            "interval": job_data.interval,
-            "cron_expression": job_data.cron_expression,
-            "tags": job_data.tags,
-            "location_info": db_job.location_info,
-            "description": job_data.description,
-            "created_at": db_job.created_at,
-            "is_active": db_job.is_active,
-            "last_run": None,
-            "status": "created",
-            "last_result": None,
-            "last_error": None
-        }
-        
-        return response
+        return build_crowd_job_response(db_job)
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"创建分析任务失败: {str(e)}")
@@ -215,51 +248,8 @@ async def get_analysis_jobs(
     # 转换为响应格式
     responses = []
     for db_job in db_jobs:
-        job_id = db_job.job_id
-        # 如果任务在内存中存在，使用内存中的最新状态
-        if job_id in memory_jobs_dict:
-            memory_job = memory_jobs_dict[job_id]
-            response = {
-                "job_id": job_id,
-                "job_name": db_job.job_name,
-                "device_ids": db_job.device_ids,
-                "models_id": db_job.models_id,
-                "detect_classes": db_job.detect_classes if db_job.detect_classes else [],
-                "confidence_threshold": db_job.confidence_threshold or 0.5,
-                "interval": db_job.interval or 0,
-                "cron_expression": db_job.cron_expression,
-                "tags": db_job.tags,
-                "location_info": db_job.location_info,
-                "description": db_job.description,
-                "created_at": db_job.created_at,
-                "is_active": db_job.is_active,
-                "last_run": memory_job.get("last_run"),
-                "status": memory_job.get("status", "paused" if not db_job.is_active else "created"),
-                "last_result": memory_job.get("last_result"),
-                "last_error": memory_job.get("last_error")
-            }
-        else:
-            # 如果任务不在内存中，使用数据库状态
-            response = {
-                "job_id": job_id,
-                "job_name": db_job.job_name,
-                "device_ids": db_job.device_ids,
-                "models_id": db_job.models_id,
-                "detect_classes": db_job.detect_classes if db_job.detect_classes else [],
-                "confidence_threshold": db_job.confidence_threshold or 0.5,
-                "interval": db_job.interval or 0,
-                "cron_expression": db_job.cron_expression,
-                "tags": db_job.tags,
-                "location_info": db_job.location_info,
-                "description": db_job.description,
-                "created_at": db_job.created_at,
-                "is_active": db_job.is_active,
-                "last_run": None,
-                "status": "paused" if not db_job.is_active else "created",
-                "last_result": None,
-                "last_error": None
-            }
-        responses.append(response)
+        memory_job = memory_jobs_dict.get(db_job.job_id)
+        responses.append(build_crowd_job_response(db_job, memory_job))
     
     return {
         "data": responses,
@@ -275,60 +265,14 @@ async def get_analysis_job(
     db: Session = Depends(get_db)
 ):
     """获取特定分析任务的详情"""
-    # 从内存中查找任务
     memory_jobs = crowd_analyzer.get_analysis_jobs()
     memory_job = next((j for j in memory_jobs if j.get("job_id") == job_id), None)
-    
-    # 从数据库获取任务
+
     db_job = db.query(CrowdAnalysisJob).filter(CrowdAnalysisJob.job_id == job_id).first()
     if not db_job:
         raise HTTPException(status_code=404, detail=f"分析任务不存在: {job_id}")
-    
-    # 构建响应
-    if memory_job:
-        # 如果任务在内存中，合并内存和数据库信息
-        response = {
-            "job_id": job_id,
-            "job_name": db_job.job_name,
-            "device_ids": db_job.device_ids,
-            "models_id": db_job.models_id,
-            "detect_classes": db_job.detect_classes if db_job.detect_classes else [],
-            "confidence_threshold": db_job.confidence_threshold or 0.5,
-            "interval": db_job.interval or 0,
-            "cron_expression": db_job.cron_expression,
-            "tags": db_job.tags,
-            "location_info": db_job.location_info,
-            "description": db_job.description,
-            "created_at": db_job.created_at,
-            "is_active": db_job.is_active,
-            "last_run": memory_job.get("last_run"),
-            "status": memory_job.get("status", "paused" if not db_job.is_active else "created"),
-            "last_result": memory_job.get("last_result"),
-            "last_error": memory_job.get("last_error")
-        }
-    else:
-        # 如果任务不在内存中，使用数据库信息
-        response = {
-            "job_id": job_id,
-            "job_name": db_job.job_name,
-            "device_ids": db_job.device_ids,
-            "models_id": db_job.models_id,
-            "detect_classes": db_job.detect_classes if db_job.detect_classes else [],
-            "confidence_threshold": db_job.confidence_threshold or 0.5,
-            "interval": db_job.interval or 0,
-            "cron_expression": db_job.cron_expression,
-            "tags": db_job.tags,
-            "location_info": db_job.location_info,
-            "description": db_job.description,
-            "created_at": db_job.created_at,
-            "is_active": db_job.is_active,
-            "last_run": None,
-            "status": "paused" if not db_job.is_active else "created",
-            "last_result": None,
-            "last_error": None
-        }
-    
-    return response
+
+    return build_crowd_job_response(db_job, memory_job)
 
 @router.delete("/jobs/{job_id}/delete")
 async def delete_analysis_job(
@@ -370,80 +314,34 @@ async def run_analysis_job_now(
     current_user: User = Depends(get_current_user)
 ):
     """立即执行分析任务"""
-    # 获取所有任务
-    jobs = crowd_analyzer.get_analysis_jobs()
-    
-    # 查找对应的任务
-    job = next((j for j in jobs if j.get("job_id") == job_id), None)
-    if not job:
-        # 检查数据库中是否存在此任务
-        db_job = db.query(CrowdAnalysisJob).filter(CrowdAnalysisJob.job_id == job_id).first()
-        if not db_job:
-            raise HTTPException(status_code=404, detail=f"分析任务不存在: {job_id}")
-        
-        db_job.is_active = True
-        db.commit()
+    db_job = db.query(CrowdAnalysisJob).filter(CrowdAnalysisJob.job_id == job_id).first()
+    if not db_job:
+        raise HTTPException(status_code=404, detail=f"分析任务不存在: {job_id}")
 
-        # 记录立即执行操作
-        log_action(db, current_user.user_id, 'run_crowd_task', job_id, f"立即执行人群分析任务: {job_id}")
-        
-        # 尝试从数据库重新加载任务
-        try:
-            job_details = crowd_analyzer.add_analysis_job(
-                job_id=db_job.job_id,
-                job_name=db_job.job_name,
-                device_ids=db_job.device_ids,
-                models_id=db_job.models_id,
-                detect_classes=db_job.detect_classes,
-                confidence_threshold=db_job.confidence_threshold or 0.5,
-                interval=db_job.interval,
-                cron_expression=db_job.cron_expression,
-                tags=db_job.tags,
-                location_info=db_job.location_info
-            )
-            job = job_details
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"无法加载分析任务: {str(e)}")
-    
-    # 验证设备可用性
-    device_ids = job.get("device_ids", [])
+    device_ids = resolve_crowd_job_devices(db, db_job)
     unavailable_devices = []
-    
     for device_id in device_ids:
         device = db.query(Device).filter(Device.device_id == device_id).first()
         if not device or not device.status:
             unavailable_devices.append(device_id)
-    
+
     if unavailable_devices and len(unavailable_devices) == len(device_ids):
         return {
-            "status": "error", 
-            "message": f"无法执行任务，所有设备不可用: {', '.join(unavailable_devices)}"
+            "status": "error",
+            "message": f"无法执行任务，所有设备不可用: {', '.join(unavailable_devices)}",
         }
-    
-    # 验证模型可用性
-    models_id = job.get("models_id")
-    model = db.query(DetectionModel).filter(DetectionModel.models_id == models_id).first()
+
+    model = db.query(DetectionModel).filter(DetectionModel.models_id == db_job.models_id).first()
     if not model:
         return {
             "status": "error",
-            "message": f"任务使用的模型不可用: {models_id}"
+            "message": f"任务使用的模型不可用: {db_job.models_id}",
         }
-    
-    # 在后台执行任务
+
+    log_action(db, current_user.user_id, 'run_crowd_task', job_id, f"立即执行人群分析任务: {job_id}")
     logger.info(f"开始执行人群分析任务: {job_id}")
-    
-    # 始终在后台执行任务，避免API响应超时
-    def run_job():
-        crowd_analyzer._run_analysis(
-            job_id, 
-            job.get("device_ids", []),
-            job.get("models_id"),
-            job.get("tags", []), 
-            job.get("location_info", {}),
-            job.get("detect_classes", [])
-        )
-    
-    background_tasks.add_task(run_job)
+
+    background_tasks.add_task(crowd_analyzer._run_analysis, job_id, True)
     return {"status": "success", "message": f"分析任务已开始执行: {job_id}"}
 
 @router.get("/available-devices")
@@ -509,18 +407,7 @@ async def resume_analysis_job(
     log_action(db, current_user.user_id, 'resume_crowd_task', job_id, f"恢复人群分析任务: {job_id}")
 
     # 重新添加到运行时服务
-    crowd_analyzer.add_analysis_job(
-        job_id=job.job_id,
-        job_name=job.job_name,
-        device_ids=job.device_ids,
-        models_id=job.models_id,
-        detect_classes=job.detect_classes,
-        confidence_threshold=job.confidence_threshold or 0.5,
-        interval=job.interval,
-        cron_expression=job.cron_expression,
-        tags=job.tags,
-        location_info=job.location_info
-    )
+    crowd_analyzer.add_analysis_job(job.job_id)
     
     return {"status": "success", "message": f"分析任务已恢复: {job_id}"}
 
@@ -548,8 +435,8 @@ async def get_available_models(
     db: Session = Depends(get_db)
 ):
     """获取可用于人群分析的模型列表"""
-    # 查询所有可用于人体检测的模型
-    models = db.query(DetectionModel).all()
+    # 人群分析使用 YOLO 等检测模型，排除 VLM 大模型
+    models = db.query(DetectionModel).filter(DetectionModel.models_type != "vlm").all()
 
     available_models = []
 
@@ -671,12 +558,21 @@ async def update_analysis_job(
     if not db_job:
         raise HTTPException(status_code=404, detail=f"分析任务不存在: {job_id}")
     
-    # 验证设备ID是否存在
-    if job_data.device_ids:
-        for device_id in job_data.device_ids:
-            device = db.query(Device).filter(Device.device_id == device_id).first()
-            if not device:
-                raise HTTPException(status_code=404, detail=f"设备不存在: {device_id}")
+    # 验证设备/分组
+    update_data = job_data.model_dump(exclude_unset=True)
+    if any(key in update_data for key in ("device_mode", "group_id", "device_ids")):
+        merged = {
+            "device_mode": update_data.get("device_mode", db_job.device_mode or "manual"),
+            "group_id": update_data.get("group_id", db_job.group_id),
+            "device_ids": update_data.get("device_ids", db_job.device_ids),
+        }
+        merged = _apply_device_source(db, merged)
+        update_data["device_mode"] = merged["device_mode"]
+        update_data["group_id"] = merged["group_id"]
+        update_data["device_ids"] = merged["device_ids"]
+
+    if "group_settings" in update_data and update_data["group_settings"] is not None:
+        update_data["group_settings"] = _normalize_group_settings(update_data["group_settings"])
     
     # 验证模型ID是否存在
     if job_data.models_id:
@@ -688,28 +584,20 @@ async def update_analysis_job(
         if not model.is_active:
             raise HTTPException(status_code=400, detail=f"模型 {model.models_name} 当前不可用")
     
-    # 验证cron和interval的一致性
+    # 验证 cron 和 interval 的一致性
     if job_data.cron_expression is not None and job_data.interval is not None:
-        logger.warning(f"更新任务时同时提供了cron表达式和interval，将优先使用cron表达式: {job_data.cron_expression}")
-        job_data.interval = None
-    elif job_data.cron_expression is None :
-        job_data.cron_expression = None
-    elif job_data.interval is None:
-        job_data.interval = None
-    
-    # 更新任务信息
+        logger.warning(
+            f"更新任务时同时提供了cron表达式和interval，将优先使用cron表达式: {job_data.cron_expression}"
+        )
+        update_data["interval"] = None
+
     is_active_changed = False
     was_active = db_job.is_active
-    
-    update_data = job_data.dict(exclude_unset=True)
-    
-    # 处理位置信息特殊情况
+
     if 'location_info' in update_data and update_data['location_info']:
-        # 确保是字典格式
         if isinstance(update_data['location_info'], LocationInfo):
-            update_data['location_info'] = update_data['location_info'].dict()
-    
-    # 更新数据库中的任务
+            update_data['location_info'] = update_data['location_info'].model_dump()
+
     for key, value in update_data.items():
         if key == 'is_active' and value != was_active:
             is_active_changed = True
@@ -725,65 +613,16 @@ async def update_analysis_job(
         # 如果激活状态改变，需要特殊处理
         if is_active_changed:
             if db_job.is_active:
-                # 如果从非激活变为激活，需要添加到运行时服务
-                crowd_analyzer.add_analysis_job(
-                    job_id=db_job.job_id,
-                    job_name=db_job.job_name,
-                    device_ids=db_job.device_ids,
-                    models_id=db_job.models_id,
-                    detect_classes=db_job.detect_classes,
-                    confidence_threshold=db_job.confidence_threshold or 0.5,
-                    interval=db_job.interval,
-                    cron_expression=db_job.cron_expression,
-                    tags=db_job.tags,
-                    location_info=db_job.location_info
-                )
+                crowd_analyzer.add_analysis_job(db_job.job_id)
             else:
-                # 如果从激活变为非激活，需要从运行时服务中移除
                 crowd_analyzer.remove_analysis_job(job_id)
         elif db_job.is_active:
-            # 如果仍然是激活状态且内容有修改，需要更新运行时服务
-            # 先移除原任务，再添加新任务
             crowd_analyzer.remove_analysis_job(job_id)
-            crowd_analyzer.add_analysis_job(
-                job_id=db_job.job_id,
-                job_name=db_job.job_name,
-                device_ids=db_job.device_ids,
-                models_id=db_job.models_id,
-                detect_classes=db_job.detect_classes,
-                confidence_threshold=db_job.confidence_threshold or 0.5,
-                interval=db_job.interval,
-                cron_expression=db_job.cron_expression,
-                tags=db_job.tags,
-                location_info=db_job.location_info
-            )
-        
-        # 获取内存中的任务状态
+            crowd_analyzer.add_analysis_job(db_job.job_id)
+
         memory_jobs = crowd_analyzer.get_analysis_jobs()
         memory_job = next((j for j in memory_jobs if j.get("job_id") == job_id), None)
-        
-        # 构建响应
-        response = {
-            "job_id": job_id,
-            "job_name": db_job.job_name,
-            "device_ids": db_job.device_ids,
-            "models_id": db_job.models_id,
-            "detect_classes": db_job.detect_classes,
-            "confidence_threshold": db_job.confidence_threshold or 0.5,
-            "interval": db_job.interval or 0,
-            "cron_expression": db_job.cron_expression,
-            "tags": db_job.tags,
-            "location_info": db_job.location_info,
-            "description": db_job.description,
-            "created_at": db_job.created_at,
-            "is_active": db_job.is_active,
-            "last_run": memory_job.get("last_run") if memory_job else db_job.last_run,
-            "status": memory_job.get("status", "paused" if not db_job.is_active else "created") if memory_job else ("paused" if not db_job.is_active else "created"),
-            "last_result": memory_job.get("last_result") if memory_job else db_job.last_result,
-            "last_error": memory_job.get("last_error") if memory_job else db_job.last_error
-        }
-        
-        return response
+        return build_crowd_job_response(db_job, memory_job)
     except Exception as e:
         db.rollback()
         logger.error(f"更新分析任务失败: {str(e)}")

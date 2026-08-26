@@ -30,9 +30,11 @@
             <div class="card-header">
               <span>画线设置</span>
               <div class="drawing-status">
-                <el-tag type="success">
-                  当前：区域绘制
-                </el-tag>
+                <el-switch
+                  v-model="configForm.coordinates.enabled"
+                  active-text="启用区域"
+                  inactive-text="未启用"
+                />
               </div>
             </div>
           </template>
@@ -75,17 +77,17 @@
                 @mousemove="handleMouseMove" @contextmenu.prevent="handleRightClick">
               </canvas>
               <div class="drawing-controls">
-                <el-button type="primary" @click="startDrawing">开始绘制</el-button>
-                <el-button @click="clearDrawing">清除</el-button>
+                <el-button type="primary" @click="startDrawing" :disabled="!configForm.coordinates.enabled">开始绘制</el-button>
+                <el-button @click="clearDrawing" :disabled="!configForm.coordinates.enabled">清除</el-button>
               </div>
             </div>
           </div>
 
           <div class="drawing-hints">
             <el-alert title="绘制提示" type="info" :closable="false">
-              <p>• 左键点击添加顶点</p>
-              <p>• 右键点击完成绘制</p>
-            </el-alert> 
+              <p>• 启用区域后，单设备/分组目标检测将只统计区域内目标</p>
+              <p>• 左键点击添加顶点，右键点击完成绘制（至少3个点）</p>
+            </el-alert>
           </div>
         </el-card>
       </div>
@@ -95,7 +97,7 @@
 </template>
 
 <script>
-import { defineComponent, ref, reactive, onMounted } from 'vue';
+import { defineComponent, ref, reactive, computed, onMounted, onUnmounted } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { ArrowLeft, VideoCamera, CircleClose } from '@element-plus/icons-vue';
@@ -112,8 +114,26 @@ export default defineComponent({
     const router = useRouter();
     const route = useRoute();
 
-    // 获取路由参数
-    const deviceId = route.params.deviceId;
+    const deviceId = computed(() => route.params.deviceId);
+
+    const normalizeAreaCoordinates = (raw) => {
+      if (!raw || typeof raw !== 'object') {
+        return { enabled: false, points: [] };
+      }
+      const points = Array.isArray(raw.points)
+        ? raw.points.map((p) => ({ x: Number(p.x), y: Number(p.y) }))
+        : [];
+      let enabled = false;
+      if (raw.enabled === true) {
+        enabled = true;
+      } else if (raw.enabled === false) {
+        enabled = false;
+      } else if (points.length >= 3) {
+        // 兼容旧数据：仅有 points、无 enabled 字段
+        enabled = true;
+      }
+      return { enabled, points };
+    };
 
     // 响应式数据
     const saveLoading = ref(false);
@@ -122,6 +142,7 @@ export default defineComponent({
     // 配置表单数据
     const configForm = reactive({
       coordinates: {
+        enabled: false,
         points: [],
       }
     });
@@ -132,6 +153,7 @@ export default defineComponent({
     const deviceImage = ref(null);
     const deviceImageRef = ref(null);
     const drawingCanvas = ref(null);
+    let canvasResizeObserver = null;
 
     // 绘制相关状态
     const isDrawing = ref(false);
@@ -147,6 +169,7 @@ export default defineComponent({
 
     const resetConfig = () => {
       configForm.coordinates = {
+        enabled: false,
         points: [],
       };
       clearDrawing();
@@ -155,15 +178,19 @@ export default defineComponent({
 
     const saveConfig = async () => {
       try {
-        // 智能方案的验证逻辑
-        if (!configForm.coordinates.points || configForm.coordinates.points.length < 3) {
-          throw new Error('请绘制有效的区域，至少需要3个点');
+        if (configForm.coordinates.enabled) {
+          if (!configForm.coordinates.points || configForm.coordinates.points.length < 3) {
+            throw new Error('启用区域时请绘制有效多边形，至少需要3个点');
+          }
         }
 
         saveLoading.value = true;
 
-        await deviceApi.updateDevice(deviceId, {
-          area_coordinates: configForm.coordinates
+        await deviceApi.updateDevice(deviceId.value, {
+          area_coordinates: {
+            enabled: configForm.coordinates.enabled,
+            points: configForm.coordinates.points || [],
+          }
         });
 
         ElMessage.success('区域配置保存成功');
@@ -176,39 +203,80 @@ export default defineComponent({
     };
 
     const canSave = () => {
-      return configForm.coordinates.points.length > 2;
+      if (!configForm.coordinates.enabled) {
+        return true;
+      }
+      return Array.isArray(configForm.coordinates.points) && configForm.coordinates.points.length > 2;
     };
 
-    // 绘制相关方法
-    const initCanvas = () => {
-      if (!drawingCanvas.value || !deviceImageRef.value) return;
-
-      const canvas = drawingCanvas.value;
+    const getImageDisplayRect = () => {
       const image = deviceImageRef.value;
+      const wrapper = image?.parentElement;
+      if (!image || !wrapper || !image.naturalWidth || !image.naturalHeight) return null;
+      const containerWidth = wrapper.clientWidth;
+      const containerHeight = wrapper.clientHeight;
+      if (!containerWidth || !containerHeight) return null;
+      const imageRatio = image.naturalWidth / image.naturalHeight;
+      const containerRatio = containerWidth / containerHeight;
+      let displayWidth, displayHeight, offsetX, offsetY;
+      if (imageRatio > containerRatio) {
+        displayWidth = containerWidth;
+        displayHeight = containerWidth / imageRatio;
+        offsetX = 0;
+        offsetY = (containerHeight - displayHeight) / 2;
+      } else {
+        displayHeight = containerHeight;
+        displayWidth = containerHeight * imageRatio;
+        offsetX = (containerWidth - displayWidth) / 2;
+        offsetY = 0;
+      }
+      return { displayWidth, displayHeight, offsetX, offsetY };
+    };
+
+    const syncCanvasLayout = () => {
+      if (!drawingCanvas.value || !deviceImageRef.value) return false;
+      const rect = getImageDisplayRect();
+      if (!rect) return false;
+      const canvas = drawingCanvas.value;
+      const { displayWidth, displayHeight, offsetX, offsetY } = rect;
+      const dpr = window.devicePixelRatio || 1;
+      canvas.style.left = `${offsetX}px`;
+      canvas.style.top = `${offsetY}px`;
+      canvas.style.width = `${displayWidth}px`;
+      canvas.style.height = `${displayHeight}px`;
+      canvas.width = Math.round(displayWidth * dpr);
+      canvas.height = Math.round(displayHeight * dpr);
       const ctx = canvas.getContext('2d');
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      return true;
+    };
 
-      const devicePixelRatio = window.devicePixelRatio || 1;
-      const displayWidth = image.clientWidth;
-      const displayHeight = image.clientHeight;
+    const refreshCanvasDrawing = () => {
+      if (syncCanvasLayout()) {
+        if (configForm.coordinates.points?.length) {
+          drawPolygon(configForm.coordinates.points);
+        } else {
+          redrawCanvas();
+        }
+      }
+    };
 
-      canvas.width = displayWidth * devicePixelRatio;
-      canvas.height = displayHeight * devicePixelRatio;
-      canvas.style.width = displayWidth + 'px';
-      canvas.style.height = displayHeight + 'px';
-
-      ctx.scale(devicePixelRatio, devicePixelRatio);
-      ctx.imageSmoothingEnabled = false;
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
+    const setupCanvasResizeObserver = () => {
+      if (canvasResizeObserver) {
+        canvasResizeObserver.disconnect();
+        canvasResizeObserver = null;
+      }
+      const wrapper = deviceImageRef.value?.parentElement;
+      if (!wrapper || typeof ResizeObserver === 'undefined') return;
+      canvasResizeObserver = new ResizeObserver(() => refreshCanvasDrawing());
+      canvasResizeObserver.observe(wrapper);
     };
 
     const onImageLoaded = () => {
-      setTimeout(() => {
-        initCanvas();
-        if (configForm.coordinates.points && configForm.coordinates.points.length > 0) {
-          drawPolygon(configForm.coordinates.points);
-        }
-      }, 100);
+      requestAnimationFrame(() => {
+        refreshCanvasDrawing();
+        setupCanvasResizeObserver();
+      });
     };
 
     const loadDeviceImage = async () => {
@@ -341,6 +409,10 @@ export default defineComponent({
     };
 
     const startDrawing = () => {
+      if (!configForm.coordinates.enabled) {
+        ElMessage.warning('请先启用区域');
+        return;
+      }
       isDrawing.value = true;
       points.value = [];
       configForm.coordinates.points = [];
@@ -480,25 +552,35 @@ export default defineComponent({
 
     // 数据加载方法
     const loadDeviceList = async () => {
+      if (!deviceId.value) {
+        ElMessage.error('缺少设备ID，无法加载区域设置');
+        return;
+      }
       try {
-        const response = await deviceApi.getDevice(deviceId);
-        deviceInfo.value = response.data;
-        deviceInfo.value = deviceInfo.value || { device_id: deviceId, device_name: '未知设备' };
-
-        Object.assign(configForm.coordinates, deviceInfo.value.area_coordinates);
-
-        // 加载设备图片
+        const response = await deviceApi.getDevice(deviceId.value);
+        deviceInfo.value = response.data || { device_id: deviceId.value, device_name: '未知设备' };
+        const normalized = normalizeAreaCoordinates(deviceInfo.value.area_coordinates);
+        Object.assign(configForm.coordinates, normalized);
+        points.value = normalized.points.map((p) => ({ ...p }));
+        isDrawing.value = false;
         setTimeout(() => {
-            loadDeviceImage();
-          }, 100);
+          loadDeviceImage();
+        }, 100);
       } catch (error) {
-        console.error('获取设备列表失败:', error);
+        console.error('获取设备信息失败:', error);
+        ElMessage.error('加载设备信息失败，请返回重试');
       }
     };
 
     // 初始化
     onMounted(async () => {
       await loadDeviceList();
+      window.addEventListener('resize', refreshCanvasDrawing);
+    });
+
+    onUnmounted(() => {
+      window.removeEventListener('resize', refreshCanvasDrawing);
+      canvasResizeObserver?.disconnect();
     });
 
     return {
@@ -689,21 +771,24 @@ export default defineComponent({
   position: relative;
   width: 100%;
   height: 100%;
+  min-height: 360px;
   overflow: hidden;
   border-radius: 6px;
 }
 
-.device-image,
+.device-image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+}
+
 .drawing-canvas {
   position: absolute;
   top: 0;
   left: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-}
-
-.drawing-canvas {
   z-index: 1;
   cursor: crosshair;
 }

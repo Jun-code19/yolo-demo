@@ -1,12 +1,15 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
 from api.routes import router
 from api.heatmap_routes import heatmap_router
 from src.database import Base, engine
-from src.db_migrations import ensure_device_rtsp_columns, ensure_detection_config_stream_type
+from src.db_migrations import ensure_device_rtsp_columns, ensure_detection_config_stream_type, ensure_device_group_support, ensure_detection_config_group_mode, ensure_detection_log_device_id_nullable, ensure_crowd_analysis_job_extensions, ensure_vlm_inspection_tables, ensure_data_push_log_table, ensure_edge_server_platform_columns, ensure_device_monitor_method
+from src.env_loader import load_env_file
 import uvicorn
 import logging
-import asyncio
+
+load_env_file()
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -16,6 +19,14 @@ logger = logging.getLogger("api")
 Base.metadata.create_all(bind=engine)
 ensure_device_rtsp_columns(engine)
 ensure_detection_config_stream_type(engine)
+ensure_device_group_support(engine)
+ensure_detection_config_group_mode(engine)
+ensure_detection_log_device_id_nullable(engine)
+ensure_crowd_analysis_job_extensions(engine)
+ensure_vlm_inspection_tables(engine)
+ensure_data_push_log_table(engine)
+ensure_edge_server_platform_columns(engine)
+ensure_device_monitor_method(engine)
 
 # 创建FastAPI应用
 app = FastAPI(
@@ -45,9 +56,14 @@ app.include_router(data_listener_router, prefix="/api/v1")
 # 添加数据大屏相关的API接口
 from api.base_dashboard import router as dashboard_router
 from api.dashboard_integrations import router as dashboard_integrations_router
+from api.device_monitor_settings import router as device_monitor_settings_router
 app.include_router(dashboard_router, prefix="/api/v1")
 app.include_router(dashboard_integrations_router, prefix="/api/v1")
+app.include_router(device_monitor_settings_router, prefix="/api/v1")
+
+from api.device_group_routes import router as device_group_router
+app.include_router(device_group_router, prefix="/api/v1")
 
 # 主函数
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8001) 
+    uvicorn.run(app, host="0.0.0.0", port=8001)

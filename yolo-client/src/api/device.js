@@ -250,6 +250,34 @@ export default {
       }
     });
   },
+
+  // 设备分组
+  getDeviceGroups() {
+    return apiClient.get('/device-groups');
+  },
+
+  getDeviceGroupsOverview(filterParams = {}) {
+    const filteredParams = Object.fromEntries(
+      Object.entries(filterParams).filter(([_, value]) => value !== null && value !== undefined && value !== '')
+    );
+    return apiClient.get('/device-groups/overview', { params: filteredParams });
+  },
+
+  createDeviceGroup(data) {
+    return apiClient.post('/device-groups', data);
+  },
+
+  updateDeviceGroup(groupId, data) {
+    return apiClient.put(`/device-groups/${groupId}`, data);
+  },
+
+  deleteDeviceGroup(groupId) {
+    return apiClient.delete(`/device-groups/${groupId}`);
+  },
+
+  assignDevicesToGroup(groupId, deviceIds) {
+    return apiClient.post(`/device-groups/${groupId}/assign`, { device_ids: deviceIds });
+  },
   
   // 获取设备抓图
   getDeviceImage(deviceData) {

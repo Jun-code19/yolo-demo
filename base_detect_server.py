@@ -1,12 +1,19 @@
 import asyncio # 导入异步I/O模块
-import numpy as np # 导入NumPy模块
 import logging # 导入日志模块
 import os # 导入操作系统模块
+
+from src.env_loader import configure_ultralytics_env, load_env_file
+
+configure_ultralytics_env()
+load_env_file()
+
+import numpy as np # 导入NumPy模块
 from datetime import datetime, timedelta # 导入日期时间模块
 from pathlib import Path # 导入路径模块
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends # 导入FastAPI相关模块
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware # 导入CORS中间件
+from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager # 导入异步上下文管理器
 from ultralytics import YOLO # 导入YOLO模型
 import torch # 导入torch模块
@@ -16,15 +23,19 @@ from sqlalchemy.orm import Session # 导入数据库会话
 from src.data_pusher import data_pusher
 # 导入人群分析模块
 from src.crowd_analyzer import crowd_analyzer
+from src.vlm_inspection_engine import vlm_inspection_engine
 # 导入数据库模块
 from src.database import (
-    SessionLocal, DetectionConfig, DetectionEvent, Device, 
+    SessionLocal, DetectionConfig, DetectionEvent, Device, DeviceGroup,
     DetectionModel, ExternalEvent,SmartEvent, Base, engine, get_db, ListenerType
 )
 
 from src.detection_runtime import extract_runtime_config
+from src.inference_pipeline.pipeline_config import extract_inference_pipeline
 from src.run_detection_task import DetectionTask
-from src.db_migrations import ensure_device_rtsp_columns, ensure_detection_config_stream_type
+from src.group_detection_task import GroupDetectionTask
+from src.yolo_task_utils import resolve_yolo_task, load_yolo_model_classes
+from src.db_migrations import ensure_device_rtsp_columns, ensure_detection_config_stream_type, ensure_device_group_support, ensure_detection_config_group_mode, ensure_detection_log_device_id_nullable, ensure_crowd_analysis_job_extensions, ensure_vlm_inspection_tables, ensure_data_push_log_table, ensure_edge_server_platform_columns, ensure_device_monitor_method
 
 # 导入认证模块
 from api.auth import get_current_user, User
@@ -72,6 +83,15 @@ class DetectionServer:
         self.total_cpu_usage = 0
         self.total_memory_usage = 0
         self.active_task_count = 0
+
+    @staticmethod
+    def _log_device_id_for_config(config: DetectionConfig, task=None):
+        config_mode = getattr(config, "config_mode", None) or "device"
+        if config_mode == "group":
+            if task and getattr(task, "last_device_id", None):
+                return task.last_device_id
+            return None
+        return config.device_id
     
     # 启动特定配置的检测任务
     async def start_detection(self, config_id: str, db: Session, user_id: str = None):
@@ -97,12 +117,40 @@ class DetectionServer:
             model = db.query(DetectionModel).filter(DetectionModel.models_id == config.models_id).first()
             if not model:
                 logger.error(f"未找到模型: {config.models_id}")
-                # 记录失败日志
-                log_detection_action(config_id, config.device_id, "start", "failed", f"未找到模型: {config.models_id}", user_id)
+                log_detection_action(
+                    config_id,
+                    self._log_device_id_for_config(config),
+                    "start",
+                    "failed",
+                    f"未找到模型: {config.models_id}",
+                    user_id,
+                )
                 return {"status": "error", "message": "未找到模型"}
             
             # 检查频率
-            if config.frequency.value == "scheduled":
+            config_mode = getattr(config, "config_mode", None) or "device"
+            if config_mode == "group":
+                if config.frequency.value != "realtime":
+                    log_detection_action(
+                        config_id,
+                        None,
+                        "start",
+                        "failed",
+                        f"分组检测仅支持实时模式 (group_id={config.group_id})",
+                        user_id,
+                    )
+                    return {"status": "error", "message": "分组检测仅支持实时模式"}
+                await self._create_and_start_task(config, model, db)
+                log_detection_action(
+                    config_id,
+                    None,
+                    "start",
+                    "success",
+                    f"启动分组检测任务成功 (group_id={config.group_id})",
+                    user_id,
+                )
+                return {"status": "success", "message": "分组检测任务已启动"}
+            elif config.frequency.value == "scheduled":
                 log_detection_action(config_id, config.device_id, "start", "failed", "定时检测已移除，请改为实时检测或抽帧检测", user_id)
                 return {"status": "error", "message": "定时检测已移除，请编辑配置并改为实时检测或抽帧检测"}
             elif config.frequency.value == "manual":
@@ -118,9 +166,10 @@ class DetectionServer:
             
         except Exception as e:
             logger.error(f"启动检测任务失败: {str(e)}")
-            # 记录失败日志
-            device_id = config.device_id if 'config' in locals() and hasattr(config, 'device_id') else "unknown"
-            log_detection_action(config_id, device_id, "start", "failed", f"启动检测任务失败: {str(e)}", user_id)
+            log_device_id = None
+            if "config" in locals() and config is not None:
+                log_device_id = self._log_device_id_for_config(config)
+            log_detection_action(config_id, log_device_id, "start", "failed", f"启动检测任务失败: {str(e)}", user_id)
             return {"status": "error", "message": f"启动检测任务失败: {str(e)}"}
     
     # 停止特定配置的检测任务
@@ -128,10 +177,12 @@ class DetectionServer:
         """停止特定配置的检测任务"""
         # 获取设备ID
         device_id = "unknown"
+        config = None
         try:
             config = db.query(DetectionConfig).filter(DetectionConfig.config_id == config_id).first()
             if config:
-                device_id = config.device_id
+                task = self.tasks.get(config_id)
+                device_id = self._log_device_id_for_config(config, task)
         except Exception:
             pass
         
@@ -180,10 +231,11 @@ class DetectionServer:
         
         for config in enabled_configs:
             try:
+                config_mode = getattr(config, "config_mode", None) or "device"
                 if config.frequency.value == "scheduled":
                     skipped_count += 1
                     logger.warning(f"跳过已废弃的定时检测配置: {config.config_id}")
-                elif config.frequency.value in ("realtime", "manual"):
+                elif config_mode == "group" or config.frequency.value in ("realtime", "manual"):
                     result = await self.start_detection(config.config_id, db)
                     if result.get("status") == "success":
                         started_count += 1
@@ -204,13 +256,15 @@ class DetectionServer:
             })
             await websocket.close()
             return
+
+        task = self.tasks[config_id]
         
         try:
             # 获取当前的事件循环并设置到任务中
-            self.tasks[config_id].loop = asyncio.get_event_loop()
+            task.loop = asyncio.get_event_loop()
             
             # 添加WebSocket客户端到检测任务
-            self.tasks[config_id].add_client(websocket)
+            task.add_client(websocket)
             
             # 发送初始连接成功消息
             await websocket.send_json({
@@ -233,13 +287,17 @@ class DetectionServer:
             logger.error(f"WebSocket连接处理异常: {e}")
         finally:
             # 确保客户端被移除
-            if config_id in self.tasks:
+            if config_id in self.tasks and hasattr(self.tasks[config_id], "remove_client"):
                 self.tasks[config_id].remove_client(websocket)
                 logger.info(f"WebSocket客户端已从检测任务移除: {config_id}")
 
     # 创建并启动检测任务
     async def _create_and_start_task(self, config: DetectionConfig, model: DetectionModel, db: Session, reset_enabled=True):
         """创建并启动检测任务（内部方法）"""
+        config_mode = getattr(config, "config_mode", None) or "device"
+        if config_mode == "group":
+            return await self._create_and_start_group_task(config, model, db, reset_enabled=reset_enabled)
+
         config_id = config.config_id
         device_id = config.device_id
         
@@ -272,10 +330,7 @@ class DetectionServer:
                 os.environ["YOLO_NO_ANALYTICS"] = "1"
                 os.environ["NO_VERSION_CHECK"] = "1"
                 
-                # 确定模型类型
-                task_type = 'detect'
-                if model.models_type == 'pose':
-                    task_type = 'pose'
+                task_type = resolve_yolo_task(model.models_type)
                 
                 logger.info(f"预加载模型到缓存: {model_path}, 任务类型: {task_type}")
                 # 尝试加载模型到缓存
@@ -291,6 +346,7 @@ class DetectionServer:
         # 创建检测任务
         frequency_value = config.frequency.value if hasattr(config.frequency, "value") else config.frequency
         runtime_config = extract_runtime_config(config.schedule_config)
+        inference_pipeline = extract_inference_pipeline(config.schedule_config)
         task = DetectionTask(
             device_id=config.device_id,
             device_name=device.device_name,
@@ -303,9 +359,11 @@ class DetectionServer:
             target_class=config.target_classes,
             save_mode=config.save_mode,
             area_coordinates=config.area_coordinates,
+            device_roi=device.area_coordinates,
             stream_type=getattr(config, 'stream_type', None) or 'main',
             frequency=frequency_value,
             runtime_config=runtime_config,
+            inference_pipeline=inference_pipeline,
         )
         
         # 如果模型已缓存，直接设置
@@ -337,6 +395,75 @@ class DetectionServer:
             config.updated_at = datetime.now()
             db.commit()
         
+        return task
+
+    async def _create_and_start_group_task(self, config: DetectionConfig, model: DetectionModel, db: Session, reset_enabled=True):
+        """创建并启动分组检测任务"""
+        config_id = config.config_id
+        group_id = config.group_id
+        if not group_id:
+            raise ValueError("分组检测配置缺少 group_id")
+
+        group = db.query(DeviceGroup).filter(DeviceGroup.group_id == group_id).first()
+        if not group:
+            raise ValueError("未找到设备分组")
+
+        model_path = model.file_path
+        abs_model_path = os.path.abspath(model_path)
+        if not os.path.exists(abs_model_path):
+            base_name = os.path.basename(model_path)
+            alternative_path = os.path.join("models", base_name)
+            alt_abs_path = os.path.abspath(alternative_path)
+            if os.path.exists(alt_abs_path):
+                model_path = alternative_path
+            else:
+                raise FileNotFoundError(f"模型文件不存在: {os.path.basename(model_path)}")
+
+        if model_path not in self.models_cache:
+            try:
+                os.environ["ULTRALYTICS_OFFLINE"] = "1"
+                os.environ["YOLO_NO_ANALYTICS"] = "1"
+                os.environ["NO_VERSION_CHECK"] = "1"
+                task_type = resolve_yolo_task(model.models_type)
+                self.models_cache[model_path] = YOLO(model_path, task=task_type)
+            except Exception as e:
+                logger.error(f"预加载分组检测模型失败: {e}")
+
+        runtime_config = extract_runtime_config(config.schedule_config)
+        inference_pipeline = extract_inference_pipeline(config.schedule_config)
+        task = GroupDetectionTask(
+            config_id=config_id,
+            group_id=group_id,
+            group_name=group.group_name,
+            model_path=model_path,
+            confidence=config.sensitivity,
+            models_type=model.models_type,
+            is_gpu=model.is_gpu,
+            target_class=config.target_classes,
+            save_mode=config.save_mode,
+            group_settings=config.group_settings,
+            runtime_config=runtime_config,
+            stream_type=getattr(config, "stream_type", None) or "main",
+            inference_pipeline=inference_pipeline,
+        )
+
+        if model_path in self.models_cache:
+            task.model = self.models_cache[model_path]
+            task.class_names = task.model.names
+            device = "cuda" if torch.cuda.is_available() and model.is_gpu else "cpu"
+            task.device = torch.device(device)
+            if device == "cuda" and hasattr(task.model, "model") and hasattr(task.model.model, "dtype"):
+                task.model.model.half()
+
+        task.loop = asyncio.get_event_loop()
+        task.start()
+        self.tasks[config_id] = task
+
+        if reset_enabled:
+            config.enabled = True
+            config.updated_at = datetime.now()
+            db.commit()
+
         return task
     
     def _check_system_resources(self):
@@ -720,8 +847,14 @@ async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
     ensure_device_rtsp_columns(engine)
     ensure_detection_config_stream_type(engine)
-    
-    # 1. 注册数据监听器类型
+    ensure_device_group_support(engine)
+    ensure_detection_config_group_mode(engine)
+    ensure_detection_log_device_id_nullable(engine)
+    ensure_crowd_analysis_job_extensions(engine)
+    ensure_vlm_inspection_tables(engine)
+    ensure_data_push_log_table(engine)
+    ensure_edge_server_platform_columns(engine)
+    ensure_device_monitor_method(engine)
     try:
         register_listener_types()
     except Exception as e:
@@ -768,6 +901,13 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"启动人群分析服务失败: {e}")
 
+    # 6b. 启动 VLM 巡检服务
+    try:
+        vlm_inspection_engine.load_all_active_jobs()
+        vlm_inspection_engine.start()
+    except Exception as e:
+        logger.error(f"启动 VLM 巡检服务失败: {e}")
+
     # 7. 启动数据监听服务
     try:
         db = SessionLocal()
@@ -805,6 +945,12 @@ async def lifespan(app: FastAPI):
         crowd_analyzer.stop()
     except Exception as e:
         logger.error(f"停止人群分析服务失败: {e}")
+
+    # 3b. 停止 VLM 巡检服务
+    try:
+        vlm_inspection_engine.stop()
+    except Exception as e:
+        logger.error(f"停止 VLM 巡检服务失败: {e}")
 
     # 4. 停止检测任务
     for config_id, task in list(detection_server.tasks.items()):
@@ -871,10 +1017,13 @@ async def get_detection_status():
     tasks_status = {}
     for config_id, task in detection_server.tasks.items():
         tasks_status[config_id] = {
-            "device_id": task.device_id,
+            "device_id": getattr(task, "device_id", None),
+            "config_mode": getattr(task, "config_mode", "device"),
+            "group_id": getattr(task, "group_id", None),
+            "last_device_id": getattr(task, "last_device_id", None),
             "is_running": task.thread is not None and task.thread.is_alive(),
-            "connected": task.connected,
-            "clients_count": len(task.clients)
+            "connected": getattr(task, "connected", False),
+            "clients_count": len(getattr(task, "clients", [])),
         }
     
     return {
@@ -1008,12 +1157,13 @@ async def get_system_status_api(current_user: User = Depends(get_current_user)):
         tasks_status = {}
         for config_id, task in detection_server.tasks.items():
             tasks_status[config_id] = {
-                "device_id": task.device_id,
+                "device_id": getattr(task, "device_id", None),
+                "config_mode": getattr(task, "config_mode", "device"),
                 "is_running": task.thread is not None and task.thread.is_alive(),
-                "connected": task.connected,
-                "clients_count": len(task.clients),
-                "use_gpu_decoder": hasattr(task, 'ffmpeg_decoder') and task.ffmpeg_decoder is not None,
-                "skip_frame_count": getattr(task, 'skip_frame_count', 5)
+                "connected": getattr(task, "connected", False),
+                "clients_count": len(getattr(task, "clients", [])),
+                "use_gpu_decoder": hasattr(task, "ffmpeg_decoder") and task.ffmpeg_decoder is not None,
+                "skip_frame_count": getattr(task, "skip_frame_count", 5),
             }
         
         return {
@@ -1040,29 +1190,28 @@ async def get_system_status_api(current_user: User = Depends(get_current_user)):
 
 # 加载模型API端点
 @app.post("/api/v2/model/load", tags=["检测任务"])
-async def load_model_api(model_data: dict): # 加载模型API端点
-    """加载模型API端点"""
+async def load_model_api(model_data: dict):
+    """加载模型 API：校验 .pt / .onnx 并返回类别"""
+    model_path = model_data.get("model_path")
+    if not model_path:
+        raise HTTPException(status_code=400, detail="缺少 model_path")
+
+    models_type = model_data.get("models_type")
+    parameters = model_data.get("parameters") or {}
     try:
-        model_path = model_data.get("model_path")
-        
-        if not model_path:
-            return {"status": "error", "message": "缺少必要参数"}
-            
-        model = YOLO(model_path)  # 加载模型
-        classes = model.names  # 获取类别名称
-        
-        if model:
-            return {
-                "status": "success", 
-                "message": "模型加载成功",                                  
-                "classes": classes
-            }
-        else:
-            return {"status": "error", "message": "模型加载失败"}
-            
+        classes = load_yolo_model_classes(
+            model_path,
+            models_type=models_type,
+            parameters=parameters,
+        )
+        return {
+            "status": "success",
+            "message": "模型加载成功",
+            "classes": classes,
+        }
     except Exception as e:
         logger.error(f"加载模型失败: {e}")
-        return {"status": "error", "message": f"加载模型失败: {str(e)}"}
+        raise HTTPException(status_code=400, detail=f"加载模型失败: {e}")
 
 # 检测预览WebSocket端点
 @app.websocket("/ws/detection/preview/{config_id}")
@@ -1089,7 +1238,7 @@ async def detection_preview_websocket(websocket: WebSocket, config_id: str): # �
     
     # 任务存在或已成功启动
     task = detection_server.tasks[config_id]
-    
+
     try:
         # 确保任务的事件循环已设置
         if not task.loop:
@@ -1102,7 +1251,9 @@ async def detection_preview_websocket(websocket: WebSocket, config_id: str): # �
             "status": "success",
             "message": "已连接到检测服务",
             "config_id": config_id,
-            "device_id": task.device_id
+            "device_id": getattr(task, "last_device_id", None) or task.device_id,
+            "group_id": getattr(task, "group_id", None),
+            "config_mode": getattr(task, "config_mode", "device"),
         })
         
         # 添加WebSocket客户端到检测任务
@@ -1123,13 +1274,18 @@ async def detection_preview_websocket(websocket: WebSocket, config_id: str): # �
         logger.error(f"WebSocket连接处理异常: {e}")
     finally:
         # 确保客户端被移除
-        if config_id in detection_server.tasks:
+        if config_id in detection_server.tasks and hasattr(detection_server.tasks[config_id], "remove_client"):
             detection_server.tasks[config_id].remove_client(websocket)
             logger.info(f"WebSocket客户端已从检测任务移除: {config_id}")
 
 # 注册人群分析API路由
 from api.crowd_analysis import router as crowd_analysis_router
+from api.vlm_inspection import router as vlm_inspection_router
 app.include_router(crowd_analysis_router, prefix="/api/v2")
+app.include_router(vlm_inspection_router, prefix="/api/v2")
+
+if os.path.isdir("storage"):
+    app.mount("/storage", StaticFiles(directory="storage"), name="storage")
 
 # 添加数据推送相关的API接口
 from api.data_push import router as data_push_router
@@ -1145,7 +1301,9 @@ app.include_router(data_listener_router, prefix="/api/v2")
 
 # 添加事件订阅相关的API接口
 from api.smart_scheme_routes import router as smart_scheme_router
+from api.device_monitor_routes import router as device_monitor_routes_router
 app.include_router(smart_scheme_router, prefix="/api/v2")
+app.include_router(device_monitor_routes_router, prefix="/api/v2")
 
 # 主函数
 if __name__ == "__main__":

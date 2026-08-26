@@ -196,10 +196,10 @@ const loadRecentEvents = async () => {
 }
 
 const viewAllEvents = () => {
-  // 跳转到事件列表页面，并传递当前订阅ID作为查询参数
   router.push({
-    path: '/smart-events',
+    path: '/smart-schemes',
     query: {
+      tab: 'events',
       scheme_id: props.scheme.id
     }
   })

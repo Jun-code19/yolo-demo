@@ -1,263 +1,355 @@
 """
 设备状态监控服务
-定期检查所有视频设备的在线状态和记录心跳时间并更新到数据库
+支持可配置探活策略：RTSP（通道级）、TCP、HTTP（大华）、可选 Ping
 """
 import asyncio
+import json
 import logging
+import platform
+import shutil
+import subprocess
 import threading
-import time
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional
-from sqlalchemy.orm import Session
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+import aiohttp
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
-from apscheduler.triggers.cron import CronTrigger
 
 from src.database import SessionLocal, Device, DetectionConfig
 from src.data_pusher import data_pusher
+from src.device_monitor_config import load_device_monitor_config, resolve_check_methods
+from src.rtsp_url import build_rtsp_url
 
 logger = logging.getLogger(__name__)
 
-OFFLINE_THRESHOLD = 3 # 连续离线超过3次才标记为离线
-PER_DEVICE_CHECK_DELAY_SECONDS = 0.2 # 每个设备检查之间的延迟，单位秒
+
+class DeviceConnectivityChecker:
+    """设备连通性探测（可被监控任务与 API 共用）"""
+
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
+        self.config = config or load_device_monitor_config()
+
+    def reload_config(self, db_session=None) -> None:
+        self.config = load_device_monitor_config(db_session)
+
+    async def check_device(self, device: Device) -> bool:
+        methods = resolve_check_methods(device, self.config)
+        for method in methods:
+            if method == "ping" and not self.config.get("enable_ping"):
+                continue
+            checker = getattr(self, f"_check_{method}", None)
+            if checker is None:
+                continue
+            try:
+                if await checker(device):
+                    return True
+            except Exception as exc:
+                logger.debug("设备 %s 探活 %s 失败: %s", device.device_id, method, exc)
+        return False
+
+    async def _check_rtsp(self, device: Device) -> bool:
+        stream = self.config.get("rtsp_stream_for_probe", "sub")
+        rtsp_url = build_rtsp_url(device, stream_type=stream)
+        timeout = float(self.config.get("rtsp_timeout_seconds", 6))
+        if shutil.which("ffprobe"):
+            return await asyncio.to_thread(self._probe_rtsp_ffprobe, rtsp_url, timeout)
+        return await asyncio.to_thread(self._probe_rtsp_opencv, rtsp_url, timeout)
+
+    @staticmethod
+    def _probe_rtsp_ffprobe(rtsp_url: str, timeout: float) -> bool:
+        cmd = [
+            "ffprobe",
+            "-v", "error",
+            "-rtsp_transport", "tcp",
+            "-stimeout", str(int(timeout * 1_000_000)),
+            "-i", rtsp_url,
+            "-show_entries", "stream=codec_type",
+            "-of", "csv=p=0",
+        ]
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=max(timeout + 1, 2),
+            )
+            return result.returncode == 0 and bool(result.stdout.strip())
+        except (subprocess.TimeoutExpired, OSError):
+            return False
+
+    @staticmethod
+    def _probe_rtsp_opencv(rtsp_url: str, timeout: float) -> bool:
+        import time
+        try:
+            import cv2
+        except ImportError:
+            return False
+
+        cap = None
+        try:
+            cap = cv2.VideoCapture(rtsp_url)
+            if not cap.isOpened():
+                return False
+            deadline = time.time() + timeout
+            while time.time() < deadline:
+                ok, _ = cap.read()
+                if ok:
+                    return True
+                time.sleep(0.2)
+            return False
+        except Exception:
+            return False
+        finally:
+            if cap is not None:
+                cap.release()
+
+    async def _check_tcp(self, device: Device) -> bool:
+        host = device.ip_address
+        ports = []
+        if device.port:
+            ports.append(int(device.port))
+        if 554 not in ports:
+            ports.append(554)
+        timeout = float(self.config.get("tcp_timeout_seconds", 3))
+        for port in ports:
+            if await self._tcp_open(host, port, timeout):
+                return True
+        return False
+
+    @staticmethod
+    async def _tcp_open(host: str, port: int, timeout: float) -> bool:
+        try:
+            _, writer = await asyncio.wait_for(asyncio.open_connection(host, port), timeout=timeout)
+            writer.close()
+            await writer.wait_closed()
+            return True
+        except (OSError, asyncio.TimeoutError):
+            return False
+
+    async def _check_http_dahua(self, device: Device) -> bool:
+        path = self.config.get("http_dahua_path", "/cgi-bin/api/tcpConnect/tcpTest")
+        port = int(self.config.get("http_dahua_port", 80))
+        url = f"http://{device.ip_address}:{port}{path}"
+        payload = {"Ip": device.ip_address, "Port": port}
+        timeout = aiohttp.ClientTimeout(total=float(self.config.get("http_timeout_seconds", 3)))
+        headers = {"Content-Type": "application/json", "User-Agent": "DeviceMonitor/2.0"}
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(url, data=json.dumps(payload), headers=headers) as response:
+                    return response.status in (200, 401, 403, 404)
+        except (aiohttp.ClientError, asyncio.TimeoutError):
+            return False
+
+    async def _check_ping(self, device: Device) -> bool:
+        if platform.system().lower() == "windows":
+            cmd = ["ping", "-n", "1", "-w", "3000", device.ip_address]
+        else:
+            cmd = ["ping", "-c", "1", "-W", "3", device.ip_address]
+        try:
+            result = await asyncio.to_thread(
+                subprocess.run,
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            return result.returncode == 0
+        except (subprocess.TimeoutExpired, OSError):
+            return False
+
 
 class DeviceMonitor:
     """设备状态监控器"""
-    
+
     def __init__(self):
         self.scheduler = BackgroundScheduler()
-        # 配置APScheduler日志
-        logging.getLogger('apscheduler').setLevel(logging.WARNING)
+        logging.getLogger("apscheduler").setLevel(logging.WARNING)
         self.running = False
-        self.monitoring_config = {
-            'check_interval': 300,  # 10分钟检测一次设备状态
-            'push_interval': 10,    # 30秒推送一次状态数据
-            'enable_notifications': True  # 是否启用通知
-        }
-        self.device_status_history = {}  # 设备状态历史记录
+        self.config = load_device_monitor_config()
+        self.checker = DeviceConnectivityChecker(self.config)
+        self.device_status_history: Dict[str, Any] = {}
         self.lock = threading.Lock()
-        
-    def start(self):
-        """启动设备监控服务"""
-        if not self.running:
-            self.running = True
 
-            self.scheduler.start()
-            
-            # 添加设备状态检测任务 - 每5分钟执行一次
-            self.scheduler.add_job(
-                self._run_check_devices_status,
-                IntervalTrigger(seconds=self.monitoring_config['check_interval']),
-                id='device_status_check',
-                replace_existing=True
-            )
-            
-            # 添加状态数据推送任务 - 每10秒执行一次
-            self.scheduler.add_job(
-                self._run_push_device_status_data,
-                IntervalTrigger(seconds=self.monitoring_config['push_interval']),
-                id='device_status_push',
-                replace_existing=True
-            )
-            
-    def stop(self):
-        """停止设备监控服务"""
+    def _reload_runtime_config(self) -> None:
+        db = SessionLocal()
+        try:
+            self.config = load_device_monitor_config(db)
+            self.checker.config = self.config
+        finally:
+            db.close()
+
+    def start(self):
         if self.running:
-            self.running = False
-            self.scheduler.shutdown()
-    
+            return
+        self._reload_runtime_config()
+        self.running = True
+        self.scheduler.start()
+
+        self.scheduler.add_job(
+            self._run_check_devices_status,
+            IntervalTrigger(seconds=int(self.config["check_interval"])),
+            id="device_status_check",
+            replace_existing=True,
+        )
+        self.scheduler.add_job(
+            self._run_push_device_status_data,
+            IntervalTrigger(seconds=int(self.config["push_interval"])),
+            id="device_status_push",
+            replace_existing=True,
+        )
+
+    def stop(self):
+        if not self.running:
+            return
+        self.running = False
+        self.scheduler.shutdown()
+
+    def reload_scheduler(self):
+        """配置变更后重建定时任务（无需重启检测服务）"""
+        if not self.running:
+            return
+        self._reload_runtime_config()
+        for job_id in ("device_status_check", "device_status_push"):
+            try:
+                self.scheduler.remove_job(job_id)
+            except Exception:
+                pass
+        self.scheduler.add_job(
+            self._run_check_devices_status,
+            IntervalTrigger(seconds=int(self.config["check_interval"])),
+            id="device_status_check",
+            replace_existing=True,
+        )
+        self.scheduler.add_job(
+            self._run_push_device_status_data,
+            IntervalTrigger(seconds=int(self.config["push_interval"])),
+            id="device_status_push",
+            replace_existing=True,
+        )
+
     def _run_check_devices_status(self):
-        """包装函数：在新的事件循环中运行异步检测任务"""
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
         try:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
             loop.run_until_complete(self.check_all_devices_status())
-        except Exception as e:
-            logger.error(f"运行设备状态检测任务失败: {e}")
+        except Exception as exc:
+            logger.error("运行设备状态检测任务失败: %s", exc)
         finally:
             loop.close()
-    
+
     def _run_push_device_status_data(self):
-        """包装函数：在新的事件循环中运行异步推送任务"""
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
         try:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
             loop.run_until_complete(self.push_device_status_data())
-        except Exception as e:
-            logger.error(f"运行设备状态推送任务失败: {e}")
+        except Exception as exc:
+            logger.error("运行设备状态推送任务: %s", exc)
         finally:
             loop.close()
-        
+
     async def check_all_devices_status(self):
-        """检查所有设备的在线状态 - 每5分钟执行一次"""
+        self._reload_runtime_config()
+        db = SessionLocal()
         try:
-            db = SessionLocal()
             devices = db.query(Device).all()
-                       
+            offline_threshold = int(self.config.get("offline_threshold", 3))
+            retry_count = int(self.config.get("retry_count", 3))
+            retry_delay = float(self.config.get("retry_delay_seconds", 1))
+            per_device_delay = float(self.config.get("per_device_delay_seconds", 0.2))
+
             for device in devices:
                 try:
-                    # 检查设备连接状态
                     is_online = False
-                    for _ in range(3):  # 最多重试3次（1次初始尝试 + 2次重试）
-                        is_online = await self._check_device_connection(device)
+                    for _ in range(retry_count):
+                        is_online = await self.checker.check_device(device)
                         if is_online:
                             break
-                        await asyncio.sleep(1)  # 等待1秒后重试
-                    
-                    # 更新设备状态
-                    # 如果设备在线，重置离线计数
+                        await asyncio.sleep(retry_delay)
+
                     if is_online:
                         device.offline_count = 0
                         device.last_online_time = datetime.now()
-                        device.status = True # 确保在线时状态为True
-                    else:
-                        if device.offline_count is None:
-                            device.offline_count = 0
-                        device.offline_count += 1
-                        # 只有当连续离线次数超过阈值，并且当前状态是在线时，才将设备状态标记为离线
-                        if device.offline_count >= OFFLINE_THRESHOLD and device.status:
-                            device.status = False
-                    
-                    # 在线时更新心跳时间
-                    if is_online:
+                        device.status = True
                         device.last_heartbeat = datetime.now()
-                    # print(f"当前设备：{device.device_name}，设备状态：{device.status}，当前时间：{datetime.now()}")
-                except Exception as e:
-                    device.status = False
-                    if device.offline_count is None:
-                        device.offline_count = 0
-                    device.offline_count += 1 # 异常也计为一次离线
-                
-                await asyncio.sleep(PER_DEVICE_CHECK_DELAY_SECONDS) # 每个设备检查后的延迟
-            
-            # 批量提交数据库更新
+                    else:
+                        device.offline_count = (device.offline_count or 0) + 1
+                        if device.offline_count >= offline_threshold:
+                            device.status = False
+                except Exception:
+                    device.offline_count = (device.offline_count or 0) + 1
+                    if device.offline_count >= offline_threshold:
+                        device.status = False
+
+                await asyncio.sleep(per_device_delay)
+
             db.commit()
-            
-        except Exception as e:
-            logger.error(f"设备状态检查失败: {e}")
+        except Exception as exc:
+            logger.error("设备状态检查失败: %s", exc)
+            db.rollback()
         finally:
             db.close()
 
     async def push_device_status_data(self):
-        try:
-            db = SessionLocal()
+        self._reload_runtime_config()
+        enable_push = self.config.get("enable_push", self.config.get("enable_notifications", True))
+        if not enable_push:
+            return
 
-            # ✅ 一次 JOIN，避免 N+1
+        push_tags = self.config.get("push_tags") or ["device_online_status"]
+        if isinstance(push_tags, str):
+            push_tags = [t.strip() for t in push_tags.split(",") if t.strip()]
+        if not push_tags:
+            push_tags = ["device_online_status"]
+
+        db = SessionLocal()
+        try:
             results = (
                 db.query(
                     Device.device_id,
                     Device.status,
-                    DetectionConfig.area_coordinates
+                    DetectionConfig.area_coordinates,
                 )
-                .outerjoin(
-                    DetectionConfig,
-                    Device.device_id == DetectionConfig.device_id
-                )
+                .outerjoin(DetectionConfig, Device.device_id == DetectionConfig.device_id)
                 .all()
             )
 
             camera_statuses = []
-
             for device_id, status, area_coordinates in results:
-                # ✅ 主设备
-                camera_statuses.append({
-                    "deviceId": device_id,
-                    "online": status
-                })
-
+                camera_statuses.append({"deviceId": device_id, "online": status})
                 if not area_coordinates:
                     continue
-
                 occupancy_areas = area_coordinates.get("occupancyAreas")
                 if not occupancy_areas or len(occupancy_areas) <= 1:
                     continue
-
                 for area in occupancy_areas:
-                    camera_statuses.append({
-                        "deviceId": area.get("name"),
-                        "online": status
-                    })
+                    camera_statuses.append({"deviceId": area.get("name"), "online": status})
 
-            try:
-                if data_pusher.push_configs:
-                    data_pusher.push_data(
-                        data={"cameraStatuses": camera_statuses},
-                        tags=["device_online_status"]
-                    )
-            except Exception as push_error:
-                logger.error(f"推送设备状态数据失败: {push_error}")
-
-        except Exception as e:
-            logger.error(f"构建设备状态数据失败: {e}")
+            if data_pusher.push_configs:
+                data_pusher.push_data(
+                    data={"cameraStatuses": camera_statuses},
+                    tags=push_tags,
+                )
+        except Exception as exc:
+            logger.error("构建设备状态数据失败: %s", exc)
         finally:
             db.close()
-            
-    async def _check_device_connection(self, device: Device) -> bool:
-        """检查单个设备的连接状态"""
-        try:  
-            # 方法1: HTTP连接测试（适用于支持HTTP API的设备）
-            if await self._test_http_connection(device):
-                return True
 
-            # 方法2: ICMP Ping测试
-            if await self._test_ping_connection(device):
-                return True    
-                
-            return False
-            
-        except Exception as e:
-            return False
-            
-    async def _test_http_connection(self, device: Device) -> bool:
-        """测试HTTP连接"""
-        try:
-            import aiohttp
-            
-            # 大华官方的tcp测试的API端点
-            test_urls = [
-                f"http://{device.ip_address}/cgi-bin/api/tcpConnect/tcpTest"
-            ]
-            
-            try:
-                timeout = aiohttp.ClientTimeout(total=3)
-                async with aiohttp.ClientSession(timeout=timeout) as session:
-                    async with session.get(test_urls) as response:
-                        if response.status in [200, 401, 403]:
-                            return True
-            except:
-                return False                   
-            
-        except Exception as e:
-            return False
-            
-    async def _test_ping_connection(self, device: Device) -> bool:
-        """测试ICMP Ping连接"""
-        try:
-            import subprocess
-            import platform
-            
-            # Windows系统
-            if platform.system().lower() == "windows":
-                cmd = ["ping", "-n", "1", "-w", "3000", device.ip_address]
-            else:
-                cmd = ["ping", "-c", "1", "-W", "3", device.ip_address]
-                
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
-            return result.returncode == 0
-            
-        except Exception as e:
-            logger.error(f"Ping测试失败: {e}")
-            return False
-                         
-    def get_monitoring_status(self) -> Dict:
-        """获取监控服务状态"""
+    def get_monitoring_status(self) -> Dict[str, Any]:
         with self.lock:
             return {
-                'running': self.running,
-                'config': self.monitoring_config,
-                'scheduler_jobs': len(self.scheduler.get_jobs()),
-                'last_check_time': datetime.now().isoformat()
+                "running": self.running,
+                "config": self.config,
+                "scheduler_jobs": len(self.scheduler.get_jobs()) if self.running else 0,
+                "last_check_time": datetime.now().isoformat(),
             }
-               
-# 全局实例
+
+
+async def check_device_online(device: Device, db_session=None) -> bool:
+    """供 API 等模块复用的单设备探活"""
+    config = load_device_monitor_config(db_session)
+    checker = DeviceConnectivityChecker(config)
+    return await checker.check_device(device)
+
+
 device_monitor = DeviceMonitor()

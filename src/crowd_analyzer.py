@@ -20,7 +20,6 @@ from apscheduler.triggers.interval import IntervalTrigger # 导入间隔触发�
 from apscheduler.triggers.cron import CronTrigger # 导入Cron触发器
 import os # 导入操作系统模块
 import psutil # 导入系统监控模块
-import requests # 导入HTTP请求模块
 from collections import OrderedDict # 导入有序字典
 # 导入数据库模型
 from src.database import (
@@ -29,7 +28,10 @@ from src.database import (
 )
 # 导入数据推送模块
 from src.data_pusher import data_pusher
-from src.rtsp_url import build_rtsp_url
+from src.device_roi import get_device_roi_pixels
+from src.frame_acquisition import frame_acquisition, DEFAULT_GROUP_SETTINGS
+from src.detection_runtime import extract_runtime_config, is_within_active_period
+from src.crowd_job_utils import resolve_crowd_job_devices
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -201,7 +203,6 @@ class CrowdAnalyzer:
         self.analysis_jobs = {}  # 存储所有分析任务 {job_id: job_details}
         self.model_cache = ModelCache(max_size=10, max_memory_mb=2048)  # 使用新的模型缓存类
         self.lock = threading.Lock()
-        self.device_get_frame_method = {}
         self.usedevice = 'cpu'
         # 启动缓存清理定时任务
         self._start_cache_cleanup()
@@ -214,24 +215,11 @@ class CrowdAnalyzer:
                     time.sleep(3600)  # 每小时清理一次
                     if self.running:
                         self.model_cache.cleanup()
-                        # 清理设备图片获取方法记录
-                        self._cleanup_device_frame_methods()
                 except Exception as e:
                     logger.error(f"缓存清理任务出错: {e}")
         
         cleanup_thread = threading.Thread(target=cleanup_task, daemon=True)
         cleanup_thread.start()
-    
-    def _cleanup_device_frame_methods(self):
-        """清理设备图片获取方法记录"""
-        try:
-            with self.lock:
-                if self.device_get_frame_method:
-                    old_count = len(self.device_get_frame_method)
-                    self.device_get_frame_method.clear()
-                    logger.info(f"已清理 {old_count} 个设备的图片获取方法记录")
-        except Exception as e:
-            logger.error(f"清理设备图片获取方法记录时出错: {e}")
         
     def start(self):
         """启动人群分析服务"""
@@ -246,77 +234,61 @@ class CrowdAnalyzer:
             self.model_cache.clear()  # 清空模型缓存
             self.scheduler.shutdown()
             
-    def add_analysis_job(self, job_id: str, job_name: str, device_ids: List[str], 
-                          models_id: str,
-                          detect_classes: List[str] = None,
-                          confidence_threshold: float = 0.5,
-                          interval: int = 300, cron_expression: str = None, 
-                          tags: List[str] = ["crowd_analysis"],
-                          location_info: Dict = None):
-        """
-        添加人群分析任务
-        
-        Args:
-            job_id: 任务ID
-            job_name: 任务名称
-            device_ids: 设备ID列表
-            model_id: 检测模型ID
-            interval: 分析间隔（秒），默认5分钟
-            cron_expression: cron表达式，用于更精确的定时控制（优先于interval）
-            tags: 标签列表，用于数据推送筛选
-            location_info: 位置信息，如 {"name": "一楼大厅", "coordinates": [116.123, 39.456]}
-        """
-        job_details = {
-            "job_id": job_id,
-            "job_name": job_name,
-            "device_ids": device_ids,
-            "models_id": models_id,
-            "detect_classes": detect_classes,
-            "confidence_threshold": confidence_threshold,
-            "interval": interval,
-            "cron_expression": cron_expression,
-            "tags": tags,
-            "location_info": location_info or {},
-            "created_at": datetime.now(),
-            "last_run": None,
-            "status": "created"
-        }
-        
-        # 定义任务触发器
-        if cron_expression:
-            trigger = CronTrigger.from_crontab(cron_expression)
-        else:
-            trigger = IntervalTrigger(seconds=interval)
-        
-        # 创建调度任务
-        job = self.scheduler.add_job(
-            self._run_analysis,
-            trigger=trigger,
-            args=[job_id, device_ids, models_id, tags, location_info, detect_classes, confidence_threshold],
-            id=job_id,
-            replace_existing=True
-        )
-        
-        # 保存任务信息
-        with self.lock:
-            job_details["job"] = job
-            job_details["status"] = "scheduled"
-            self.analysis_jobs[job_id] = job_details
-            
-        logger.info(f"人群分析任务已添加: {job_id}")
-        return job_details
+    def add_analysis_job(self, job_id: str):
+        """将数据库中的人群分析任务加入调度器"""
+        db = SessionLocal()
+        try:
+            job = db.query(CrowdAnalysisJob).filter(CrowdAnalysisJob.job_id == job_id).first()
+            if not job:
+                logger.error(f"未找到人群分析任务: {job_id}")
+                return None
+
+            if job.cron_expression:
+                trigger = CronTrigger.from_crontab(job.cron_expression)
+            else:
+                trigger = IntervalTrigger(seconds=job.interval or 300)
+
+            self.scheduler.add_job(
+                self._run_analysis,
+                trigger=trigger,
+                args=[job_id],
+                id=job_id,
+                replace_existing=True,
+            )
+
+            job_details = {
+                "job_id": job_id,
+                "job_name": job.job_name,
+                "interval": job.interval or 300,
+                "cron_expression": job.cron_expression,
+                "created_at": job.created_at,
+                "last_run": None,
+                "status": "scheduled",
+            }
+
+            with self.lock:
+                self.analysis_jobs[job_id] = job_details
+
+            logger.info(f"人群分析任务已添加: {job_id}")
+            return job_details
+        finally:
+            db.close()
     
     def remove_analysis_job(self, job_id: str):
-        """移除人群分析任务"""
+        """移除人群分析任务（停止调度；已在跑的一轮会在下一台设备前退出）"""
+        try:
+            self.scheduler.remove_job(job_id)
+        except Exception:
+            pass
+
         with self.lock:
             if job_id in self.analysis_jobs:
-                job_details = self.analysis_jobs[job_id]
-                if "job" in job_details:
-                    self.scheduler.remove_job(job_id)
+                self.analysis_jobs[job_id]["status"] = "paused"
                 del self.analysis_jobs[job_id]
                 logger.info(f"人群分析任务已移除: {job_id}")
                 return True
-            return False
+        logger.info(f"人群分析任务已从调度器移除: {job_id}")
+        return True
     
     def get_analysis_jobs(self):
         """获取所有人群分析任务"""
@@ -360,34 +332,59 @@ class CrowdAnalyzer:
         logger.info(f"重新加载模型: {model_path}")
         return self._get_model(model_path, confidence)
     
-    def _run_analysis(self, job_id: str, device_ids: List[str], 
-                     models_id: str, tags: List[str], location_info: Dict, detect_classes: List[str], 
-                     confidence_threshold: float = 0.5):
-        """
-        执行人群分析的具体逻辑
-        
-        Args:
-            job_id: 任务ID
-            device_ids: 设备ID列表
-            models_id: 检测模型ID
-            tags: 数据推送标签
-            location_info: 位置信息
-        """
+    def _is_job_stopped(self, db: Session, job_id: str) -> bool:
+        """判断任务是否应停止（DB 已停用或已从运行时队列移除）"""
+        job = db.query(CrowdAnalysisJob).filter(CrowdAnalysisJob.job_id == job_id).first()
+        if not job or not job.is_active:
+            return True
+        with self.lock:
+            return job_id not in self.analysis_jobs
+
+    def _run_analysis(self, job_id: str, manual: bool = False):
+        """执行人群分析：从数据库加载配置，校验生效时段后逐台取帧检测"""
         start_time = time.time()
-        # logger.info(f"开始执行人群分析: {job_id}")
-        
+        db = SessionLocal()
         try:
-            # 更新任务状态
+            job = db.query(CrowdAnalysisJob).filter(CrowdAnalysisJob.job_id == job_id).first()
+            if not job:
+                logger.error(f"未找到人群分析任务: {job_id}")
+                return None
+
+            if not manual and self._is_job_stopped(db, job_id):
+                logger.info(f"人群分析任务未启用或已停止，跳过: {job_id}")
+                return None
+
+            runtime = extract_runtime_config(job.schedule_config)
+            if not is_within_active_period(datetime.now(), runtime):
+                with self.lock:
+                    if job_id in self.analysis_jobs:
+                        self.analysis_jobs[job_id]["status"] = "scheduled"
+                return None
+
+            device_ids = resolve_crowd_job_devices(db, job)
+            if not device_ids:
+                error_msg = "没有可用的监控设备"
+                with self.lock:
+                    if job_id in self.analysis_jobs:
+                        self.analysis_jobs[job_id]["status"] = "error"
+                        self.analysis_jobs[job_id]["last_error"] = error_msg
+                self.update_job_status_in_db(job_id, None, error=error_msg)
+                return None
+
+            models_id = job.models_id
+            tags = job.tags or ["crowd_analysis"]
+            location_info = job.location_info or {}
+            detect_classes = job.detect_classes or []
+            confidence_threshold = job.confidence_threshold or 0.5
+            group_settings = job.group_settings or DEFAULT_GROUP_SETTINGS
+            device_interval = float(group_settings.get("device_interval_sec") or 0)
+
             with self.lock:
                 if job_id in self.analysis_jobs:
                     self.analysis_jobs[job_id]["status"] = "running"
                     self.analysis_jobs[job_id]["last_run"] = datetime.now()
-            
-            # 获取模型信息
-            db = SessionLocal()
+
             model = db.query(DetectionModel).filter(DetectionModel.models_id == models_id).first()
-            db.close()
-            
             if not model:
                 logger.error(f"未找到模型: {models_id}")
                 with self.lock:
@@ -395,9 +392,8 @@ class CrowdAnalyzer:
                         self.analysis_jobs[job_id]["status"] = "error"
                         self.analysis_jobs[job_id]["last_error"] = f"未找到模型: {models_id}"
                 return None
-            
-            # 加载YOLO模型
-            yolo_model = self._get_model(model.file_path, confidence_threshold, model.is_gpu)  # 使用任务配置的置信度
+
+            yolo_model = self._get_model(model.file_path, confidence_threshold, model.is_gpu)
             if not yolo_model:
                 logger.error(f"模型加载失败: {model.file_path}")
                 with self.lock:
@@ -405,30 +401,40 @@ class CrowdAnalyzer:
                         self.analysis_jobs[job_id]["status"] = "error"
                         self.analysis_jobs[job_id]["last_error"] = f"模型加载失败: {model.file_path}"
                 return None
-            
-            # 初始化结果集
+
             analysis_results = {
                 "job_id": job_id,
                 "timestamp": datetime.now().isoformat(),
                 "location_info": self._ensure_json_serializable(location_info),
-                "camera_counts": []
+                "camera_counts": [],
             }
-            
+
             total_person_count = 0
-            
-            # 遍历所有设备
-            for device_id in device_ids:
-                result = self._analyze_single_camera(device_id, yolo_model, confidence_threshold, detect_classes, tags)  # 使用任务配置的置信度
+            for index, device_id in enumerate(device_ids):
+                if not manual and self._is_job_stopped(db, job_id):
+                    logger.info(f"人群分析任务已停止，中断本轮: {job_id}")
+                    with self.lock:
+                        if job_id in self.analysis_jobs:
+                            self.analysis_jobs[job_id]["status"] = "paused"
+                    return None
+
+                if index > 0 and device_interval > 0:
+                    time.sleep(device_interval)
+                result = self._analyze_single_camera(
+                    device_id,
+                    yolo_model,
+                    confidence_threshold,
+                    detect_classes,
+                    tags,
+                    group_settings,
+                )
                 if result:
-                    # 确保所有结果都可JSON序列化
                     result_serializable = self._ensure_json_serializable(result)
                     analysis_results["camera_counts"].append(result_serializable)
                     total_person_count += result.get("person_count", 0)
-            
-            # 添加总人数
+
             analysis_results["total_person_count"] = total_person_count
-            
-            # 删除preview_image字段
+
             def remove_preview_image(camera_counts):
                 processed_camera_counts = []
                 for camera in camera_counts:
@@ -437,18 +443,12 @@ class CrowdAnalyzer:
                         del camera_copy["preview_image"]
                     processed_camera_counts.append(camera_copy)
                 return processed_camera_counts
-            
+
             processed_camera_counts = remove_preview_image(analysis_results["camera_counts"])
-            # 检查是否需要发送预警
             self._check_warning(job_id, total_person_count, processed_camera_counts)
-            
-            # 保存结果到数据库
             self._save_analysis_result(job_id, total_person_count, location_info, processed_camera_counts)
-            
-            # 计算分析耗时
+
             analysis_time = time.time() - start_time
-            
-            # 更新任务状态
             with self.lock:
                 if job_id in self.analysis_jobs:
                     self.analysis_jobs[job_id]["status"] = "completed"
@@ -456,269 +456,41 @@ class CrowdAnalyzer:
                         "timestamp": datetime.now().isoformat(),
                         "total_person_count": total_person_count,
                         "camera_counts": analysis_results["camera_counts"],
-                        "analysis_time": analysis_time
-                    }
-                    # 记录分析时间统计
-                    if "time_stats" not in self.analysis_jobs[job_id]:
-                        self.analysis_jobs[job_id]["time_stats"] = []
-                    self.analysis_jobs[job_id]["time_stats"].append({
-                        "timestamp": datetime.now().isoformat(),
                         "analysis_time": analysis_time,
-                        "device_count": len(device_ids)
-                    })
-                    # 保持最近10次的记录
-                    if len(self.analysis_jobs[job_id]["time_stats"]) > 10:
-                        self.analysis_jobs[job_id]["time_stats"] = self.analysis_jobs[job_id]["time_stats"][-10:]
-            
-            # 检查是否需要自动调整任务间隔
-            self._check_and_adjust_interval(job_id, analysis_time)
-            
-            # logger.info(f"人群分析完成: {job_id}, 总人数: {total_person_count}, 耗时: {analysis_time:.2f}秒")
-            return analysis_results
-            
-        except Exception as e:
-            # 计算分析耗时（即使失败也要记录）
-            analysis_time = time.time() - start_time
-            
-            logger.error(f"人群分析任务异常: {e}")
-            # 更新任务状态
-            with self.lock:
-                if job_id in self.analysis_jobs:
-                    self.analysis_jobs[job_id]["status"] = "error"
-                    self.analysis_jobs[job_id]["last_error"] = str(e)
-                    # 记录失败的时间统计
+                    }
                     if "time_stats" not in self.analysis_jobs[job_id]:
                         self.analysis_jobs[job_id]["time_stats"] = []
                     self.analysis_jobs[job_id]["time_stats"].append({
                         "timestamp": datetime.now().isoformat(),
                         "analysis_time": analysis_time,
                         "device_count": len(device_ids),
-                        "status": "error"
                     })
-                    # 保持最近10次的记录
                     if len(self.analysis_jobs[job_id]["time_stats"]) > 10:
                         self.analysis_jobs[job_id]["time_stats"] = self.analysis_jobs[job_id]["time_stats"][-10:]
-            
+
+            self._check_and_adjust_interval(job_id, analysis_time)
+            return analysis_results
+        except Exception as e:
+            analysis_time = time.time() - start_time
+            logger.error(f"人群分析任务异常: {e}")
+            with self.lock:
+                if job_id in self.analysis_jobs:
+                    self.analysis_jobs[job_id]["status"] = "error"
+                    self.analysis_jobs[job_id]["last_error"] = str(e)
+                    if "time_stats" not in self.analysis_jobs[job_id]:
+                        self.analysis_jobs[job_id]["time_stats"] = []
+                    self.analysis_jobs[job_id]["time_stats"].append({
+                        "timestamp": datetime.now().isoformat(),
+                        "analysis_time": analysis_time,
+                        "device_count": 0,
+                        "status": "error",
+                    })
+                    if len(self.analysis_jobs[job_id]["time_stats"]) > 10:
+                        self.analysis_jobs[job_id]["time_stats"] = self.analysis_jobs[job_id]["time_stats"][-10:]
             logger.error(f"人群分析任务失败: {job_id}, 耗时: {analysis_time:.2f}秒")
             return None
-    
-    def _get_camera_frame(self, device):
-        """       
-        优先使用摄像机API抓图，失败时回退到OpenCV RTSP拉流
-        
-        Args:
-            device: 设备对象
-            
-        Returns:
-            图像帧，失败则返回None
-        """
-        device_id = device.device_id
-        
-        # 检查是否有记录的成功方法
-        if device_id in self.device_get_frame_method:
-            method = self.device_get_frame_method[device_id]
-            if method == 'api':
-                # 直接使用API方法
-                frame = self._get_frame_via_api(device)
-                if frame is not None:
-                    return frame
-                else:
-                    # API失败，清除记录并尝试RTSP
-                    del self.device_get_frame_method[device_id]
-
-            elif method == 'rtsp':
-                # 直接使用RTSP方法
-                frame = self._get_frame_via_rtsp(device)
-                if frame is not None:
-                    return frame
-                else:
-                    # RTSP失败，清除记录并尝试API
-                    del self.device_get_frame_method[device_id]
-        
-        # 没有记录或记录的方法失败，按优先级尝试
-        # 首先尝试使用摄像机API抓图
-        frame = self._get_frame_via_api(device)
-        if frame is not None:
-            # 记录API方法成功
-            self.device_get_frame_method[device_id] = 'api'
-            return frame
-        
-        # API抓图失败，回退到OpenCV RTSP拉流
-        frame = self._get_frame_via_rtsp(device)
-        if frame is not None:
-            # 记录RTSP方法成功
-            self.device_get_frame_method[device_id] = 'rtsp'
-            return frame
-        
-        return None
-    
-    def _get_frame_via_api(self, device):
-        """
-        通过摄像机API抓图获取图像
-        
-        Args:
-            device: 设备对象
-            
-        Returns:
-            OpenCV图像帧，失败则返回None
-        """
-        try:
-            # 构建设备抓图URL
-            if device.device_type.lower() == 'nvr':
-                snapshot_url = f"http://{device.ip_address}/cgi-bin/snapshot.cgi?channel={device.channel}&type=0"
-            else:
-                snapshot_url = f"http://{device.ip_address}/cgi-bin/snapshot.cgi?channel=1&type=0"
-            
-            # 第一次请求，获取认证信息
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }
-            
-            first_response = requests.get(snapshot_url, headers=headers, timeout=10)
-
-            if first_response.status_code == 200:
-                # 如果直接成功，将图片字节数据转换为OpenCV图像
-                image_array = np.frombuffer(first_response.content, np.uint8)
-                frame = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
-                if frame is not None:
-                    # logger.info(f"API抓图成功: {device.device_id}, 图像尺寸: {frame.shape}")
-                    return frame
-                else:
-                    # logger.error(f"API抓图成功但图像解码失败: {device.device_id}")
-                    return None
-            
-            elif first_response.status_code == 401:
-                # 需要认证
-                auth_header = first_response.headers.get('www-authenticate', '')
-                
-                if 'Digest' in auth_header:
-                    # Digest认证
-                    auth_response = self._generate_digest_auth(
-                        auth_header, device.username, device.password, 
-                        'GET', snapshot_url
-                    )
-                    
-                    # 发送带认证的请求
-                    auth_headers = {
-                        'Authorization': auth_response,
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-                    }
-                    
-                    auth_response_obj = requests.get(snapshot_url, headers=auth_headers, timeout=10)
-                    
-                    if auth_response_obj.status_code == 200:
-                        # 将认证后的图片字节数据转换为OpenCV图像
-                        image_array = np.frombuffer(auth_response_obj.content, np.uint8)
-                        frame = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
-                        if frame is not None:
-                            # logger.info(f"API抓图成功(认证): {device.device_id}, 图像尺寸: {frame.shape}")
-                            return frame
-                        else:
-                            # logger.error(f"API抓图成功(认证)但图像解码失败: {device.device_id}")
-                            return None
-                    else:
-                        # logger.error(f"设备抓图失败: {device.device_id}, {auth_response_obj.status_code}")
-                        return None
-            
-            else:
-                # 其他状态码
-                # logger.error(f"设备抓图失败: {device.device_id}, {first_response.status_code}")
-                return None
-             
-        except requests.exceptions.Timeout:
-            # logger.error(f"请求超时，设备可能离线或网络不通: {device.device_id}")
-            return None
-        except requests.exceptions.ConnectionError:
-            # logger.error(f"连接失败，设备可能离线或网络不通: {device.device_id}")
-            return None
-        except Exception as e:
-            # logger.error(f"设备抓图失败: {device.device_id}, {e}")
-            return None
-    
-    def _generate_digest_auth(self, auth_header: str, username: str, password: str, method: str, uri: str) -> str:
-        """
-        生成Digest认证响应
-        """
-        import hashlib
-        import re
-        
-        # 解析认证头
-        auth_info = {}
-        pattern = r'(\w+)="([^"]*)"'
-        matches = re.findall(pattern, auth_header)
-        
-        for key, value in matches:
-            auth_info[key] = value
-        
-        realm = auth_info.get('realm', '')
-        nonce = auth_info.get('nonce', '')
-        qop = auth_info.get('qop', '')
-        algorithm = auth_info.get('algorithm', 'MD5')
-        
-        # 生成随机值
-        import secrets
-        cnonce = secrets.token_hex(8)
-        nc = '00000001'
-        
-        # 计算HA1 = MD5(username:realm:password)
-        ha1 = hashlib.md5(f"{username}:{realm}:{password}".encode()).hexdigest()
-        
-        # 计算HA2 = MD5(method:uri)
-        ha2 = hashlib.md5(f"{method}:{uri}".encode()).hexdigest()
-        
-        # 计算response
-        if qop:
-            response = hashlib.md5(f"{ha1}:{nonce}:{nc}:{cnonce}:{qop}:{ha2}".encode()).hexdigest()
-        else:
-            response = hashlib.md5(f"{ha1}:{nonce}:{ha2}".encode()).hexdigest()
-        
-        # 构建Authorization头
-        auth_response = f'Digest username="{username}", realm="{realm}", nonce="{nonce}", uri="{uri}", algorithm={algorithm}, response="{response}"'
-        
-        if qop:
-            auth_response += f', qop={qop}, nc={nc}, cnonce="{cnonce}"'
-        
-        return auth_response
-
-    def _get_frame_via_rtsp(self, device):
-        """
-        通过OpenCV RTSP拉流获取图像（回退方案）
-        
-        Args:
-            device: 设备对象
-            
-        Returns:
-            图像帧，失败则返回None
-        """
-        try:
-            rtsp_url = build_rtsp_url(device)
-            
-            # 连接到摄像机
-            cap = cv2.VideoCapture(rtsp_url)
-            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-            
-            # 兼容性处理：某些OpenCV版本可能不支持CAP_PROP_TIMEOUT
-            # try:
-            #     cap.set(cv2.CAP_PROP_TIMEOUT, 10000)  # 设置10秒超时
-            # except AttributeError:
-                # logger.warning(f"当前OpenCV版本不支持CAP_PROP_TIMEOUT，将使用默认超时设置")
-            
-            if not cap.isOpened():
-                logger.error(f"无法连接到摄像机: {device.device_id}")
-                return None
-           
-            # 获取单帧图像
-            ret, frame = cap.read()
-            cap.release()
-            
-            if not ret or frame is None:
-                logger.error(f"无法获取摄像机画面: {device.device_id}")
-                return None
-                
-            return frame
-        except Exception as e:
-            logger.error(f"RTSP拉流失败: {e}, 设备: {device.device_id}")
-            return None
+        finally:
+            db.close()
     
     def _check_and_adjust_interval(self, job_id: str, analysis_time: float):
         """
@@ -751,37 +523,31 @@ class CrowdAnalyzer:
                     job_details["adjustment_reason"] = f"分析耗时{analysis_time:.1f}秒，原间隔{old_interval}秒不足，自动调整为{new_interval}秒"
                     
                     # 重新调度任务
-                    if "job" in job_details:
-                        old_job = job_details["job"]
-                        self.scheduler.remove_job(job_id)
-                        
-                        # 创建新的调度任务
-                        new_job = self.scheduler.add_job(
-                            self._run_analysis,
-                            trigger=IntervalTrigger(seconds=new_interval),
-                            args=[job_id, job_details["device_ids"], job_details["models_id"], 
-                                  job_details["tags"], job_details["location_info"], 
-                                  job_details["detect_classes"], job_details["confidence_threshold"]],
-                            id=job_id,
-                            replace_existing=True
-                        )
-                        job_details["job"] = new_job
-                        
-                        logger.warning(f"任务 {job_id} 间隔自动调整: {old_interval}秒 → {new_interval}秒 (分析耗时: {analysis_time:.1f}秒)")
-                        
-                        # 记录调整历史
-                        if "interval_adjustments" not in job_details:
-                            job_details["interval_adjustments"] = []
-                        job_details["interval_adjustments"].append({
-                            "timestamp": datetime.now().isoformat(),
-                            "old_interval": old_interval,
-                            "new_interval": new_interval,
-                            "analysis_time": analysis_time,
-                            "reason": "自动调整"
-                        })
-                        # 保持最近5次的调整记录
-                        if len(job_details["interval_adjustments"]) > 5:
-                            job_details["interval_adjustments"] = job_details["interval_adjustments"][-5:]
+                    self.scheduler.remove_job(job_id)
+                    new_job = self.scheduler.add_job(
+                        self._run_analysis,
+                        trigger=IntervalTrigger(seconds=new_interval),
+                        args=[job_id],
+                        id=job_id,
+                        replace_existing=True,
+                    )
+                    job_details["job"] = new_job
+
+                    logger.warning(
+                        f"任务 {job_id} 间隔自动调整: {old_interval}秒 → {new_interval}秒 (分析耗时: {analysis_time:.1f}秒)"
+                    )
+
+                    if "interval_adjustments" not in job_details:
+                        job_details["interval_adjustments"] = []
+                    job_details["interval_adjustments"].append({
+                        "timestamp": datetime.now().isoformat(),
+                        "old_interval": old_interval,
+                        "new_interval": new_interval,
+                        "analysis_time": analysis_time,
+                        "reason": "自动调整",
+                    })
+                    if len(job_details["interval_adjustments"]) > 5:
+                        job_details["interval_adjustments"] = job_details["interval_adjustments"][-5:]
                 
                 # 如果分析时间明显短于间隔，可以考虑缩短间隔（可选功能）
                 elif current_interval > suggested_interval * 2 and analysis_time < current_interval * 0.1:
@@ -845,7 +611,15 @@ class CrowdAnalyzer:
             logger.error(f"人员检测失败: {e}")
             return (0, [])
             
-    def _analyze_single_camera(self, device_id: str, yolo_model=None, confidence=0.5, detect_classes: List[str] = None, tags: List[str] = None):   
+    def _analyze_single_camera(
+        self,
+        device_id: str,
+        yolo_model=None,
+        confidence=0.5,
+        detect_classes: List[str] = None,
+        tags: List[str] = None,
+        group_settings: Optional[Dict] = None,
+    ):
         """
         分析单个摄像头的画面
         
@@ -870,8 +644,9 @@ class CrowdAnalyzer:
             
             db.close()
             
-            # 获取摄像机画面
-            frame = self._get_camera_frame(device)
+            settings = group_settings or DEFAULT_GROUP_SETTINGS
+            stream_type = getattr(device, "stream_type", None) or "main"
+            frame = frame_acquisition.get_frame(device, settings=settings, stream_type=stream_type)
             if frame is None:
                 return None
             
@@ -880,12 +655,7 @@ class CrowdAnalyzer:
                 return None
             
             area_coordinates = device.area_coordinates
-            
-            # 将归一化坐标转换为像素坐标
-            if area_coordinates and area_coordinates.get('points'):               
-                area_points = self.normalize_points(area_coordinates.get('points'), frame.shape)
-            else:
-                area_points = None
+            area_points = get_device_roi_pixels(area_coordinates, frame.shape)
 
             # 检测人员
             person_count, person_boxes = self._detect_persons(frame, yolo_model, confidence, area_points, detect_classes)
@@ -1155,18 +925,7 @@ class CrowdAnalyzer:
             # 加载所有活跃的人群分析任务
             active_jobs = db.query(CrowdAnalysisJob).filter(CrowdAnalysisJob.is_active == True).all()
             for job in active_jobs:
-                self.add_analysis_job(
-                    job_id=job.job_id,
-                    job_name=job.job_name,
-                    device_ids=job.device_ids,
-                    models_id=job.models_id,  # 添加模型ID
-                    detect_classes=job.detect_classes,
-                    confidence_threshold=job.confidence_threshold or 0.5,
-                    interval=job.interval,
-                    cron_expression=job.cron_expression,
-                    tags=job.tags,
-                    location_info=job.location_info
-                )
+                self.add_analysis_job(job.job_id)
                 logger.info(f"已加载人群分析任务: {job.job_name} (ID: {job.job_id})")
         except Exception as e:
             logger.error(f"加载人群分析任务失败: {e}")

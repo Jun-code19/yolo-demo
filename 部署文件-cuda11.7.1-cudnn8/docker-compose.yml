@@ -22,8 +22,10 @@ services:
       - "8001:8001"
     environment:
       - DATABASE_URL=postgresql://postgres:admin123@postgres:5432/yolo
+      - DETECT_SERVER_URL=http://detect-server:8000
     depends_on:
       - postgres
+      - detect-server
     restart: always
     networks:
       - yolo-network

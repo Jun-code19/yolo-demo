@@ -2,7 +2,7 @@
   <div class="devices-container">
     <div class="page-header">
       <h2>视频设备管理</h2>
-      <el-space>
+      <el-space wrap>
         <el-dropdown @command="handleExport">
           <el-button type="primary">
             <el-icon>
@@ -55,14 +55,6 @@
           </el-form-item>
 
           <!-- <el-form-item label="IP地址">
-            <el-input v-model="filterForm.ip_address" placeholder="请输入IP地址" clearable style="width: 150px;" />
-          </el-form-item> -->
-
-          <el-form-item label="位置">
-            <el-input v-model="filterForm.location" placeholder="请输入位置" clearable style="width: 120px;" />
-          </el-form-item>
-
-          <!-- <el-form-item label="区域">
             <el-input v-model="filterForm.area" placeholder="请输入区域" clearable style="width: 120px;" />
           </el-form-item> -->
 
@@ -86,10 +78,45 @@
     <!-- 设备列表 -->
     <el-card class="device-list">
       <div class="table-toolbar">
-        <span v-if="selectedDevices.length > 0" class="selection-tip">
+        <div class="toolbar-left">
+          <el-radio-group v-model="viewMode" size="default" @change="handleViewModeChange">
+            <el-radio-button value="tree">
+              <el-icon><Share /></el-icon>
+              树形
+            </el-radio-button>
+            <el-radio-button value="card">
+              <el-icon><Grid /></el-icon>
+              卡片
+            </el-radio-button>
+          </el-radio-group>
+        </div>
+        <div class="toolbar-right">
+        <span v-if="viewMode === 'tree' && selectedDevices.length > 0" class="selection-tip">
           已选择 {{ selectedDevices.length }} 项
         </span>
+        <el-dropdown
+          v-if="viewMode === 'tree' && selectedDevices.length > 0"
+          @command="handleBatchMoveGroup"
+        >
+          <el-button size="small" type="primary">
+            移动到分组
+            <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+          </el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="__ungrouped__">未分组</el-dropdown-item>
+              <el-dropdown-item
+                v-for="group in deviceGroups"
+                :key="group.group_id"
+                :command="group.group_id"
+              >
+                {{ group.group_name }}
+              </el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
         <el-button
+          v-if="viewMode === 'tree'"
           size="small"
           type="danger"
           :disabled="selectedDevices.length === 0"
@@ -97,76 +124,187 @@
         >
           批量删除
         </el-button>
+        </div>
       </div>
-      <!-- 设备表格 -->
-      <el-table
-        :data="devices"
-        style="width: 100%"
-        v-loading="loading"
-        @selection-change="handleSelectionChange"
-      >
-        <el-table-column type="selection" width="55" />
-        <el-table-column prop="device_id" label="设备ID" sortable min-width="120" />
-        <el-table-column prop="device_name" label="设备名称" sortable min-width="150" />
-        <el-table-column prop="device_type" label="设备类型" sortable min-width="120">
-          <template #default="{ row }">
-            <el-tag :type="getDeviceTypeTag(row.device_type)">
-              {{ getDeviceTypeName(row.device_type) }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="ip_address" label="IP地址" sortable min-width="120" />
-        <el-table-column prop="port" label="端口" width="80" />
-        <!-- <el-table-column prop="username" label="用户名" min-width="100" /> -->
-        <el-table-column prop="status" label="状态" width="80">
-          <template #default="{ row }">
-            <el-tag :type="row.status ? 'success' : 'danger'">
-              {{ row.status ? '在线' : '离线' }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="last_heartbeat" label="最后心跳" min-width="180">
-          <template #default="{ row }">
-            {{ formatDateTime(row.last_heartbeat) }}
-          </template>
-        </el-table-column>
-        <el-table-column prop="stream_type" label="码流" min-width="80">
-          <template #default="{ row }">
-            {{ row.stream_type === 'sub' ? '辅码流' : '主码流' }}
-          </template>
-        </el-table-column>
-        <el-table-column prop="rtsp_url_mode" label="拉流方式" min-width="120">
-          <template #default="{ row }">
-            <el-tag size="small" :type="row.rtsp_url_mode === 'custom' ? 'warning' : 'info'">
-              {{ getRtspPresetLabel(row) }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="location" label="位置" sortable min-width="120" />
-        <el-table-column label="操作" width="200" fixed="right">
-          <template #default="{ row }">
-            <el-button-group>
-              <el-button type="warning" link @click="setInterestArea(row)">
-                区域
-              </el-button>
-              <el-button type="primary" link @click="handlePreview(row)">
-                预览
-              </el-button>
-              <el-button type="primary" link @click="handleEdit(row)">
-                编辑
-              </el-button>             
-              <el-button type="danger" link @click="handleDelete(row)">
-                删除
-              </el-button>
-            </el-button-group>
-          </template>
-        </el-table-column>
-      </el-table>
 
-      <div class="pagination">
-        <el-pagination v-model:current-page="currentPage" v-model:page-size="pageSize" :total="total"
-          :page-sizes="[20, 50, 100, 200]" layout="prev, pager, next, jumper, ->, total, sizes"
-          @size-change="handleSizeChange" @current-change="handleCurrentChange" />
+      <!-- 树形 + 列表 -->
+      <div v-if="viewMode === 'tree'" class="tree-layout" v-loading="loading">
+        <aside class="tree-panel">
+          <div class="tree-panel-header">
+            <span>设备分组</span>
+            <el-button link type="primary" size="small" @click="openGroupManageDialog">
+              <el-icon><Setting /></el-icon>
+              管理分组
+            </el-button>
+          </div>
+          <el-tree
+            :data="groupTreeData"
+            node-key="id"
+            highlight-current
+            :current-node-key="selectedTreeKey"
+            default-expand-all
+            :expand-on-click-node="false"
+            @node-click="handleTreeNodeClick"
+          >
+            <template #default="{ data }">
+              <div class="tree-node">
+                <el-icon v-if="data.id === '__all__'"><Monitor /></el-icon>
+                <el-icon v-else-if="data.id === '__ungrouped__'"><FolderOpened /></el-icon>
+                <el-icon v-else><Folder /></el-icon>
+                <span class="tree-node-label">{{ data.label }}</span>
+                <el-tag size="small" type="info" round>{{ data.count }}</el-tag>
+              </div>
+            </template>
+          </el-tree>
+        </aside>
+        <main class="tree-content">
+          <div class="tree-content-title">
+            <h3>{{ selectedTreeLabel }}</h3>
+            <span class="tree-content-sub">{{ treeFilteredDevices.length }} 台设备</span>
+          </div>
+          <el-table
+            :data="paginatedTreeDevices"
+            style="width: 100%"
+            stripe
+            @selection-change="handleSelectionChange"
+          >
+            <el-table-column type="selection" width="55" />
+            <el-table-column prop="device_id" label="设备ID" sortable min-width="120" />
+            <el-table-column prop="device_name" label="设备名称" sortable min-width="150" />
+            <el-table-column v-if="selectedTreeKey === '__all__'" prop="group_name" label="分组" min-width="110">
+              <template #default="{ row }">
+                <el-tag v-if="row.group_name" size="small" type="info">{{ row.group_name }}</el-tag>
+                <span v-else class="text-muted">未分组</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="device_type" label="设备类型" sortable min-width="110">
+              <template #default="{ row }">
+                <el-tag size="small" :type="getDeviceTypeTag(row.device_type)">
+                  {{ getDeviceTypeName(row.device_type) }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="ip_address" label="IP地址" sortable min-width="120" />
+            <el-table-column prop="port" label="端口" width="72" />
+            <el-table-column prop="status" label="状态" width="80">
+              <template #default="{ row }">
+                <el-tag size="small" :type="row.status ? 'success' : 'danger'">
+                  {{ row.status ? '在线' : '离线' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="last_heartbeat" label="最后心跳" min-width="160">
+              <template #default="{ row }">
+                {{ formatDateTime(row.last_heartbeat) }}
+              </template>
+            </el-table-column>
+            <el-table-column prop="stream_type" label="码流" width="80">
+              <template #default="{ row }">
+                {{ row.stream_type === 'sub' ? '辅码流' : '主码流' }}
+              </template>
+            </el-table-column>
+            <el-table-column prop="rtsp_url_mode" label="拉流方式" min-width="110">
+              <template #default="{ row }">
+                <el-tag size="small" :type="row.rtsp_url_mode === 'custom' ? 'warning' : 'info'">
+                  {{ getRtspPresetLabel(row) }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="230" fixed="right">
+              <template #default="{ row }">
+                <el-button-group>
+                  <el-button type="warning" link @click.stop="setInterestArea(row)">区域</el-button>
+                  <el-button type="primary" link @click="handlePreview(row)">预览</el-button>
+                  <el-button type="primary" link @click="handleEdit(row)">编辑</el-button>
+                  <el-button type="danger" link @click="handleDelete(row)">删除</el-button>
+                </el-button-group>
+              </template>
+            </el-table-column>
+          </el-table>
+          <div class="pagination tree-pagination">
+            <el-pagination
+              v-model:current-page="treePage"
+              v-model:page-size="treePageSize"
+              :total="treeFilteredDevices.length"
+              :page-sizes="[20, 50, 100, 200]"
+              layout="prev, pager, next, jumper, ->, total, sizes"
+              @size-change="handleTreeSizeChange"
+              @current-change="handleTreePageChange"
+            />
+          </div>
+        </main>
+      </div>
+
+      <!-- 卡片分组视图 -->
+      <div v-else v-loading="loading" class="card-grid-view">
+        <div class="card-view-header">
+          <span class="card-view-title">分组概览</span>
+          <el-button size="small" @click="openGroupManageDialog">
+            <el-icon><Setting /></el-icon>
+            管理分组
+          </el-button>
+        </div>
+        <el-empty v-if="groupOverview.length === 0" description="暂无设备数据" />
+        <el-row v-else :gutter="16">
+          <el-col
+            v-for="group in groupOverview"
+            :key="group.group_id || '__ungrouped__'"
+            :xs="24"
+            :sm="12"
+            :lg="8"
+            :xl="6"
+          >
+            <el-card class="group-card" shadow="hover">
+              <template #header>
+                <div class="group-card-header">
+                  <div class="group-card-title">
+                    <el-icon class="group-card-icon"><Folder /></el-icon>
+                    <span>{{ group.group_name }}</span>
+                  </div>
+                  <div class="group-card-actions">
+                    <el-tag size="small">{{ group.device_count }} 台</el-tag>
+                    <el-button
+                      v-if="group.group_id"
+                      link
+                      type="primary"
+                      size="small"
+                      @click="openEditGroupDialog(group)"
+                    >
+                      编辑
+                    </el-button>
+                  </div>
+                </div>
+              </template>
+              <div v-if="group.description" class="group-card-desc">{{ group.description }}</div>
+              <div class="group-card-stats">
+                <span class="online">在线 {{ countOnline(group.devices) }}</span>
+                <span class="offline">离线 {{ countOffline(group.devices) }}</span>
+              </div>
+              <div class="group-device-list">
+                <el-empty v-if="!group.devices?.length" description="暂无设备" :image-size="48" />
+                <div
+                  v-for="device in group.devices"
+                  :key="device.device_id"
+                  class="group-device-item"
+                >
+                  <div class="device-item-main">
+                    <el-icon :class="device.status ? 'status-online' : 'status-offline'">
+                      <VideoCamera />
+                    </el-icon>
+                    <div class="device-item-info">
+                      <div class="device-item-name">{{ device.device_name }}</div>
+                      <div class="device-item-meta">{{ device.ip_address }} · {{ getRtspPresetLabel(device) }}</div>
+                    </div>
+                  </div>
+                  <el-button-group class="device-item-actions">
+                    <el-button link type="primary" size="small" @click="handlePreview(device)">预览</el-button>
+                    <el-button link type="primary" size="small" @click="handleEdit(device)">编辑</el-button>
+                  </el-button-group>
+                </div>
+              </div>
+            </el-card>
+          </el-col>
+        </el-row>
       </div>
     </el-card>
 
@@ -237,6 +375,16 @@
         </template>
         <el-form-item label="位置" prop="location">
           <el-input v-model="deviceForm.location" placeholder="请输入设备位置" />
+        </el-form-item>
+        <el-form-item label="所属分组" prop="group_id">
+          <el-select v-model="deviceForm.group_id" placeholder="未分组" clearable style="width: 100%">
+            <el-option
+              v-for="group in deviceGroups"
+              :key="group.group_id"
+              :label="group.group_name"
+              :value="group.group_id"
+            />
+          </el-select>
         </el-form-item>
         <el-form-item label="区域" prop="area">
           <el-input v-model="deviceForm.area" placeholder="请输入设备区域" />
@@ -331,6 +479,58 @@
       </template>
     </el-dialog>
 
+    <!-- 分组管理对话框 -->
+    <el-dialog
+      v-model="groupManageVisible"
+      title="设备分组管理"
+      width="680px"
+      destroy-on-close
+      append-to-body
+    >
+      <el-form :inline="true" :model="newGroupForm" class="group-create-form">
+        <el-form-item label="组名称">
+          <el-input v-model="newGroupForm.group_name" placeholder="新分组名称" style="width: 160px" />
+        </el-form-item>
+        <el-form-item label="排序">
+          <el-input-number v-model="newGroupForm.sort_order" :min="0" :max="9999" />
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" :loading="groupSaving" @click="handleCreateGroup">添加分组</el-button>
+        </el-form-item>
+      </el-form>
+      <el-table :data="deviceGroups" stripe border max-height="360">
+        <el-table-column prop="group_name" label="组名称" min-width="140" />
+        <el-table-column prop="description" label="描述" min-width="120" show-overflow-tooltip />
+        <el-table-column prop="sort_order" label="排序" width="70" />
+        <el-table-column prop="device_count" label="设备数" width="80" />
+        <el-table-column label="操作" width="140" fixed="right">
+          <template #default="{ row }">
+            <el-button link type="primary" @click="openEditGroupDialog(row)">编辑</el-button>
+            <el-button link type="danger" @click="handleDeleteGroup(row)">删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-dialog>
+
+    <!-- 编辑分组对话框 -->
+    <el-dialog v-model="groupEditVisible" title="编辑分组" width="480px" destroy-on-close append-to-body>
+      <el-form :model="editGroupForm" label-width="80px">
+        <el-form-item label="组名称" required>
+          <el-input v-model="editGroupForm.group_name" />
+        </el-form-item>
+        <el-form-item label="描述">
+          <el-input v-model="editGroupForm.description" type="textarea" :rows="2" />
+        </el-form-item>
+        <el-form-item label="排序">
+          <el-input-number v-model="editGroupForm.sort_order" :min="0" :max="9999" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="groupEditVisible = false">取消</el-button>
+        <el-button type="primary" :loading="groupSaving" @click="handleSaveGroupEdit">保存</el-button>
+      </template>
+    </el-dialog>
+
     <!-- 导入对话框 -->
     <el-dialog 
       v-model="importDialogVisible" 
@@ -368,11 +568,13 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onUnmounted, h, computed } from 'vue'
-import { Plus, VideoCamera, CircleClose, Camera, Download, ArrowDown, Upload, UploadFilled, Search, Refresh, FullScreen } from '@element-plus/icons-vue'
+import { ref, reactive, onMounted, onUnmounted, h, computed, watch } from 'vue'
+import { useRouter } from 'vue-router'
+import { Plus, VideoCamera, CircleClose, Camera, Download, ArrowDown, Upload, UploadFilled, Search, Refresh, FullScreen, Folder, Setting, Share, Grid, Monitor, FolderOpened } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import deviceApi from '@/api/device'
-import router from '@/router'
+
+const router = useRouter()
 import {
   buildRtspUrl,
   getRtspPresetLabel,
@@ -384,6 +586,31 @@ import {
 } from '@/utils/rtspUrl'
 
 const selectedRtspPreset = ref('dahua')
+
+const VIEW_MODE_KEY = 'devices_view_mode'
+const rawViewMode = localStorage.getItem(VIEW_MODE_KEY) || 'tree'
+const viewMode = ref(
+  rawViewMode === 'card' ? 'card' : 'tree'
+)
+if (rawViewMode === 'list' || rawViewMode === 'group') {
+  localStorage.setItem(VIEW_MODE_KEY, rawViewMode === 'group' ? 'card' : 'tree')
+}
+const deviceGroups = ref([])
+const groupOverview = ref([])
+const selectedTreeKey = ref('__all__')
+const groupManageVisible = ref(false)
+const groupEditVisible = ref(false)
+const groupSaving = ref(false)
+const newGroupForm = reactive({
+  group_name: '',
+  sort_order: 0,
+})
+const editGroupForm = reactive({
+  group_id: '',
+  group_name: '',
+  description: '',
+  sort_order: 0,
+})
 
 const displayRtspFormat = computed(() => {
   if (selectedRtspPreset.value === 'dahua') {
@@ -408,12 +635,10 @@ const previewRtspUrl = computed(() => {
   return buildRtspUrl(deviceForm)
 })
 
-// 列表数据
+// 设备数据
 const loading = ref(false)
-const devices = ref([])
-const currentPage = ref(1)
-const pageSize = ref(20)
-const total = ref(0)
+const treePage = ref(1)
+const treePageSize = ref(20)
 const selectedDevices = ref([])
 
 // 对话框控制
@@ -437,7 +662,8 @@ const deviceForm = reactive({
   rtsp_url_mode: 'dahua',
   rtsp_url: '',
   location: '',
-  area: ''
+  area: '',
+  group_id: null
 })
 
 const deviceRules = {
@@ -501,32 +727,198 @@ const hasActiveFilter = () => {
   return Object.entries(filterForm).some(([_, value]) => value !== '' && value !== null && value !== undefined)
 }
 
+const groupTreeData = computed(() => {
+  const ungrouped = groupOverview.value.find(g => !g.group_id)
+  const ungroupedCount = ungrouped?.device_count || 0
+  const totalCount = groupOverview.value.reduce((sum, g) => sum + (g.device_count || 0), 0)
+
+  const groupNodes = deviceGroups.value.map((group) => {
+    const overview = groupOverview.value.find(g => g.group_id === group.group_id)
+    return {
+      id: group.group_id,
+      label: group.group_name,
+      count: overview?.device_count ?? group.device_count ?? 0,
+      group_id: group.group_id,
+    }
+  })
+
+  return [
+    { id: '__all__', label: '全部设备', count: totalCount, group_id: null },
+    ...groupNodes,
+    { id: '__ungrouped__', label: '未分组', count: ungroupedCount, group_id: '__ungrouped__' },
+  ]
+})
+
+const selectedTreeLabel = computed(() => {
+  const node = groupTreeData.value.find(item => item.id === selectedTreeKey.value)
+  return node?.label || '全部设备'
+})
+
+const treeFilteredDevices = computed(() => {
+  if (selectedTreeKey.value === '__all__') {
+    return groupOverview.value.flatMap(g => g.devices || [])
+  }
+  const target = groupOverview.value.find(g => {
+    if (selectedTreeKey.value === '__ungrouped__') return !g.group_id
+    return g.group_id === selectedTreeKey.value
+  })
+  return target?.devices || []
+})
+
+const paginatedTreeDevices = computed(() => {
+  const start = (treePage.value - 1) * treePageSize.value
+  return treeFilteredDevices.value.slice(start, start + treePageSize.value)
+})
+
+watch(selectedTreeKey, () => {
+  treePage.value = 1
+  selectedDevices.value = []
+})
+
+watch(treeFilteredDevices, () => {
+  const maxPage = Math.max(1, Math.ceil(treeFilteredDevices.value.length / treePageSize.value))
+  if (treePage.value > maxPage) {
+    treePage.value = maxPage
+  }
+})
+
+const countOnline = (devices = []) => devices.filter(d => d.status).length
+const countOffline = (devices = []) => devices.filter(d => !d.status).length
+
 const reloadDevices = () => {
-  loadData(isFiltering.value || hasActiveFilter())
+  loadGroupOverview(isFiltering.value || hasActiveFilter())
 }
 
-// 加载设备数据
-const loadData = async (useFilter = false) => {
+const loadDeviceGroups = async () => {
+  try {
+    const res = await deviceApi.getDeviceGroups()
+    deviceGroups.value = res.data?.data || []
+  } catch (error) {
+    deviceGroups.value = []
+  }
+}
+
+const loadGroupOverview = async (useFilter = false) => {
   loading.value = true
   try {
-    const skip = (currentPage.value - 1) * pageSize.value
-    const paginationParams = { skip, limit: pageSize.value }
-
-    let response
-    if (useFilter) {
-      // 使用筛选参数
-      response = await deviceApi.getFilteredDevices(filterForm, paginationParams)
-    } else {
-      // 不使用筛选，获取所有数据
-      response = await deviceApi.getDevices(paginationParams)
-    }
-
-    devices.value = response.data.data
-    total.value = response.data.total
+    const params = useFilter
+      ? {
+          device_type: filterForm.device_type,
+          status: filterForm.status,
+          device_name: filterForm.device_name,
+        }
+      : {}
+    const response = await deviceApi.getDeviceGroupsOverview(params)
+    groupOverview.value = response.data?.data || []
   } catch (error) {
-    ElMessage.error('加载设备数据失败，请检查网络连接或服务器状态')
+    ElMessage.error('加载分组视图失败')
   } finally {
     loading.value = false
+  }
+}
+
+const handleTreeNodeClick = (data) => {
+  selectedTreeKey.value = data.id
+}
+
+const handleViewModeChange = () => {
+  localStorage.setItem(VIEW_MODE_KEY, viewMode.value)
+  selectedDevices.value = []
+  if (viewMode.value === 'tree') {
+    selectedTreeKey.value = '__all__'
+  }
+  reloadDevices()
+}
+
+const openGroupManageDialog = async () => {
+  await loadDeviceGroups()
+  groupManageVisible.value = true
+}
+
+const openEditGroupDialog = (group) => {
+  if (!group?.group_id) return
+  Object.assign(editGroupForm, {
+    group_id: group.group_id,
+    group_name: group.group_name,
+    description: group.description || '',
+    sort_order: group.sort_order ?? 0,
+  })
+  groupEditVisible.value = true
+}
+
+const handleCreateGroup = async () => {
+  if (!newGroupForm.group_name?.trim()) {
+    ElMessage.warning('请输入分组名称')
+    return
+  }
+  groupSaving.value = true
+  try {
+    await deviceApi.createDeviceGroup({
+      group_name: newGroupForm.group_name.trim(),
+      sort_order: newGroupForm.sort_order,
+    })
+    ElMessage.success('分组创建成功')
+    newGroupForm.group_name = ''
+    newGroupForm.sort_order = 0
+    await loadDeviceGroups()
+    reloadDevices()
+  } catch (error) {
+    ElMessage.error(error.response?.data?.detail || '创建分组失败')
+  } finally {
+    groupSaving.value = false
+  }
+}
+
+const handleSaveGroupEdit = async () => {
+  if (!editGroupForm.group_name?.trim()) {
+    ElMessage.warning('请输入分组名称')
+    return
+  }
+  groupSaving.value = true
+  try {
+    await deviceApi.updateDeviceGroup(editGroupForm.group_id, {
+      group_name: editGroupForm.group_name.trim(),
+      description: editGroupForm.description,
+      sort_order: editGroupForm.sort_order,
+    })
+    ElMessage.success('分组已更新')
+    groupEditVisible.value = false
+    await loadDeviceGroups()
+    reloadDevices()
+  } catch (error) {
+    ElMessage.error(error.response?.data?.detail || '更新分组失败')
+  } finally {
+    groupSaving.value = false
+  }
+}
+
+const handleDeleteGroup = (group) => {
+  ElMessageBox.confirm(
+    `删除分组「${group.group_name}」？组内设备将移至未分组。`,
+    '删除确认',
+    { type: 'warning' }
+  ).then(async () => {
+    try {
+      await deviceApi.deleteDeviceGroup(group.group_id)
+      ElMessage.success('分组已删除')
+      await loadDeviceGroups()
+      reloadDevices()
+    } catch (error) {
+      ElMessage.error(error.response?.data?.detail || '删除分组失败')
+    }
+  }).catch(() => {})
+}
+
+const handleBatchMoveGroup = async (groupId) => {
+  if (selectedDevices.value.length === 0) return
+  try {
+    const deviceIds = selectedDevices.value.map(item => item.device_id)
+    await deviceApi.assignDevicesToGroup(groupId, deviceIds)
+    ElMessage.success('设备分组已更新')
+    selectedDevices.value = []
+    reloadDevices()
+  } catch (error) {
+    ElMessage.error(error.response?.data?.detail || '移动分组失败')
   }
 }
 
@@ -552,7 +944,8 @@ const handleFullscreenChange = () => {
 
 // 初始化
 onMounted(() => {
-  loadData()
+  loadDeviceGroups()
+  loadGroupOverview()
   // refreshStatus()
   // refreshInterval = setInterval(refreshStatus, 60000)
   
@@ -588,18 +981,15 @@ onUnmounted(() => {
   document.removeEventListener('keydown', handleKeyDown)
 })
 
-// 设置感兴趣区域方法（跳转到新页面）
+// 设置感兴趣区域（跳转区域设置页）
 const setInterestArea = (device) => {
-      router.push({
-        name: 'AreaConfigSetting',
-        params: {
-          deviceId: device.device_id
-        },
-        query: {
-          deviceId: device.device_id
-        }
-      });
-    };
+  const deviceId = device?.device_id
+  if (!deviceId) {
+    ElMessage.warning('设备ID无效，无法打开区域设置')
+    return
+  }
+  router.push(`/devices/area-config/${encodeURIComponent(deviceId)}`).catch(() => {})
+}
 
 // 处理键盘事件
 const handleKeyDown = (event) => {
@@ -608,15 +998,14 @@ const handleKeyDown = (event) => {
   }
 }
 
-// 分页处理
-const handleSizeChange = (val) => {
-  pageSize.value = val
-  loadData(isFiltering.value)
+// 树形列表分页
+const handleTreeSizeChange = (val) => {
+  treePageSize.value = val
+  treePage.value = 1
 }
 
-const handleCurrentChange = (val) => {
-  currentPage.value = val
-  loadData(isFiltering.value)
+const handleTreePageChange = (val) => {
+  treePage.value = val
 }
 
 // 添加设备
@@ -636,7 +1025,8 @@ const handleAdd = () => {
     rtsp_url_mode: 'dahua',
     rtsp_url: '',
     location: '',
-    area: ''
+    area: '',
+    group_id: null
   })
   selectedRtspPreset.value = 'dahua'
 }
@@ -658,7 +1048,8 @@ const handleEdit = (row) => {
     rtsp_url_mode: row.rtsp_url_mode || 'dahua',
     rtsp_url: row.rtsp_url || '',
     location: row.location || '',
-    area: row.area || ''
+    area: row.area || '',
+    group_id: row.group_id || null
   })
   syncRtspPresetFromForm()
 }
@@ -1535,9 +1926,9 @@ const handleExport = async (command) => {
 
 // 筛选功能
 const handleFilter = () => {
-  currentPage.value = 1
+  treePage.value = 1
   isFiltering.value = hasActiveFilter()
-  loadData(isFiltering.value)
+  reloadDevices()
 }
 
 const handleResetFilter = () => {
@@ -1549,9 +1940,9 @@ const handleResetFilter = () => {
     location: '',
     area: ''
   })
-  currentPage.value = 1 // 重置到第一页
+  treePage.value = 1
   isFiltering.value = false
-  loadData(false)
+  reloadDevices()
 }
 </script>
 
@@ -1573,10 +1964,23 @@ const handleResetFilter = () => {
 
 .table-toolbar {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
   align-items: center;
   gap: 12px;
   margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.toolbar-left,
+.toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.toolbar-right {
+  margin-left: auto;
 }
 
 .selection-tip {
@@ -1587,6 +1991,10 @@ const handleResetFilter = () => {
 .pagination {
   margin-top: 20px;
   text-align: right;
+}
+
+.tree-pagination {
+  margin-top: 16px;
 }
 
 .preview-container {
@@ -1768,6 +2176,217 @@ const handleResetFilter = () => {
 
 .rtsp-form-hint > div + div {
   margin-top: 4px;
+}
+
+.text-muted {
+  color: #909399;
+  font-size: 12px;
+}
+
+.tree-layout {
+  display: flex;
+  gap: 16px;
+  min-height: 520px;
+}
+
+.tree-panel {
+  width: 260px;
+  flex-shrink: 0;
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  background: #fafbfc;
+  padding: 12px;
+}
+
+.tree-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  font-weight: 600;
+  color: #303133;
+}
+
+.tree-node {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  padding-right: 8px;
+}
+
+.tree-node-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tree-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.tree-content-title {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.tree-content-title h3 {
+  margin: 0;
+  font-size: 16px;
+  color: #303133;
+}
+
+.tree-content-sub {
+  color: #909399;
+  font-size: 13px;
+}
+
+.card-grid-view {
+  min-height: 200px;
+}
+
+.card-view-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.card-view-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #303133;
+}
+
+.group-card {
+  margin-bottom: 16px;
+  height: calc(100% - 16px);
+}
+
+.group-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.group-card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  color: #303133;
+  min-width: 0;
+}
+
+.group-card-title span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.group-card-icon {
+  color: #409eff;
+  flex-shrink: 0;
+}
+
+.group-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.group-card-desc {
+  font-size: 12px;
+  color: #909399;
+  margin-bottom: 10px;
+  line-height: 1.5;
+}
+
+.group-card-stats {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 12px;
+  font-size: 12px;
+}
+
+.group-card-stats .online {
+  color: #67c23a;
+}
+
+.group-card-stats .offline {
+  color: #f56c6c;
+}
+
+.group-device-list {
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.group-device-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 0;
+  border-bottom: 1px solid #f0f2f5;
+}
+
+.group-device-item:last-child {
+  border-bottom: none;
+}
+
+.device-item-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+}
+
+.status-online {
+  color: #67c23a;
+  font-size: 18px;
+}
+
+.status-offline {
+  color: #c0c4cc;
+  font-size: 18px;
+}
+
+.device-item-info {
+  min-width: 0;
+}
+
+.device-item-name {
+  font-size: 14px;
+  color: #303133;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.device-item-meta {
+  font-size: 12px;
+  color: #909399;
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.device-item-actions {
+  flex-shrink: 0;
+}
+
+.group-create-form {
+  margin-bottom: 16px;
 }
 </style>
 

@@ -45,6 +45,19 @@ class DetectionFrequency(enum.Enum):
     scheduled = "scheduled"
     manual = "manual"
 
+class DeviceGroup(Base):
+    """设备分组"""
+    __tablename__ = "device_group"
+
+    group_id = Column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
+    group_name = Column(String(255), nullable=False, unique=True)
+    description = Column(Text)
+    sort_order = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    devices = relationship("Device", back_populates="device_group")
+
 class Device(Base):
     __tablename__ = "device"
     
@@ -59,15 +72,18 @@ class Device(Base):
     stream_type = Column(String(10), default="main")  # 码流类型，main或sub
     rtsp_url_mode = Column(String(20), default="dahua")  # dahua=大华默认, custom=自定义URL/模板
     rtsp_url = Column(Text, nullable=True)  # 自定义 RTSP 完整地址或模板
+    monitor_method = Column(String(32), default="auto", comment="探活方式: auto/rtsp/tcp/http_dahua/ping")
     offline_count = Column(Integer, default=0) # 记录设备连续离线的次数
     last_online_time = Column(DateTime, default=datetime.now) # 记录设备最后一次在线的时间
     status = Column(Boolean, default=True)
     last_heartbeat = Column(DateTime)
     location = Column(String(255))
     area = Column(String(255))
+    group_id = Column(String(64), ForeignKey('device_group.group_id'), nullable=True)
     created_at = Column(DateTime, default=datetime.now)
     area_coordinates = Column(JSONB)  # 新增字段，用于存储区域坐标
     
+    device_group = relationship("DeviceGroup", back_populates="devices")
     detection_configs = relationship("DetectionConfig", back_populates="device", cascade="all, delete-orphan")
     detection_events = relationship("DetectionEvent", back_populates="device", cascade="all, delete-orphan")
 
@@ -112,9 +128,12 @@ class DetectionModel(Base):
 
 class DetectionConfig(Base):
     __tablename__ = "detection_config"
-    
+
     config_id = Column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
-    device_id = Column(String(64), ForeignKey('device.device_id'), nullable=False)
+    config_mode = Column(String(20), default="device")  # device | group
+    device_id = Column(String(64), ForeignKey('device.device_id'), nullable=True)
+    group_id = Column(String(64), ForeignKey('device_group.group_id'), nullable=True)
+    group_settings = Column(JSONB)  # 分组检测：取帧策略、轮询间隔等
     models_id = Column(String(64), ForeignKey('detection_model.models_id'), nullable=False)
     enabled = Column(Boolean, default=False)
     sensitivity = Column(Float, default=0.5)
@@ -131,6 +150,7 @@ class DetectionConfig(Base):
     created_by = Column(String(64), ForeignKey('users.user_id'))
     
     device = relationship("Device", back_populates="detection_configs")
+    device_group = relationship("DeviceGroup", backref="detection_configs")
     model = relationship("DetectionModel", back_populates="detection_configs")
     # schedules = relationship("DetectionSchedule", back_populates="config", cascade="all, delete-orphan")
     events = relationship("DetectionEvent", back_populates="config", cascade="all, delete-orphan")
@@ -223,12 +243,62 @@ class DataPushConfig(Base):
     # 关系可以保留，但现在是可选的
     config = relationship("DetectionConfig", foreign_keys=[config_id])
 
+
+class DataPushLog(Base):
+    """数据推送执行记录（持久化，便于查询成功/失败）"""
+    __tablename__ = "data_push_log"
+
+    log_id = Column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
+    push_id = Column(String(64), ForeignKey("data_push_config.push_id"), nullable=False, index=True)
+    push_name = Column(String(255))
+    push_method = Column(String(32))
+    status = Column(String(20), nullable=False, index=True)  # success | failure
+    target_summary = Column(String(500))
+    message = Column(Text)
+    tags = Column(ARRAY(Text), default=[])
+    config_id = Column(String(64))
+    duration_ms = Column(Integer)
+    payload_preview = Column(JSONB)
+    is_test = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.now, index=True)
+
+    push_config = relationship("DataPushConfig", foreign_keys=[push_id])
+
+
+class DetectionRule(Base):
+    """检测规则：Fact 匹配条件 + 冷却 + 动作"""
+    __tablename__ = "detection_rule"
+
+    rule_id = Column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
+    config_id = Column(String(64), ForeignKey('detection_config.config_id'), nullable=True)
+    device_id = Column(String(64), ForeignKey('device.device_id'), nullable=True)
+    name = Column(String(255), nullable=False)
+    description = Column(Text)
+    enabled = Column(Boolean, default=True)
+    priority = Column(Integer, default=100)
+    is_builtin = Column(Boolean, default=False)
+    builtin_key = Column(String(128))
+    cooldown_sec = Column(Integer, default=15)
+    cooldown_scope = Column(String(32), default="scenario")
+    conditions = Column(JSONB, nullable=False, default=dict)
+    actions = Column(JSONB, nullable=False, default=list)
+    schedule = Column(JSONB)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    config = relationship("DetectionConfig", foreign_keys=[config_id])
+    device = relationship("Device", foreign_keys=[device_id])
+
 class CrowdAnalysisJob(Base):
     __tablename__ = "crowd_analysis_job"
     
     job_id = Column(String(64), primary_key=True)
     job_name = Column(String(128), nullable=False)
-    device_ids = Column(ARRAY(String)) # 设备ID列表
+    device_mode = Column(String(20), default="manual")  # manual | group
+    group_id = Column(String(64), ForeignKey('device_group.group_id'), nullable=True)
+    group_settings = Column(JSONB)  # 取帧策略、设备间隔等
+    schedule_config = Column(JSONB)  # 生效时段 schedule_config.runtime
+    device_ids = Column(ARRAY(String)) # 设备ID列表（手动模式）或分组快照
     models_id = Column(String(64), ForeignKey('detection_model.models_id'), nullable=True) # 检测模型ID
     interval = Column(Integer, nullable=True) # 执行间隔(秒)
     cron_expression = Column(String(64), nullable=True) # Cron表达式
@@ -247,6 +317,7 @@ class CrowdAnalysisJob(Base):
     warning_receivers = Column(ARRAY(String))  # 预警接收者
     
     model = relationship("DetectionModel", foreign_keys=[models_id])
+    device_group = relationship("DeviceGroup", foreign_keys=[group_id])
 
 class CrowdAnalysisResult(Base):
     __tablename__ = "crowd_analysis_result"
@@ -262,6 +333,94 @@ class CrowdAnalysisResult(Base):
 
 # 添加反向关系
 CrowdAnalysisJob.results = relationship("CrowdAnalysisResult", back_populates="job")
+
+
+class VlmInspectionJob(Base):
+    __tablename__ = "vlm_inspection_job"
+
+    job_id = Column(String(64), primary_key=True)
+    job_name = Column(String(128), nullable=False)
+    device_mode = Column(String(20), default="manual")
+    group_id = Column(String(64), ForeignKey("device_group.group_id"), nullable=True)
+    group_settings = Column(JSONB)
+    schedule_config = Column(JSONB)
+    device_ids = Column(ARRAY(String))
+    vlm_model_id = Column(String(64), ForeignKey("detection_model.models_id"), nullable=False)
+    prompt_id = Column(String(64), default="general_patrol_v1")
+    prompt_override = Column(Text, nullable=True)
+    vlm_config = Column(JSONB)
+    alert_labels = Column(ARRAY(String))
+    min_confidence = Column(Float, default=0.7)
+    interval = Column(Integer, default=300)
+    tags = Column(ARRAY(String))
+    description = Column(String(512), nullable=True)
+    is_active = Column(Boolean, default=False)
+    status = Column(String(32), default="created")
+    last_run = Column(DateTime, nullable=True)
+    last_result = Column(JSONB, nullable=True)
+    last_error = Column(String(512), nullable=True)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    vlm_model = relationship("DetectionModel", foreign_keys=[vlm_model_id])
+    device_group = relationship("DeviceGroup", foreign_keys=[group_id])
+
+
+class VlmInspectionRun(Base):
+    __tablename__ = "vlm_inspection_run"
+
+    run_id = Column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
+    job_id = Column(String(64), ForeignKey("vlm_inspection_job.job_id"), nullable=False)
+    started_at = Column(DateTime, default=datetime.now)
+    finished_at = Column(DateTime, nullable=True)
+    device_total = Column(Integer, default=0)
+    device_success = Column(Integer, default=0)
+    device_failed = Column(Integer, default=0)
+    alert_count = Column(Integer, default=0)
+    status = Column(String(32), default="running")
+    summary = Column(JSONB, nullable=True)
+
+    job = relationship("VlmInspectionJob", back_populates="runs")
+
+
+class VlmInspectionFinding(Base):
+    __tablename__ = "vlm_inspection_finding"
+
+    finding_id = Column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
+    run_id = Column(String(64), ForeignKey("vlm_inspection_run.run_id"), nullable=False)
+    job_id = Column(String(64), ForeignKey("vlm_inspection_job.job_id"), nullable=False)
+    device_id = Column(String(64), ForeignKey("device.device_id"), nullable=False)
+    timestamp = Column(DateTime, default=datetime.now)
+    vlm_model_id = Column(String(64), nullable=True)
+    prompt_id = Column(String(64), nullable=True)
+    latency_ms = Column(Integer, default=0)
+    raw_response = Column(JSONB, nullable=True)
+    findings = Column(JSONB, nullable=True)
+    needs_alert = Column(Boolean, default=False)
+    alert_labels = Column(ARRAY(String))
+    snapshot_path = Column(Text, nullable=True)
+    summary = Column(Text, nullable=True)
+    error = Column(Text, nullable=True)
+
+    run = relationship("VlmInspectionRun", back_populates="findings")
+
+
+class VlmInspectionAlertCooldown(Base):
+    """VLM 巡检告警冷却（持久化，detect-server 重启后仍有效）"""
+
+    __tablename__ = "vlm_inspection_alert_cooldown"
+
+    job_id = Column(String(64), ForeignKey("vlm_inspection_job.job_id"), primary_key=True)
+    device_id = Column(String(64), ForeignKey("device.device_id"), primary_key=True)
+    last_alert_at = Column(DateTime, nullable=False, default=datetime.now)
+
+
+VlmInspectionJob.runs = relationship(
+    "VlmInspectionRun", back_populates="job", cascade="all, delete-orphan"
+)
+VlmInspectionRun.findings = relationship(
+    "VlmInspectionFinding", back_populates="run", cascade="all, delete-orphan"
+)
 
 # 根据环境区分数据库连接字符串
 # 开发环境使用本地数据库，生产环境使用Docker容器内数据库
@@ -291,7 +450,7 @@ class DetectionLog(Base):
     
     log_id = Column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
     config_id = Column(String(64), ForeignKey('detection_config.config_id'), nullable=False)
-    device_id = Column(String(64), ForeignKey('device.device_id'), nullable=False)
+    device_id = Column(String(64), ForeignKey('device.device_id'), nullable=True)
     operation = Column(String(50), nullable=False)  # start, stop, auto_start, auto_stop
     status = Column(String(50))  # success, failed
     message = Column(Text)
@@ -312,6 +471,10 @@ class EdgeServer(Base):
     ip_address = Column(String(45), nullable=False, unique=True, comment="IP地址")
     port = Column(Integer, default=80, nullable=False, comment="端口号")
     description = Column(Text, comment="服务器描述")
+    platform_type = Column(String(20), default="maisi", nullable=False, comment="平台类型: maisi/nodered/custom")
+    admin_url = Column(String(512), comment="管理/编辑器地址")
+    dashboard_url = Column(String(512), comment="Dashboard 地址")
+    health_check_url = Column(String(512), comment="自定义健康检查地址")
     
     # 状态信息
     status = Column(String(20), default="unknown", comment="状态: online/offline/checking/unknown")

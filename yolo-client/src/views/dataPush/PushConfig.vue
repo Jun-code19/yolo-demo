@@ -1,5 +1,7 @@
 <template>
   <div class="push-config-container">
+    <el-tabs v-model="activePanel" class="push-tabs" @tab-change="handleTabChange">
+      <el-tab-pane label="推送配置" name="configs">
     <div class="card-header">
       <div class="header-content">
         <h2>数据推送配置</h2>
@@ -158,6 +160,9 @@
             <div v-if="pushStats[scope.row.push_id] && pushStats[scope.row.push_id].last_success">
               {{ formatTime(pushStats[scope.row.push_id].last_success) }}
             </div>
+            <div v-else-if="scope.row.last_push_time">
+              {{ formatTime(scope.row.last_push_time) }}
+            </div>
             <div v-else>-</div>
           </template>
         </el-table-column>
@@ -189,6 +194,12 @@
           @current-change="handleCurrentChange" />
       </div>
     </el-card>
+      </el-tab-pane>
+
+      <el-tab-pane label="推送记录" name="logs">
+        <PushLogPanel ref="pushLogPanelRef" :push-options="pushConfigs" />
+      </el-tab-pane>
+    </el-tabs>
 
     <!-- 创建/编辑推送配置对话框 -->
     <el-dialog v-model="dialogVisible" :title="isEdit ? '编辑推送配置' : '创建推送配置'" width="50%" top="5vh" :z-index="999999" append-to-body class="high-priority-dialog">
@@ -294,6 +305,7 @@ import { dataPushApi } from '../../api/data_push';
 import { detectionConfigApi } from '../../api/detection';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { Plus, Refresh, Document, CircleCheck, TrendCharts } from '@element-plus/icons-vue';
+import PushLogPanel from './PushLogPanel.vue';
 
 export default {
   name: 'PushConfig',
@@ -302,7 +314,8 @@ export default {
     Refresh,
     Document,
     CircleCheck,
-    TrendCharts
+    TrendCharts,
+    PushLogPanel
   },
   setup() {
     const pushConfigs = ref([]);
@@ -316,6 +329,8 @@ export default {
     const saving = ref(false);
     const dialogVisible = ref(false);
     const isEdit = ref(false);
+    const activePanel = ref('configs');
+    const pushLogPanelRef = ref(null);
 
     // 分页相关
     const currentPage = ref(1);
@@ -436,9 +451,15 @@ export default {
     const loadPushStats = async () => {
       try {
         const response = await dataPushApi.getPushStats();
-        pushStats.value = response.data || {};
+        pushStats.value = response.data?.data || response.data || {};
       } catch (error) {
-        // console.error('加载推送统计信息失败:', error);
+        // 统计来自检测服务(8000)，未启动时仅影响内存计数
+      }
+    };
+
+    const handleTabChange = (tabName) => {
+      if (tabName === 'logs' && pushLogPanelRef.value?.loadLogs) {
+        pushLogPanelRef.value.loadLogs();
       }
     };
 
@@ -538,9 +559,12 @@ export default {
         if (response.data.status === 'success') {
           ElMessage.success('推送测试成功!');
         } else {
-          ElMessage.warning('推送测试失败!');
+          ElMessage.warning(response.data.message || '推送测试失败!');
         }
         await loadPushStats();
+        if (pushLogPanelRef.value?.loadLogs) {
+          pushLogPanelRef.value.loadLogs();
+        }
       } catch (error) {
         // console.error('测试推送配置失败:', error);
         ElMessage.error(`测试推送配置失败: ${error.response?.data?.detail || error.message}`);
@@ -625,6 +649,9 @@ export default {
 
     return {
       pushFormRef,
+      activePanel,
+      pushLogPanelRef,
+      handleTabChange,
       pushConfigs,
       detectionConfigs,
       filterConfigId,
@@ -666,6 +693,10 @@ export default {
 <style scoped>
 .push-config-container {
   padding: 20px;
+}
+
+.push-tabs :deep(.el-tabs__header) {
+  margin-bottom: 16px;
 }
 
 .card-header {

@@ -97,4 +97,10 @@ body .el-time-picker {
 .high-priority-dialog .el-date-picker,
 .high-priority-dialog .el-time-picker {
   z-index: 999999 !important;
+}
+
+/* teleported 到 body 的下拉层需高于高优先级弹窗 */
+.el-select-dropdown.el-popper,
+.el-popper.el-select__popper {
+  z-index: 1000000 !important;
 } 

@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from src.database import SysLog, DetectionLog
+from src.database import SysLog, DetectionLog, Device
 from datetime import datetime
 
 # 在文件开头添加新的操作类型常量
@@ -90,6 +90,14 @@ def log_action(db: Session, user_id: str, action_type: str, target_id: str, deta
         db.rollback()
 
 # 添加记录检测日志的函数
+def _resolve_detection_log_device_id(db, device_id: str):
+    """检测日志 device_id 必须是 device 表中的 ID，分组任务等场景可为空"""
+    if not device_id or device_id in ("unknown", "null"):
+        return None
+    exists = db.query(Device.device_id).filter(Device.device_id == device_id).first()
+    return device_id if exists else None
+
+
 def log_detection_action(config_id: str, device_id: str, operation: str, status: str, message: str, user_id: str = None, db = None):
     """记录检测任务操作日志"""
     from src.database import SessionLocal
@@ -101,10 +109,12 @@ def log_detection_action(config_id: str, device_id: str, operation: str, status:
         if db is None or isinstance(db, str):
             db = SessionLocal()
             close_db = True
+
+        resolved_device_id = _resolve_detection_log_device_id(db, device_id)
             
         log = DetectionLog(
             config_id=config_id,
-            device_id=device_id,
+            device_id=resolved_device_id,
             operation=operation,
             status=status,
             message=message,

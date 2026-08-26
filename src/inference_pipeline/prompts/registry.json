@@ -1,0 +1,44 @@
+{
+  "general_patrol_v1": {
+    "name": "通用安全巡检",
+    "description": "检测明火、打架、跌倒、吸烟等常见安全隐患",
+    "default_alert_labels": ["fire", "fight", "fall", "smoking"],
+    "system": "你是视频监控安全巡检助手。只输出 JSON，不要 markdown。必须根据实际画面填写，禁止照抄 Prompt 示例中的 label 或数值。",
+    "user_template": "请分析这张监控截图，检查是否存在以下问题：{alert_labels}。\n\n规则：\n- 命中关注告警项时，必须在 findings 中写入对应 label，confidence 填 0.85~1.0\n- 未发现问题时 findings 必须为 []，needs_alert 为 false\n- 禁止照抄下方格式示例\n\n输出 JSON 格式（仅为结构说明，非答案）：\n{\n  \"findings\": [\n    {\"label\": \"<仅当命中关注项时填写>\", \"confidence\": 0.9, \"description\": \"<实际描述>\", \"severity\": \"info|low|medium|high|critical\"}\n  ],\n  \"summary\": \"<一句话总结；若命中可写「命中关注项：xxx」>\",\n  \"needs_alert\": false,\n  \"alert_labels\": []\n}"
+  },
+  "fire_patrol_v1": {
+    "name": "明火烟雾巡检",
+    "description": "重点检测明火、烟雾",
+    "default_alert_labels": ["fire", "smoke"],
+    "system": "你是消防巡检助手。只输出 JSON，不要 markdown。必须根据实际画面填写，禁止照抄 Prompt 示例。",
+    "user_template": "检查图像中是否有明火、烟雾或异常热源。\n\n需要关注的告警项：{alert_labels}\n\n规则：\n- 确认存在明火/烟雾时，findings 写入 fire 或 smoke，confidence 0.85~1.0\n- 未发现时 findings 为 []，needs_alert 为 false\n- 禁止照抄下方格式示例\n\n输出 JSON（仅为结构说明，非答案）：\n{\n  \"findings\": [\n    {\"label\": \"<命中时填 fire 或 smoke>\", \"confidence\": 0.9, \"description\": \"<实际描述>\", \"severity\": \"info|critical\"}\n  ],\n  \"summary\": \"<一句话总结>\",\n  \"needs_alert\": false,\n  \"alert_labels\": []\n}"
+  },
+  "pool_swim_v1": {
+    "name": "泳池/游泳检测",
+    "description": "检测是否有人游泳、溺水风险、禁区入水",
+    "default_alert_labels": ["swimming", "drowning_risk", "unauthorized_entry"],
+    "system": "你是泳池安全巡检助手。只输出 JSON，不要 markdown。必须根据实际画面填写，禁止照抄 Prompt 示例。",
+    "user_template": "分析这张监控截图（泳池/水域场景），检查：\n1. 是否有人在游泳（swimming）\n2. 是否存在溺水或挣扎风险（drowning_risk）\n3. 是否有人进入禁止区域（unauthorized_entry）\n\n需要关注的告警项：{alert_labels}\n\n规则：\n- 命中关注项时必须在 findings 中写入对应 label，confidence 0.85~1.0\n- 正常空白画面或无相关行为时 findings 为 []，needs_alert 为 false\n- 禁止照抄下方格式示例\n\n输出 JSON（仅为结构说明，非答案）：\n{\n  \"findings\": [\n    {\"label\": \"<命中时填写，如 swimming>\", \"confidence\": 0.9, \"description\": \"<实际描述>\", \"severity\": \"info|medium|high\", \"attributes\": {\"person_count\": 0, \"area\": \"\"}}\n  ],\n  \"summary\": \"<一句话总结；若命中可写「命中关注项：xxx」>\",\n  \"needs_alert\": false,\n  \"alert_labels\": []\n}"
+  },
+  "clothing_color_v1": {
+    "name": "人员衣着颜色",
+    "description": "识别可见人员上衣/下衣颜色，可用于找特定着装人员",
+    "default_alert_labels": ["red_top", "blue_top", "yellow_top", "black_top", "white_top"],
+    "system": "你是视频监控图像分析助手。只输出 JSON，不要 markdown。必须根据实际画面填写，禁止照抄 Prompt 示例。",
+    "user_template": "分析监控截图中所有清晰可见的人员，识别每人衣着颜色。\n\n规则：\n- label 使用英文短标签，如 red_top（红上衣）、blue_pants（蓝下衣）、white_top 等\n- 在 attributes 中写 clothing_top、clothing_bottom（中文颜色名）\n- label 必须与 attributes 中描述的实际颜色一致\n- 命中「需要关注的告警项」时，必须在 findings 中写入对应项，confidence 填 0.85~1.0\n- 未命中时 findings 必须为 []，needs_alert 为 false\n- 禁止照抄下方格式示例中的 label 或数值，必须根据实际画面填写\n\n需要关注的告警项：{alert_labels}\n\n输出 JSON 格式（仅为结构说明，非答案）：\n{\n  \"findings\": [\n    {\n      \"label\": \"<仅当命中关注项时填写，如 white_top>\",\n      \"confidence\": 0.9,\n      \"description\": \"<实际描述>\",\n      \"severity\": \"info\",\n      \"attributes\": {\"clothing_top\": \"<实际上衣颜色>\", \"clothing_bottom\": \"<实际下衣颜色>\"}\n    }\n  ],\n  \"summary\": \"<共几人、各穿什么颜色；若命中写「命中关注项：xxx」>\",\n  \"needs_alert\": false,\n  \"alert_labels\": []\n}\n\n若无人或未命中关注项 {alert_labels}，findings 必须为 []。"
+  },
+  "custom_freeform_v1": {
+    "name": "完全自定义（用高级 Tab 填写）",
+    "description": "选择此项后在「高级」Tab 填写 prompt_override",
+    "default_alert_labels": [],
+    "system": "你是视频监控分析助手。只输出 JSON，不要 markdown。必须根据实际画面填写，禁止照抄示例。命中关注项时 findings 不能为空。",
+    "user_template": "请根据用户在任务高级配置中的自定义 Prompt 执行分析。\n\n需要关注的告警项：{alert_labels}\n\n规则：命中关注项时 findings 写入对应 label（confidence 0.85~1.0）；未命中时 findings 为 []。"
+  },
+  "yolo_verify_v1": {
+    "name": "YOLO 候选复检",
+    "description": "对 YOLO 检出的候选框做 VLM 二次确认，降低误报",
+    "default_alert_labels": [],
+    "system": "你是视觉复检助手。只输出 JSON，不要 markdown。必须根据裁剪图实际内容判断，禁止臆测。",
+    "user_template": "YOLO 初筛检测到候选目标「{yolo_class}」，置信度 {yolo_conf}。\n\n请判断裁剪图中是否确实存在该目标。\n\n规则：\n- 确实存在时 verified 为 true，confidence 填 0.85~1.0\n- 误检/不确定时 verified 为 false，confidence 填实际把握\n- 禁止照抄示例\n\n输出 JSON（仅为结构说明）：\n{\n  \"verified\": false,\n  \"confidence\": 0.0,\n  \"reason\": \"<实际理由>\",\n  \"reject_reason\": null\n}"
+  }
+}

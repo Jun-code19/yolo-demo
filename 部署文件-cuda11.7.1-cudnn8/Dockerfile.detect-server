@@ -15,18 +15,28 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     && echo "Asia/Shanghai" > /etc/timezone \
     && rm -rf /var/lib/apt/lists/*
 
-# 删除冗余CUDA仓库配置（官方镜像已包含）
-# RUN apt-key adv ... (删除此行)
-
 # 配置PyTorch安装源
 COPY pip.conf /etc/pip.conf
 
 # 安装Python依赖
 COPY requirements.base.txt requirements.detect-server.txt ./
-RUN pip install --no-cache-dir -r requirements.base.txt -r requirements.detect-server.txt
+RUN pip install --no-cache-dir "numpy==1.26.4" \
+    && pip install --no-cache-dir -r requirements.base.txt -r requirements.detect-server.txt
 
 # 复制项目文件
 COPY . .
+
+# NetSDK：优先 vendor/，其次 docs/（构建上下文内需有 .whl）
+RUN set -e; \
+    WHEEL=""; \
+    for f in /app/vendor/*.whl /app/docs/NetSDK*.whl; do \
+      if [ -f "$f" ]; then WHEEL="$f"; break; fi; \
+    done; \
+    if [ -n "$WHEEL" ]; then \
+      pip install --no-cache-dir "$WHEEL" && echo "NetSDK installed: $WHEEL"; \
+    else \
+      echo "WARN: 未找到 NetSDK wheel（请放入 vendor/ 或 docs/ 后重建镜像)"; \
+    fi
 
 # 创建目录
 RUN mkdir -p models storage uploads
@@ -34,6 +44,7 @@ RUN mkdir -p models storage uploads
 # 启用GPU支持
 ENV NVIDIA_VISIBLE_DEVICES=all
 ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility,video
+ENV YOLO_AUTOINSTALL=false ULTRALYTICS_OFFLINE=1 YOLO_NO_ANALYTICS=1 NO_VERSION_CHECK=1
 
 EXPOSE 8000
 CMD ["uvicorn", "base_detect_server:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

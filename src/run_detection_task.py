@@ -11,7 +11,6 @@ from collections import deque
 from typing import List, Optional, Dict, Any
 import os
 import torch
-from ultralytics import YOLO
 
 import uuid
 import colorsys
@@ -31,6 +30,22 @@ from src.tracker import ObjectTracker
 from src.data_pusher import data_pusher
 from src.rtsp_url import build_rtsp_url
 from src.detection_runtime import is_within_active_period, get_frame_interval
+from src.smart_scenarios import is_multi_scenario_config, normalize_smart_config, SCENARIO_TYPE_LABELS, _resolve_counting_type
+from src.device_roi import (
+    coerce_area_coordinates,
+    get_device_roi_pixels,
+    filter_detections_by_roi,
+    draw_device_roi,
+)
+from src.inference_pipeline.detection_vlm_runner import DetectionVlmRunner
+from src.yolo_task_utils import (
+    is_segmentation_type,
+    process_yolo_results,
+    draw_segmentation_detections,
+    build_detection_meta,
+    load_detection_model,
+    predict_detection_frame,
+)
 
 logger = logging.getLogger(__name__)
 # 导入GPU解码器
@@ -48,7 +63,9 @@ class DetectionTask:
     
     def __init__(self, device_id: str, device_name: str, device_ip: str, config_id: str, model_path: str, 
                  confidence: float, models_type: str, is_gpu: bool, target_class: List[str],                  save_mode: SaveMode, area_coordinates:Optional[dict]=None,
-                 stream_type: str = 'main', frequency: str = 'realtime', runtime_config: Optional[dict] = None):
+                 device_roi: Optional[dict] = None,
+                 stream_type: str = 'main', frequency: str = 'realtime', runtime_config: Optional[dict] = None,
+                 inference_pipeline: Optional[dict] = None):
         self.device_id = device_id
         self.device_name = device_name
         self.device_ip = device_ip
@@ -59,7 +76,8 @@ class DetectionTask:
         self.is_gpu = is_gpu
         self.target_class = target_class
         self.save_mode = save_mode
-        self.area_coordinates = area_coordinates  #点坐标值，前端生成的归一化坐标  
+        self.area_coordinates = area_coordinates  # 检测配置中的智能方案区域
+        self.device_roi = device_roi  # 设备管理中的检测区域（enabled + points）
         self.class_colors = {}  # 用于存储每个类别的固定颜色
         self.class_names = None  # 用于存储类别名称
         self.stream_type = stream_type or 'main'
@@ -67,9 +85,20 @@ class DetectionTask:
         self.runtime_config = runtime_config or {}
         self.frame_interval = get_frame_interval(self.runtime_config)
         self.last_detection_time = 0.0
+        self.inference_pipeline = inference_pipeline or {}
+        self.vlm_runner = DetectionVlmRunner(
+            config_id=config_id,
+            inference_pipeline=self.inference_pipeline,
+            save_mode=save_mode,
+            target_class=self.target_class,
+            stream_type=self.stream_type,
+            area_coordinates=self.area_coordinates,
+        )
 
         self.stop_event = threading.Event()
         self.model = None
+        self.infer_device = "cpu"
+        self.is_onnx_model = False
         self.device = None
         self.cap = None
         self.ffmpeg_decoder = None  # 添加GPU解码器
@@ -93,6 +122,7 @@ class DetectionTask:
 
         # 初始化 ObjectTracker
         self.object_tracker = ObjectTracker(max_age=self.max_age, min_hits=self.min_hits, iou_threshold=self.iou_threshold)
+        self.last_yolo_event_time = 0.0
         
         # 设置智能分析区域坐标
         if self.area_coordinates:
@@ -103,71 +133,50 @@ class DetectionTask:
             
         # 性能优化参数
         self.use_gpu_decoder = GPU_DECODER_AVAILABLE and torch.cuda.is_available()
-        self.skip_frame_count = 5  # 跳帧数，可根据CPU负载动态调整
+        self.skip_frame_count = 1  # 跳帧数，可根据CPU负载动态调整
         self.last_performance_check = time.time()
         self.performance_check_interval = 3600  # 每3600秒检查一次性能
     
+    def _get_fresh_device_roi(self) -> Optional[dict]:
+        db = SessionLocal()
+        try:
+            row = (
+                db.query(Device.area_coordinates)
+                .filter(Device.device_id == self.device_id)
+                .first()
+            )
+            return coerce_area_coordinates(row[0] if row else None)
+        finally:
+            db.close()
+
     def load_model(self): # 加载YOLO模型
         """加载YOLO模型"""
         try:
-            # 获取模型的绝对路径并记录
             abs_model_path = os.path.abspath(self.model_path)
             logger.info(f"加载模型 - 路径: {abs_model_path}")
-            
-            # 设置离线模式，避免连接GitHub
-            os.environ["ULTRALYTICS_OFFLINE"] = "1"
-            # 禁用所有自动更新和在线检查
-            os.environ["YOLO_NO_ANALYTICS"] = "1"
-            os.environ["NO_VERSION_CHECK"] = "1"
-            
-            # 确保模型文件存在
+
             if not os.path.exists(abs_model_path):
-                # 尝试在当前目录下的models文件夹中查找
                 base_name = os.path.basename(abs_model_path)
                 alt_path = os.path.join("models", base_name)
                 alt_abs_path = os.path.abspath(alt_path)
-                
                 if os.path.exists(alt_abs_path):
                     abs_model_path = alt_abs_path
                     self.model_path = alt_path
                 else:
-                    logger.error(f"无法找到模型文件")
+                    logger.error("无法找到模型文件")
                     return False
-            
-            # 使用绝对路径加载模型
-            # 最新YOLO版本可能需要使用以下方式加载本地模型
-            # 设置环境变量确保使用本地模型
-            os.environ["YOLO_VERBOSE"] = "0"  # 减少冗余日志
-            
-            # 根据文件扩展名确定模型类型
-            model_ext = os.path.splitext(abs_model_path)[1].lower()
-            
-            # 直接使用本地文件路径加载
-            try:
-                # 强制指定task类型
-                task_type = 'detect'
-                if hasattr(self, 'models_type') and self.models_type == 'pose':
-                    task_type = 'pose'
-                    
-                self.model = YOLO(abs_model_path, task=task_type)
-   
-                # 使用GPU并进行优化
-                device = 'cuda' if torch.cuda.is_available() and self.is_gpu else 'cpu'
-                self.device = torch.device(device)
-                self.model.to(self.device)
-                
-                self.class_names = self.model.names
 
-                if device == 'cuda' and hasattr(self.model, 'model'): 
-                    # 使用半精度浮点数以提高性能
-                    if hasattr(self.model.model, 'dtype'):
-                        self.model.model.half()
-
-                return True
-            except Exception as e:
-                logger.error(f"加载模型时出错: {e}")
-                return False
-                
+            self.model, self.infer_device, self.is_onnx_model = load_detection_model(
+                abs_model_path,
+                self.models_type,
+                self.is_gpu,
+            )
+            self.class_names = getattr(self.model, "names", {})
+            if self.is_onnx_model:
+                logger.info("已使用 ONNX 专用推理适配器加载模型")
+            else:
+                logger.info("已加载 PyTorch/YOLO 模型，device=%s", self.infer_device)
+            return True
         except Exception as e:
             logger.error(f"模型加载失败: {e}")
             return False
@@ -356,6 +365,8 @@ class DetectionTask:
 
             if self.area_coordinates and self.area_coordinates.get('alarm_interval'):
                 cooldown_period = self.area_coordinates.get('alarm_interval')
+            elif self.area_coordinates and is_multi_scenario_config(self.area_coordinates):
+                cooldown_period = normalize_smart_config(self.area_coordinates).get('global', {}).get('alarm_interval', 15)
             else:
                 cooldown_period = 15  # 检测事件的冷却时间（秒）
 
@@ -397,24 +408,32 @@ class DetectionTask:
                         # img_result = frame_rgb.copy() 保留如果保存不带检测结果的帧，可以用于调试 _process_detection_events                 
                         # 使用 try-except 捕获模型推理过程中的错误
                         try:
-                            results = self.model(detect_frame, conf=self.confidence,iou=0.45,max_det=300,device=self.device, verbose=False)
+                            results = predict_detection_frame(
+                                self.model,
+                                detect_frame,
+                                infer_device=self.infer_device,
+                                is_onnx=self.is_onnx_model,
+                                confidence=self.confidence,
+                            )
                             # 获取速度
                             speed = results[0].speed
                             # 处理检测结果
-                            detections = self.process_detection_results(results)                    
+                            detections = self.process_detection_results(results)
+                            device_roi = self._get_fresh_device_roi()
+                            roi_pixels = get_device_roi_pixels(device_roi, detect_frame.shape)
+                            output_detections = detections
                             
                             # 首次设置区域坐标
                             if self.area_coordinates and not self.area_coordinates_set:
                                 self.object_tracker.set_area_coordinates(self.area_coordinates, detect_frame.shape)
                                 self.area_coordinates_set = True
                             
-                            # 绘制区域框提示
+                            # 绘制智能方案区域框
                             self.draw_roi(detect_frame)
 
-                            if self.area_coordinates and self.area_coordinates.get('analysisType'):
+                            if self._has_smart_analysis():
                                 if self.models_type == 'pose' and detections:
                                     detect_frame = self.display_pose_results(detect_frame, results[0])
-                                # 智能分析：即使本帧无检测也更新 tracker，保留 ghost track
                                 self.object_tracker.update(detections, frame_gap=skip_frame_count)
                                 detect_frame = self.object_tracker.draw_tracks(
                                     detect_frame,
@@ -422,12 +441,31 @@ class DetectionTask:
                                     show_boxes=True,
                                 )
                                 self._process_smart_analysis_events(detect_frame, detections, speed, cooldown_period)
-                            elif detections:
-                                if self.models_type == 'pose':
-                                    detect_frame = self.display_pose_results(detect_frame, results[0])
-                                else:
-                                    detect_frame = self.display_detection_results(detect_frame, results[0], show_boxes=True)
-                                    self._process_detection_events(detect_frame, detections, speed, cooldown_period)
+                            else:
+                                basic_detections = detections
+                                if roi_pixels:
+                                    draw_device_roi(detect_frame, roi_pixels)
+                                    basic_detections = filter_detections_by_roi(detections, roi_pixels)
+                                output_detections = basic_detections
+                                if basic_detections:
+                                    if self.models_type == 'pose':
+                                        detect_frame = self.display_pose_results(detect_frame, results[0])
+                                    elif is_segmentation_type(self.models_type):
+                                        detect_frame = draw_segmentation_detections(
+                                            detect_frame,
+                                            basic_detections,
+                                            self.get_class_color,
+                                        )
+                                    else:
+                                        detect_frame = self.display_detections_list(detect_frame, basic_detections)
+                                    if self.vlm_runner.enabled:
+                                        self._process_vlm_pipeline(
+                                            detect_frame, basic_detections, speed, cooldown_period
+                                        )
+                                    else:
+                                        self._process_detection_events(
+                                            detect_frame, basic_detections, speed, cooldown_period
+                                        )
 
                             if self.frequency == 'manual':
                                 self.last_detection_time = time.time()
@@ -435,7 +473,7 @@ class DetectionTask:
                             if not self.clients:
                                 continue  # 没有客户端连接，跳过下面步骤
                             else:
-                                self.broadcast_img_result(detect_frame, detections) # 向WebSocket客户端推送检测结果
+                                self.broadcast_img_result(detect_frame, output_detections)
                             
                         except Exception as e:
                             logger.error(f"模型推理过程中出错: {e}")
@@ -493,25 +531,11 @@ class DetectionTask:
 
     def process_detection_results(self, results):
         """处理检测结果"""
-        detections = []
-        
-        for r in results:
-            boxes = r.boxes
-            for box in boxes:
-                x1, y1, x2, y2 = box.xyxy[0].tolist()
-                confidence = box.conf.item()
-                class_id = int(box.cls.item())
-                class_name = r.names[class_id]
-                
-                if str(class_id) in self.target_class:
-                    detections.append({
-                        "bbox": [x1, y1, x2, y2],
-                        "confidence": confidence,
-                        "class_id": class_id,
-                        "class_name": class_name
-                    })
-        
-        return detections
+        return process_yolo_results(
+            results,
+            self.target_class,
+            include_segmentation=is_segmentation_type(self.models_type),
+        )
     # 显示检测结果
     def display_detection_results(self, img, results,show_boxes=True): # 显示检测结果
         if not hasattr(results, 'boxes') or results.boxes is None:
@@ -536,6 +560,25 @@ class DetectionTask:
             label = f"{class_name}: {conf:.2f}"
             cv2.putText(img, label, (int(x1), int(y1) - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
+        return img
+
+    def display_detections_list(self, img, detections, show_boxes=True):
+        """按过滤后的检测列表绘制目标框"""
+        if not show_boxes or not detections:
+            return img
+        for det in detections:
+            x1, y1, x2, y2 = det["bbox"]
+            cls = det.get("class_id", 0)
+            conf = det.get("confidence", 0.0)
+            color = self.get_class_color(cls)
+            cv2.rectangle(img, (int(x1), int(y1)), (int(x2), int(y2)), color, 2)
+            class_name = det.get("class_name") or (
+                self.class_names[cls] if self.class_names else f"Class {cls}"
+            )
+            label = f"{class_name}: {conf:.2f}"
+            cv2.putText(
+                img, label, (int(x1), int(y1) - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2
+            )
         return img
 
     def display_pose_results(self, img, results): # 显示姿态结果
@@ -634,17 +677,37 @@ class DetectionTask:
                 logger.warning(f"检测线程未能及时停止: {self.config_id}")
 
         self.release_camera_connection("任务停止")
+        if self.vlm_runner:
+            self.vlm_runner.shutdown()
     
+    def _process_vlm_pipeline(self, img_result, detections, speed, cooldown_period):
+        """YOLO 初筛后异步调用 VLM（verify / analyze）"""
+        if not detections or not self.vlm_runner.enabled:
+            return
+        self.vlm_runner.submit(
+            img_result,
+            detections,
+            speed,
+            device_id=self.device_id,
+            device_name=self.device_name,
+            device_ip=self.device_ip,
+        )
+
     # 保存检测事件到数据库并存储图像/视频
-    def _process_detection_events(self, img_result, detections, speed, cooldown_period): # 处理检测事件
-        """处理检测事件"""
-        # 判断是否需要创建检测事件
-        current_time = time.time() # 当前时间
-        if detections and (current_time - self.last_detection_time) > cooldown_period:
-            self.last_detection_time = current_time
-            self.push_detection_data(detections, img_result, speed)
-            # if self.save_mode.value != 'none':
+    def _process_detection_events(self, img_result, detections, speed, cooldown_period):
+        """生成普通检测事件（不参与规则）"""
+        if not detections:
+            return
+        now = time.time()
+        if now - self.last_yolo_event_time < float(cooldown_period or 0):
+            return
+        try:
             self.save_detection_event(img_result, detections)
+            self.push_detection_data_legacy(detections, img_result, speed)
+            self.last_yolo_event_time = now
+            self.last_detection_time = now
+        except Exception as exc:
+            logger.error("保存检测事件失败: %s", exc)
             
     def save_detection_event(self, frame, detections): # 保存检测事件到数据库并存储图像/视频
         """保存检测事件到数据库并存储图像/视频"""
@@ -675,12 +738,7 @@ class DetectionTask:
                 created_at=current_time
             )
 
-            # 保存事件元数据
-            event.meta_data = {
-                "current_count": len(detections),
-                "target_class": self.target_class,
-                "event_description": f"检测到{len(detections)}个目标"
-            }
+            event.meta_data = build_detection_meta(self.models_type, detections, self.target_class)
             
             if self.save_mode in [SaveMode.screenshot, SaveMode.both]:
                 # 根据保存模式保存图像/视频
@@ -707,7 +765,7 @@ class DetectionTask:
             if 'db' in locals() and db:
                 db.close()  
     
-    def push_detection_data(self, detections, frame_rgb, speed): # 推送检测数据
+    def push_detection_data_legacy(self, detections, frame_rgb, speed): # 推送检测数据
         """推送检测数据"""
         if not data_pusher.push_configs:
             return
@@ -755,37 +813,133 @@ class DetectionTask:
             finally:
                 db.close()
 
-    # 处理智能分析事件
-    def _process_smart_analysis_events(self, img_result, detections, speed, cooldown_period): # 处理智能分析事件
-        """处理智能分析事件"""
-        try:
-            # 获取触发的行为事件
-            triggered_events = self.object_tracker.triggered_events
-            current_time = time.time() # 当前时间
+    def _has_smart_analysis(self) -> bool:
+        if not self.area_coordinates:
+            return False
+        if is_multi_scenario_config(self.area_coordinates):
+            normalized = normalize_smart_config(self.area_coordinates)
+            return bool(normalized.get("scenarios"))
+        return bool(self.area_coordinates.get("analysisType"))
 
-            for event_key, event_info in triggered_events.items():
-                # 创建检测事件记录（用于行为分析）
-                if self.area_coordinates.get('analysisType') == 'behavior':
+    def _process_smart_analysis_events(self, img_result, detections, speed, cooldown_period):
+        """生成智能分析事件（不参与规则）"""
+        try:
+            for _event_key, event_info in list(self.object_tracker.triggered_events.items()):
+                scenario_type = event_info.get("scenario_type")
+                analysis = event_info.get("analysisType") or event_info.get("analysis_type")
+                counting = event_info.get("counting_type") or event_info.get("countingType")
+                evt = event_info.get("event_type") or ""
+
+                if scenario_type in ("leave_post", "crowd_gather", "loitering"):
+                    self._create_scenario_alert_event(event_info, img_result, detections)
+                    self._push_scenario_alert_event(event_info, img_result, detections, speed)
+                elif evt in (
+                    "occupancy_alert",
+                    "occupancy_change_increase",
+                    "occupancy_change_decrease",
+                    "occupancy_report",
+                ) or counting in ("occupancy", "flow") or evt.startswith("occupancy_"):
+                    self._create_counting_event(event_info, img_result, detections)
+                    self.push_counting_event_legacy(event_info, img_result, detections, speed)
+                    if evt == "occupancy_alert":
+                        self._check_alert(event_info.get("current_count", 0))
+                elif analysis == "behavior" or scenario_type == "behavior" or evt.startswith(
+                    ("line_cross", "area_")
+                ):
                     self._create_behavior_event(event_info, img_result, detections)
-                    self.push_behavior_event(event_info, img_result, detections, speed)
-                elif self.area_coordinates.get('analysisType') == 'counting':                    
-                    if self.area_coordinates.get('countingType') == 'occupancy':
-                        self._check_alert(event_info['current_count'])
-                        if (current_time - self.last_detection_time) > cooldown_period:
-                            self.last_detection_time = current_time
-                            self._create_counting_event(event_info, img_result, detections)
-                            self.push_counting_event(event_info, img_result, detections, speed)             
-                    else:
-                        self._create_counting_event(event_info, img_result, detections)
-                        self.push_counting_event(event_info, img_result, detections, speed)
-                # 输出日志
-                # logger.info(f"智能分析事件: {event_info['event_type']}, 轨迹ID: {event_info['track_id']}")
-            
-            # 清空已处理的事件
+                    self.push_behavior_event_legacy(event_info, img_result, detections, speed)
+                else:
+                    self._create_behavior_event(event_info, img_result, detections)
+                    self.push_behavior_event_legacy(event_info, img_result, detections, speed)
             self.object_tracker.triggered_events.clear()
-            
+        except Exception as exc:
+            logger.error("保存智能分析事件失败: %s", exc)
+
+    def _create_scenario_alert_event(self, event_info, frame, detections):
+        """创建离岗/聚众等场景告警事件"""
+        try:
+            db = SessionLocal()
+            event_id = str(uuid.uuid4())
+            current_time = datetime.now()
+
+            config = db.query(DetectionConfig).filter(DetectionConfig.config_id == self.config_id).first()
+            if not config:
+                logger.error(f"未找到检测配置: {self.config_id}")
+                db.close()
+                return
+
+            event = DetectionEvent(
+                event_id=event_id,
+                config_id=self.config_id,
+                device_id=self.device_id,
+                timestamp=current_time,
+                event_type='smart_person',
+                confidence=max([d["confidence"] for d in detections]) if detections else 0.0,
+                bounding_box=detections,
+                status=EventStatus.new,
+                created_at=current_time
+            )
+
+            event.meta_data = {
+                "scenario_id": event_info.get('scenario_id'),
+                "scenario_name": event_info.get('scenario_name'),
+                "scenario_type": event_info.get('scenario_type'),
+                "event_type": event_info.get('event_type'),
+                "event_description": self._get_event_description(event_info.get('event_type')),
+                "current_count": event_info.get('current_count'),
+                "min_persons": event_info.get('min_persons'),
+                "duration_sec": event_info.get('duration_sec'),
+                "target_class": self.target_class,
+            }
+
+            save_dir = Path(f"storage/events/{current_time.strftime('%Y-%m-%d')}/{self.device_id}")
+            save_dir.mkdir(parents=True, exist_ok=True, mode=0o777)
+
+            if self.save_mode in [SaveMode.screenshot, SaveMode.both]:
+                thumbnail_path = save_dir / f"{event_id}.jpg"
+                quality = 100 if self.stream_type == 'sub' else 70
+                cv2.imwrite(str(thumbnail_path), frame, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
+                event.thumbnail_path = str(thumbnail_path)
+
+            db.add(event)
+            db.commit()
+            logger.info(f"已保存场景告警事件: {event_id} ({event_info.get('scenario_name')})")
         except Exception as e:
-            logger.error(f"处理智能分析事件失败: {e}")
+            logger.error(f"保存场景告警事件失败: {e}")
+            if 'db' in locals() and db:
+                db.rollback()
+        finally:
+            if 'db' in locals() and db:
+                db.close()
+
+    def _push_scenario_alert_event(self, event_info, frame, detections, speed):
+        if not data_pusher.push_configs:
+            return
+
+        push_label = event_info.get('pushLabel')
+        if not push_label and self.area_coordinates:
+            push_label = self.area_coordinates.get('pushLabel')
+        if not push_label:
+            return
+
+        push_data = {
+            "cameraInfo": self.device_name + ":" + self.device_ip,
+            "deviceId": self.device_id,
+            "scenarioId": event_info.get('scenario_id'),
+            "scenarioName": event_info.get('scenario_name'),
+            "scenarioType": event_info.get('scenario_type'),
+            "eventType": event_info.get('event_type'),
+            "currentCount": event_info.get('current_count', 0),
+            "minPersons": event_info.get('min_persons'),
+            "durationSec": event_info.get('duration_sec'),
+            "recordTime": datetime.now().isoformat() + '+08:00',
+        }
+        data_pusher.push_data(
+            data=push_data,
+            image=frame,
+            tags=[push_label, f"device_{self.device_id}", f"scenario_{event_info.get('scenario_id')}"],
+            config_id=self.config_id
+        )
     
     def _create_behavior_event(self, event_info, frame, detections): # 创建行为事件记录
         """创建行为事件记录"""
@@ -818,9 +972,11 @@ class DetectionTask:
 
             # 保存事件元数据
             event.meta_data = {
-                "analysis_type": self.area_coordinates.get('analysisType'),
-                "behavior_type": self.area_coordinates.get('behaviorType'),
-                "behavior_subtype": self.area_coordinates.get('behaviorSubtype'),
+                "analysis_type": event_info.get('analysisType') or self.area_coordinates.get('analysisType'),
+                "behavior_type": event_info.get('behavior_type') or self.area_coordinates.get('behaviorType'),
+                "behavior_subtype": event_info.get('behavior_subtype') or self.area_coordinates.get('behaviorSubtype'),
+                "scenario_id": event_info.get('scenario_id'),
+                "scenario_name": event_info.get('scenario_name'),
                 "event_type": event_info['event_type'],
                 "event_description": self._get_event_description(event_info['event_type']),
                 "target_class": self.target_class           
@@ -883,16 +1039,20 @@ class DetectionTask:
 
             # 保存事件元数据
             event.meta_data = {
-                "analysis_type": self.area_coordinates.get('analysisType'),
-                "counting_type": self.area_coordinates.get('countingType'),
-                "counting_subtype": 'area_counting' if self.area_coordinates.get('countingType') == 'occupancy' else 'flow_counting',
+                "analysis_type": event_info.get('analysisType') or self.area_coordinates.get('analysisType'),
+                "counting_type": event_info.get('counting_type') or self.area_coordinates.get('countingType'),
+                "counting_subtype": 'area_counting' if (event_info.get('counting_type') or self.area_coordinates.get('countingType')) == 'occupancy' else 'flow_counting',
+                "scenario_id": event_info.get('scenario_id'),
+                "scenario_name": event_info.get('scenario_name'),
                 "event_type": event_info['event_type'],
                 "event_description": self._get_event_description(event_info['event_type']),
                 "target_class": self.target_class,
-                "current_count": event_info['current_count'],
+                "current_count": event_info.get('current_count'),
+                "previous_count": event_info.get('previous_count'),
+                "change_amount": event_info.get('change_amount'),
                 "area_counts": event_info.get('area_counts'),
-                "today_in_count": event_info['today_in_count'],
-                "today_out_count": event_info['today_out_count']
+                "today_in_count": event_info.get('today_in_count'),
+                "today_out_count": event_info.get('today_out_count')
             }
             
             # 根据保存模式保存图像/视频
@@ -921,60 +1081,43 @@ class DetectionTask:
             if 'db' in locals() and db:
                 db.close()
 
-    def push_behavior_event(self, event_info, frame, detections, speed): # 推送行为事件
+    def push_behavior_event_legacy(self, event_info, frame, detections, speed): # 推送行为事件
         """推送行为事件"""
         if not data_pusher.push_configs:
             return
         
-        if self.area_coordinates and self.area_coordinates.get('pushLabel'):
+        push_label = event_info.get('pushLabel')
+        if not push_label and self.area_coordinates:
             push_label = self.area_coordinates.get('pushLabel')
-       
-            push_data = {
-                "cameraInfo": self.device_name + ":" + self.device_ip,
-                "deviceId": self.device_id,
-                "enteredCount":0,
-                "exitedCount":0,
-                "stayingCount": event_info['current_count'],
-                "passedCount":0,
-                "recordTime": datetime.now().isoformat() + '+08:00',
-                # "event_description": self._get_event_description(event_info['event_type']),
-                # "target_class": self.target_class
-            }
-            # 增加标签，使推送更灵活
-            data_pusher.push_data(
-                data=push_data, 
-                image=frame, 
-                tags=[push_label, f"device_{self.device_id}"],
-                config_id=self.config_id  # 为了兼容性保留
-            )
-        
-            # 记录性能统计信息
-            # db = SessionLocal()
-            # try:
-            #     perf = DetectionPerformance(
-            #         device_id=self.device_id,
-            #         config_id=self.config_id,
-            #         detection_time=speed['inference'],
-            #         preprocessing_time=speed['preprocess'],
-            #         postprocessing_time=speed['postprocess'],
-            #         frame_width=frame.shape[1],
-            #         frame_height=frame.shape[0],
-            #         objects_detected=len(detections)
-            #     )
-            #     db.add(perf)
-            #     db.commit()
-            # except Exception as e:
-            #     logger.error(f"保存性能数据失败: {e}")
-            #     db.rollback()
-            # finally:
-            #     db.close()
+        if not push_label:
+            return
 
-    def push_counting_event(self, event_info, frame, detections, speed): # 推送人数统计事件
+        push_data = {
+            "cameraInfo": self.device_name + ":" + self.device_ip,
+            "deviceId": self.device_id,
+            "enteredCount": 0,
+            "exitedCount": 0,
+            "stayingCount": event_info.get('current_count', 0),
+            "passedCount": 0,
+            "recordTime": datetime.now().isoformat() + '+08:00',
+        }
+        data_pusher.push_data(
+            data=push_data,
+            image=frame,
+            tags=[push_label, f"device_{self.device_id}"],
+            config_id=self.config_id
+        )
+
+    def push_counting_event_legacy(self, event_info, frame, detections, speed): # 推送人数统计事件
         """推送人数统计事件"""
         if not data_pusher.push_configs:
             return
 
-        push_label = self.area_coordinates.get('pushLabel') if self.area_coordinates else None
+        push_label = event_info.get('pushLabel')
+        if not push_label and self.area_coordinates:
+            push_label = self.area_coordinates.get('pushLabel')
+        if not push_label:
+            return
 
         record_time = datetime.now().isoformat() + '+08:00'
 
@@ -1065,7 +1208,13 @@ class DetectionTask:
             'enter_area': '进入统计区域',
             'exit_area': '离开统计区域',
             'occupancy_change_increase': '区域内人数增加',
-            'occupancy_change_decrease': '区域内人数减少'
+            'occupancy_change_decrease': '区域内人数减少',
+            'occupancy_report': '区域人数定期上报',
+            'leave_post_alert': '离岗告警',
+            'crowd_gather_alert': '聚众告警',
+            'loitering_alert': '徘徊告警',
+            'occupancy_alert': '区域人数超限告警',
+            'occupancy_stats': '区域人数统计',
         }
         return descriptions.get(event_type, '未知事件')
 
@@ -1111,18 +1260,18 @@ class DetectionTask:
     def draw_roi(self, frame, line_color=(0,255,0), fill_color=(0,0,0,0), thickness=2, line_type=cv2.LINE_AA): # 绘制线段/区域 ROI（支持line/area类型）
         """
         绘制线段/区域 ROI（支持line/area类型）
-        :param frame: 输入图像
-        :param roi_type: ROI类型（'line'或'area'或'occupancy'或'flow'） 
-        :param roi_points: ROI坐标列表 [[x1,y1], [x2,y2],...]
-        :param line_color: 线段/边框颜色 (BGR格式)
-        :param fill_color: 填充颜色 (BGR+Alpha格式)
-        :param thickness: 线宽
-        :param line_type: 线型（默认抗锯齿）
         """
+        if not self.area_coordinates:
+            return
+
+        if is_multi_scenario_config(self.area_coordinates):
+            self._draw_multi_scenario_roi(frame, thickness, line_type)
+            return
+
         roi_type = None
         roi_points = None
         # 获取区域配置
-        if(self.area_coordinates and self.area_coordinates['analysisType']): 
+        if self.area_coordinates.get('analysisType'):
             roi_type = self.area_coordinates['behaviorType'] if self.area_coordinates['analysisType'] == 'behavior' else self.area_coordinates['countingType']
             roi_points = self.area_coordinates['points']
         else:
@@ -1177,6 +1326,44 @@ class DetectionTask:
                     overlay = frame.copy()
                     cv2.fillPoly(overlay, [roi_array], fill_color)
                     frame = cv2.addWeighted(frame, 0.7, overlay, 0.3, 0)
+
+    def _draw_multi_scenario_roi(self, frame, thickness=2, line_type=cv2.LINE_AA):
+        normalized = normalize_smart_config(self.area_coordinates)
+        palette = [
+            (0, 255, 0), (255, 170, 0), (0, 170, 255), (255, 68, 170), (170, 68, 255)
+        ]
+        for index, scenario in enumerate(normalized.get('scenarios') or []):
+            if scenario.get('enabled') is False:
+                continue
+            color = palette[index % len(palette)]
+            scenario_type = scenario.get('type')
+            if scenario_type == 'counting' and _resolve_counting_type(scenario) == 'occupancy':
+                for area in scenario.get('occupancyAreas') or []:
+                    area_points = area.get('points') or []
+                    if len(area_points) < 3:
+                        continue
+                    line = self.normalize_points(area_points, frame.shape)
+                    roi_array = np.array(line, np.int32)
+                    cv2.polylines(frame, [roi_array], True, color, thickness, line_type)
+                continue
+
+            points = scenario.get('points') or []
+            if len(points) < 2:
+                continue
+            line = self.normalize_points(points, frame.shape)
+            roi_array = np.array(line, np.int32)
+            is_line = (
+                (scenario_type == 'behavior' and scenario.get('behaviorType') == 'line')
+                or (scenario_type == 'counting' and _resolve_counting_type(scenario) == 'flow')
+            )
+            if is_line:
+                cv2.polylines(frame, [roi_array], False, color, thickness, line_type)
+                for pt in roi_array:
+                    cv2.circle(frame, tuple(pt), 3, color, -1)
+            elif len(roi_array) >= 3:
+                cv2.polylines(frame, [roi_array], True, color, thickness, line_type)
+            else:
+                cv2.polylines(frame, [roi_array], False, color, thickness, line_type)
 
     async def broadcast_worker(self): # 处理消息广播的工作协程
         """处理消息广播的工作协程"""

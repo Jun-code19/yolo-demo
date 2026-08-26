@@ -6,6 +6,8 @@
         <el-tab-pane label="系统状态" name="status"></el-tab-pane>
         <el-tab-pane label="系统日志" name="logs"></el-tab-pane>
         <el-tab-pane label="检测日志" name="detection_logs"></el-tab-pane>
+        <el-tab-pane label="外部数据" name="integrations"></el-tab-pane>
+        <el-tab-pane label="设备监控" name="device_monitor"></el-tab-pane>
       </el-tabs>
     </div>
 
@@ -269,6 +271,36 @@
       </div>
     </div>
 
+    <!-- 设备监控配置 -->
+    <div v-if="activeTab === 'device_monitor'" class="integrations-panel">
+      <el-card>
+        <template #header>
+          <div class="card-header">
+            <div>
+              <div class="panel-title">设备在线监控</div>
+              <div class="panel-desc">配置 RTSP/TCP/HTTP 探活策略；NVR 通道建议优先 RTSP</div>
+            </div>
+          </div>
+        </template>
+        <DeviceMonitorConfig />
+      </el-card>
+    </div>
+
+    <!-- 大屏外部数据配置 -->
+    <div v-if="activeTab === 'integrations'" class="integrations-panel">
+      <el-card>
+        <template #header>
+          <div class="card-header">
+            <div>
+              <div class="panel-title">大屏外部数据</div>
+              <div class="panel-desc">配置数据大屏使用的排队时长与天气接口，密钥由服务端安全代理</div>
+            </div>
+          </div>
+        </template>
+        <DashboardIntegrationConfig />
+      </el-card>
+    </div>
+
     <!-- 清除日志对话框 -->
     <el-dialog v-model="clearDialogVisible" title="清除系统日志" width="400px">
       <el-form :model="clearForm" label-width="120px">
@@ -312,13 +344,29 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { Refresh, Download, Delete } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import systemLogApi from '@/api/system_log'
+import DashboardIntegrationConfig from '@/components/DashboardIntegrationConfig.vue'
+import DeviceMonitorConfig from '@/components/DeviceMonitorConfig.vue'
+
+const route = useRoute()
 
 // 选项卡控制
 const activeTab = ref('status')
+
+const syncTabFromRoute = () => {
+  const tab = route.query.tab
+  if (tab === 'integrations') {
+    activeTab.value = 'integrations'
+  } else if (tab === 'device_monitor') {
+    activeTab.value = 'device_monitor'
+  }
+}
+
+watch(() => route.query.tab, syncTabFromRoute)
 
 // 系统状态数据
 const systemStatus = ref({
@@ -899,6 +947,7 @@ const confirmClearDetectionLog = async () => {
 
 // 页面初始化
 onMounted(() => {
+  syncTabFromRoute()
   refreshStatus()
   refreshInterval = setInterval(refreshStatus, 5000)
 
@@ -1083,6 +1132,23 @@ onUnmounted(() => {
 
 .logs-panel {
   margin-top: 20px;
+}
+
+.integrations-panel {
+  margin-top: 20px;
+}
+
+.panel-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #303133;
+}
+
+.panel-desc {
+  margin-top: 4px;
+  font-size: 13px;
+  color: #909399;
+  font-weight: normal;
 }
 
 .header-actions {

@@ -21,7 +21,7 @@ import paho.mqtt.client as mqtt
 from sqlalchemy.orm import Session
 import numpy as np
 
-from src.database import SessionLocal, DataPushConfig, PushMethod
+from src.database import SessionLocal, DataPushConfig, PushMethod, DataPushLog
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -107,9 +107,83 @@ class DataPusher:
                 db.close()
     
     def get_push_stats(self):
-        """获取推送统计信息"""
+        """获取推送统计信息（JSON 可序列化）"""
         with self.lock:
-            return self.push_stats.copy()
+            result = {}
+            for push_id, stat in self.push_stats.items():
+                last_success = stat.get("last_success")
+                result[push_id] = {
+                    "success": stat.get("success", 0),
+                    "fail": stat.get("fail", 0),
+                    "last_success": last_success.isoformat() if last_success else None,
+                }
+            return result
+
+    @staticmethod
+    def _target_summary(config) -> str:
+        method = config.push_method.value if hasattr(config.push_method, "value") else str(config.push_method)
+        if method in ("http", "https"):
+            return config.http_url or ""
+        if method == "tcp":
+            return f"{config.tcp_host}:{config.tcp_port}"
+        if method == "mqtt":
+            return f"{config.mqtt_broker}:{config.mqtt_port}/{config.mqtt_topic}"
+        return method
+
+    @staticmethod
+    def _payload_preview(data: Dict[str, Any], limit: int = 8) -> Dict[str, Any]:
+        if not isinstance(data, dict):
+            return {"value": str(data)[:200]}
+        preview = {}
+        for idx, (key, value) in enumerate(data.items()):
+            if idx >= limit:
+                preview["_truncated"] = True
+                break
+            if isinstance(value, (str, int, float, bool)) or value is None:
+                text = "" if value is None else str(value)
+                preview[str(key)] = text[:120]
+            elif isinstance(value, (list, dict)):
+                preview[str(key)] = f"<{type(value).__name__} len={len(value)}>"
+            else:
+                preview[str(key)] = type(value).__name__
+        return preview
+
+    def record_push_log(
+        self,
+        config,
+        success: bool,
+        message: str = "",
+        duration_ms: int = 0,
+        tags: Optional[List[str]] = None,
+        payload_preview: Optional[Dict[str, Any]] = None,
+        is_test: bool = False,
+    ) -> None:
+        """写入推送执行记录"""
+        db = SessionLocal()
+        try:
+            method = config.push_method.value if hasattr(config.push_method, "value") else str(config.push_method)
+            row = DataPushLog(
+                log_id=str(uuid.uuid4()),
+                push_id=config.push_id,
+                push_name=config.push_name,
+                push_method=method,
+                status="success" if success else "failure",
+                target_summary=self._target_summary(config),
+                message=(message or "")[:2000],
+                tags=list(tags or config.tags or []),
+                config_id=config.config_id,
+                duration_ms=duration_ms or None,
+                payload_preview=payload_preview,
+                is_test=is_test,
+                created_at=datetime.now(),
+            )
+            db.add(row)
+            db.commit()
+        except Exception as exc:
+            logger.error(f"写入推送记录失败: {exc}")
+            db.rollback()
+        finally:
+            db.close()
     
     def push_data(self, data: Dict[str, Any], image=None, tags: List[str] = None, config_id: str = None):
         """将数据放入推送队列
@@ -212,14 +286,26 @@ class DataPusher:
                 
                 # 根据推送方式调用相应的推送函数
                 success = False
+                error_message = ""
+                started = time.time()
                 try:
                     if config.push_method == PushMethod.http or config.push_method == PushMethod.https:
-                        success = self._push_http(config, task["data"], task.get("image"))
+                        success, error_message = self._push_http(config, task["data"], task.get("image"))
                     elif config.push_method == PushMethod.tcp:
-                        success = self._push_tcp(config, task["data"], task.get("image"))
+                        success, error_message = self._push_tcp(config, task["data"], task.get("image"))
                     elif config.push_method == PushMethod.mqtt:
-                        success = self._push_mqtt(config, task["data"], task.get("image"))
-                    
+                        success, error_message = self._push_mqtt(config, task["data"], task.get("image"))
+
+                    duration_ms = int((time.time() - started) * 1000)
+                    preview = self._payload_preview(task.get("data") or {})
+                    self.record_push_log(
+                        config,
+                        success,
+                        message=error_message or ("推送成功" if success else "推送失败"),
+                        duration_ms=duration_ms,
+                        payload_preview=preview,
+                    )
+
                     # 更新统计信息
                     with self.lock:
                         if success:
@@ -239,17 +325,18 @@ class DataPusher:
                                 db.close()
                         else:
                             self.push_stats[push_id]["fail"] += 1
-                            
-                            # 重试逻辑
-                            # if task["retry_count"] < task["max_retries"]:
-                            #     task["retry_count"] += 1
-                            #     # 稍后重试
-                            #     time.sleep(config.retry_interval)
-                            #     self.push_queue.put(task)
                             logger.info(f"推送失败:{push_id}, 数据:{task['data']}")
-                
+
                 except Exception as e:
                     logger.error(f"推送数据时出错: {e}")
+                    duration_ms = int((time.time() - started) * 1000)
+                    self.record_push_log(
+                        config,
+                        False,
+                        message=str(e),
+                        duration_ms=duration_ms,
+                        payload_preview=self._payload_preview(task.get("data") or {}),
+                    )
                     with self.lock:
                         self.push_stats[push_id]["fail"] += 1
                 
@@ -263,145 +350,105 @@ class DataPusher:
                 time.sleep(1)  # 避免CPU占用过高
     
     def _push_http(self, config, data, image=None):
-        """通过HTTP/HTTPS推送数据"""
+        """通过HTTP/HTTPS推送数据，返回 (success, message)"""
         try:
             url = config.http_url
             if not url:
-                # logger.error("HTTP URL 未配置")
-                return False
-            
-            # 准备要发送的数据
+                return False, "HTTP URL 未配置"
+
             post_data = data.copy()
-            
-            # 如果有图像数据且需要包含
             if image is not None:
                 post_data["image"] = image
-            
-            # 准备HTTP头
+
             headers = {}
             if config.http_headers:
-                headers = config.http_headers
+                headers = dict(config.http_headers)
             headers["Content-Type"] = "application/json"
-            
-            # 发送请求
+
             response = requests.request(
                 method=config.http_method,
                 url=url,
                 json=post_data,
                 headers=headers,
-                timeout=3 # 设置超时
+                timeout=3,
             )
-            
-            # 检查响应状态
-            if response.status_code >= 200 and response.status_code < 300:
-                return True
-            else:
-                # logger.warning(f"HTTP推送失败: {config.push_id}, 状态码: {response.status_code}, 响应: {response.text}")
-                return False
-                
+
+            if 200 <= response.status_code < 300:
+                return True, f"HTTP {response.status_code}"
+            return False, f"HTTP {response.status_code}: {(response.text or '')[:300]}"
+
         except requests.exceptions.RequestException as e:
-            # logger.error(f"HTTP推送请求异常: {e}")
-            return False
+            return False, str(e)
         except Exception as e:
-            # logger.error(f"HTTP推送未知异常: {e}")
-            return False
-    
+            return False, str(e)
+
     def _push_tcp(self, config, data, image=None):
-        """通过TCP推送数据"""
+        """通过TCP推送数据，返回 (success, message)"""
         try:
             host = config.tcp_host
             port = config.tcp_port
-            
+
             if not host or not port:
-                # logger.error("TCP主机或端口未配置")
-                return False
-            
-            # 准备发送的数据
+                return False, "TCP 主机或端口未配置"
+
             send_data = data.copy()
-            
-            # 如果有图像数据且需要包含
             if image is not None:
                 send_data["image"] = image
-            
-            # 转换为JSON字符串
-            json_data = json.dumps(send_data) + "\n"  # 添加换行符作为消息分隔符
-            
-            # 创建TCP连接
+
+            json_data = json.dumps(send_data) + "\n"
+
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-                sock.settimeout(10)  # 设置超时
+                sock.settimeout(10)
                 sock.connect((host, port))
-                sock.sendall(json_data.encode('utf-8'))
-                
-                # logger.info(f"TCP推送成功: {config.push_id}")
-                return True
-                
+                sock.sendall(json_data.encode("utf-8"))
+            return True, "TCP 发送成功"
+
         except socket.error as e:
-            # logger.error(f"TCP推送连接异常: {e}")
-            return False
+            return False, str(e)
         except Exception as e:
-            # logger.error(f"TCP推送未知异常: {e}")
-            return False
-    
+            return False, str(e)
+
     def _push_mqtt(self, config, data, image=None):
-        """通过MQTT推送数据"""
+        """通过MQTT推送数据，返回 (success, message)"""
         try:
             broker = config.mqtt_broker
             port = config.mqtt_port
             topic = config.mqtt_topic
             client_id = config.mqtt_client_id or f"detector-{uuid.uuid4()}"
-            
+
             if not broker or not topic:
-                # logger.error("MQTT代理或主题未配置")
-                return False
-            
-            # 准备发送的数据
+                return False, "MQTT 代理或主题未配置"
+
             send_data = data.copy()
-            
-            # 如果有图像数据且需要包含
             if image is not None:
                 send_data["image"] = image
-            
-            # 转换为JSON字符串
+
             json_data = json.dumps(send_data)
-            
-            # 创建MQTT客户端
             client = mqtt.Client(client_id=client_id)
-            
-            # 设置认证信息（如果有）
+
             if config.mqtt_username and config.mqtt_password:
                 client.username_pw_set(config.mqtt_username, config.mqtt_password)
-            
-            # 设置TLS（如果需要）
+
             if config.mqtt_use_tls:
                 client.tls_set(
-                    ca_certs=None,  # 可以设置CA证书路径
+                    ca_certs=None,
                     certfile=None,
                     keyfile=None,
                     cert_reqs=ssl.CERT_REQUIRED,
                     tls_version=ssl.PROTOCOL_TLS,
-                    ciphers=None
+                    ciphers=None,
                 )
-            
-            # 连接到MQTT代理
+
             client.connect(broker, port=port, keepalive=60)
-            
-            # 发布消息
             result = client.publish(topic, json_data, qos=1)
-            
-            # 断开连接
             client.disconnect()
-            
-            # 检查发布结果
+
             if result.rc == mqtt.MQTT_ERR_SUCCESS:
-                # logger.info(f"MQTT推送成功: {config.push_id}")
-                return True
-            else:
-                # logger.warning(f"MQTT推送失败: {config.push_id}, 错误码: {result.rc}")
-                return False
-                
+                return True, "MQTT 发布成功"
+            return False, f"MQTT 错误码: {result.rc}"
+
         except Exception as e:
-            # logger.error(f"MQTT推送异常: {e}")
-            return False
+            return False, str(e)
 
     def _ensure_json_serializable(self, data):
         """确保数据可以被JSON序列化"""

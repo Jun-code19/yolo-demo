@@ -2,13 +2,11 @@ FROM python:3.10-slim
 
 WORKDIR /app
 
-# 手动配置阿里云 APT 源（适配 Debian Bullseye）
 RUN echo "deb http://mirrors.aliyun.com/debian/ bullseye main non-free contrib" > /etc/apt/sources.list && \
     echo "deb http://mirrors.aliyun.com/debian-security/ bullseye-security main non-free contrib" >> /etc/apt/sources.list && \
     echo "deb http://mirrors.aliyun.com/debian/ bullseye-updates main non-free contrib" >> /etc/apt/sources.list
 
-# 安装系统依赖，包括FFmpeg
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     build-essential \
     python3-dev \
     libgl1-mesa-glx \
@@ -20,31 +18,34 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tzdata \
     fonts-wqy-zenhei \
     && rm -rf /var/lib/apt/lists/*
-    
-# 设置时区为中国标准时间
+
+# CPU 镜像不装 ffmpeg（apt 依赖大、易超时）；设备探活用 OpenCV，拉流走 cv2 / ffmpeg-python 回退
+
 RUN ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \
     dpkg-reconfigure -f noninteractive tzdata
 
-# 验证FFmpeg安装
-# RUN ffmpeg -version && ffprobe -version
-
 COPY pip.conf /etc/pip.conf
-
-# 复制并安装依赖
 COPY requirements.base.txt requirements.detect-server.txt ./
-RUN pip install --no-cache-dir -r requirements.base.txt -r requirements.detect-server.txt
+RUN pip install --no-cache-dir "numpy==1.26.4" \
+    && pip install --no-cache-dir -r requirements.base.txt -r requirements.detect-server.txt
 
-# 复制项目文件
 COPY . .
 
-# 创建模型和存储目录
+RUN set -e; \
+    WHEEL=""; \
+    for f in /app/vendor/*.whl /app/docs/NetSDK*.whl; do \
+      if [ -f "$f" ]; then WHEEL="$f"; break; fi; \
+    done; \
+    if [ -n "$WHEEL" ]; then \
+      pip install --no-cache-dir "$WHEEL" && echo "NetSDK installed: $WHEEL"; \
+    else \
+      echo "WARN: 未找到 NetSDK wheel（请放入 vendor/ 或 docs/ 后重建镜像)"; \
+    fi
+
 RUN mkdir -p models storage uploads
 
-# 强制使用CPU模式
-ENV CUDA_VISIBLE_DEVICES=-1 FORCE_CPU=1
+ENV CUDA_VISIBLE_DEVICES=-1 FORCE_CPU=1 \
+    YOLO_AUTOINSTALL=false ULTRALYTICS_OFFLINE=1 YOLO_NO_ANALYTICS=1 NO_VERSION_CHECK=1
 
-# 暴露端口
 EXPOSE 8000
-
-# 启动服务
-CMD ["uvicorn", "base_detect_server:app", "--host", "0.0.0.0", "--port", "8000"] 
+CMD ["uvicorn", "base_detect_server:app", "--host", "0.0.0.0", "--port", "8000"]

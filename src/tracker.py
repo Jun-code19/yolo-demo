@@ -4,9 +4,11 @@
 import cv2
 import numpy as np
 from collections import deque
+from typing import Tuple
 import colorsys
 from PIL import Image, ImageDraw, ImageFont
 from datetime import datetime
+from src.smart_scenarios import ScenarioProcessor, is_multi_scenario_config
 
 class ObjectTracker:
     def __init__(self, max_age=30, min_hits=3, iou_threshold=0.3):
@@ -36,6 +38,8 @@ class ObjectTracker:
         self._occupancy_history = {}  # 各区域原始人数历史 {area_id: deque}
         self._display_total = 0
         self._decrease_hold = 0
+        self.scenario_processor = ScenarioProcessor()
+        self.multi_scenario_mode = False
 
         # 尝试加载中文字体，如果失败则使用默认字体
         try:
@@ -79,8 +83,14 @@ class ObjectTracker:
         self._occupancy_history = {}
         self._display_total = 0
         self._decrease_hold = 0
+        self.multi_scenario_mode = is_multi_scenario_config(area_coordinates)
 
         if not area_coordinates:
+            self.scenario_processor = ScenarioProcessor()
+            return
+
+        if self.multi_scenario_mode:
+            self.scenario_processor.configure(area_coordinates, frame_shape, self)
             return
 
         h, w = frame_shape[:2]
@@ -512,6 +522,10 @@ class ObjectTracker:
                 current_active_tracks.add(track_id)
             self.active_tracks = current_active_tracks
             self._update_area_occupancy_count()
+            if self.multi_scenario_mode and self.scenario_processor.is_active:
+                scenario_events = self.scenario_processor.process()
+                if scenario_events:
+                    self.triggered_events.update(scenario_events)
             return
 
         matches, matched_detections, matched_trackers = self._match_detections_to_tracks(detections)
@@ -537,6 +551,11 @@ class ObjectTracker:
         self.trackers = {k: v for k, v in self.trackers.items() if k in current_active_tracks}
         self.active_tracks = current_active_tracks
         self._update_area_occupancy_count()
+
+        if self.multi_scenario_mode and self.scenario_processor.is_active:
+            scenario_events = self.scenario_processor.process()
+            if scenario_events:
+                self.triggered_events.update(scenario_events)
 
     def _init_new_tracker(self, detection):
         """初始化新的跟踪器并返回track_id"""
@@ -570,8 +589,8 @@ class ObjectTracker:
             interpolated_points = self._interpolate_points(prev_center, current_center)
             self.trackers[track_id]['trajectory'].extend(interpolated_points)
 
-        # 智能分析逻辑
-        if self.area_coordinates and self.area_points:
+        # 智能分析逻辑（单场景模式）
+        if not self.multi_scenario_mode and self.area_coordinates and self.area_points:
             self._analyze_behavior(track_id, current_center, prev_center)
 
         # 更新轨迹
@@ -642,16 +661,7 @@ class ObjectTracker:
                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
                 
                 # 绘制轨迹（人流统计时显示更明显的轨迹）
-                show_trajectory = True
-                if self.area_coordinates:
-                    analysis_type = self.area_coordinates.get('analysisType')
-                    counting_type = self.area_coordinates.get('countingType')
-                    # 人流统计时显示轨迹
-                    if analysis_type == 'counting' and counting_type == 'flow':
-                        show_trajectory = True
-                    # 区域人数统计时不显示轨迹
-                    elif analysis_type == 'counting' and counting_type == 'occupancy':
-                        show_trajectory = False
+                show_trajectory = self._should_draw_trajectory()
                 
                 if show_trajectory:
                     trajectory = track['trajectory'][-max_trajectory_length:]
@@ -700,8 +710,51 @@ class ObjectTracker:
         frame_cv = cv2.cvtColor(np.array(frame_pil), cv2.COLOR_RGB2BGR)
         frame[:] = frame_cv[:]
 
+    def _should_draw_trajectory(self) -> bool:
+        if self.multi_scenario_mode and self.scenario_processor.is_active:
+            overlays = self.scenario_processor.get_display_overlays()
+            has_flow = any(item.get("kind") == "flow" for item in overlays)
+            has_occupancy = any(item.get("kind") == "occupancy" for item in overlays)
+            if has_flow:
+                return True
+            if has_occupancy:
+                return False
+            return True
+
+        if not self.area_coordinates:
+            return True
+        analysis_type = self.area_coordinates.get('analysisType')
+        counting_type = self.area_coordinates.get('countingType')
+        if analysis_type == 'counting' and counting_type == 'occupancy':
+            return False
+        return True
+
+    @staticmethod
+    def _polygon_centroid(points) -> Tuple[int, int]:
+        if not points:
+            return 10, 10
+        xs = [int(p[0]) for p in points]
+        ys = [int(p[1]) for p in points]
+        return int(sum(xs) / len(xs)), int(sum(ys) / len(ys))
+
+    @staticmethod
+    def _line_label_position(points) -> Tuple[int, int]:
+        if not points:
+            return 10, 10
+        if len(points) == 1:
+            return int(points[0][0]), max(10, int(points[0][1]) - 30)
+        mid_index = len(points) // 2
+        if mid_index >= len(points):
+            mid_index = len(points) - 1
+        x, y = points[mid_index]
+        return int(x), max(10, int(y) - 36)
+
     def _draw_analysis_info(self, frame):
         """绘制智能分析信息"""
+        if self.multi_scenario_mode and self.scenario_processor.is_active:
+            self._draw_multi_scenario_analysis_info(frame)
+            return
+
         if not self.area_coordinates:
             return
         
@@ -759,6 +812,44 @@ class ObjectTracker:
                 info_text += f" ({direction_text})"
             
             self._draw_chinese_text(frame, info_text, (10, 10), 30, (255, 165, 0))
+
+    def _draw_multi_scenario_analysis_info(self, frame):
+        overlays = self.scenario_processor.get_display_overlays()
+        if not overlays:
+            return
+
+        line_height = max(24, int(frame.shape[0] / 28))
+        corner_y = 10
+
+        for item in overlays:
+            if item.get("kind") == "occupancy":
+                points = item.get("points") or []
+                if len(points) < 3:
+                    continue
+                cx, cy = self._polygon_centroid(points)
+                label = f"{item.get('area_name', '区域')}: {item.get('count', 0)}人"
+                text_x = max(8, cx - min(80, cx // 3))
+                text_y = max(24, cy - 8)
+                self._draw_chinese_text(frame, label, (text_x, text_y), 26, (0, 255, 0))
+            elif item.get("kind") == "flow":
+                flow_direction = item.get("flow_direction", "bidirectional")
+                today_in = item.get("today_in_count", 0)
+                today_out = item.get("today_out_count", 0)
+                scenario_name = item.get("scenario_name") or "人流"
+                if flow_direction == "in":
+                    info_text = f"{scenario_name} 进入:{today_in}"
+                elif flow_direction == "out":
+                    info_text = f"{scenario_name} 离开:{today_out}"
+                else:
+                    info_text = f"{scenario_name} 进入:{today_in} 离开:{today_out}"
+
+                points = item.get("points") or []
+                if len(points) >= 2:
+                    pos = self._line_label_position(points)
+                else:
+                    pos = (10, corner_y)
+                    corner_y += line_height
+                self._draw_chinese_text(frame, info_text, pos, 26, (0, 255, 255))
     
     def get_counting_stats(self):
         """获取计数统计信息"""
@@ -789,6 +880,8 @@ class ObjectTracker:
 
     def _update_area_occupancy_count(self):
         """更新区域内人数统计（各区域独立计数，总人数为各区域之和）"""
+        if self.multi_scenario_mode:
+            return
         if not self.area_coordinates or self.area_coordinates.get('countingType') != 'occupancy':
             return
 

@@ -1,6 +1,6 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
-import { Monitor, VideoCamera, Picture, DataLine, UserFilled, Lock } from '@element-plus/icons-vue'
+import { Monitor, VideoCamera, Picture, DataLine, UserFilled, Lock, ChatDotRound, Connection } from '@element-plus/icons-vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import deviceApi from '@/api/device'
@@ -174,6 +174,14 @@ const showInitForm = () => {
 const backToLogin = () => {
   isInitializing.value = false
 }
+
+const featureItems = [
+  { icon: VideoCamera, text: 'YOLO 实时检测与分组轮询' },
+  { icon: ChatDotRound, text: 'YOLO + VLM 复检 / 行为分析' },
+  { icon: Monitor, text: 'VLM 定时语义巡检' },
+  { icon: DataLine, text: '人群密度分析与趋势' },
+  { icon: Connection, text: '告警推送与事件订阅' }
+]
 </script>
 
 <template>
@@ -181,31 +189,19 @@ const backToLogin = () => {
     <div class="login-panel">
       <div class="login-left">
         <div class="left-content">
-          <div class="logo-box">
-            <el-icon :size="64">
-              <Monitor />
-            </el-icon>
+          <div class="brand-block">
+            <div class="logo-box">
+              <el-icon :size="52">
+                <Monitor />
+              </el-icon>
+            </div>
+            <h1>智能视频分析系统</h1>
+            <p class="brand-subtitle">YOLO · VLM 一体化视觉分析平台</p>
           </div>
-          <h1>智能视频分析系统</h1>
-          <p>YOLO Client</p>
-          <div class="feature-list">
-            <div class="feature-item">
-              <el-icon>
-                <VideoCamera />
-              </el-icon>
-              <span>实时视频分析</span>
-            </div>
-            <div class="feature-item">
-              <el-icon>
-                <Picture />
-              </el-icon>
-              <span>异常行为检测</span>
-            </div>
-            <div class="feature-item">
-              <el-icon>
-                <DataLine />
-              </el-icon>
-              <span>数据可视分析</span>
+          <div class="feature-grid">
+            <div v-for="(item, index) in featureItems" :key="index" class="feature-item">
+              <el-icon><component :is="item.icon" /></el-icon>
+              <span>{{ item.text }}</span>
             </div>
           </div>
         </div>
@@ -325,8 +321,9 @@ const backToLogin = () => {
 }
 
 .login-panel {
-  width: 1000px;
-  height: 600px;
+  width: min(1080px, 94vw);
+  min-height: 560px;
+  max-height: 92vh;
   background-color: #fff;
   border-radius: 20px;
   box-shadow:
@@ -340,13 +337,14 @@ const backToLogin = () => {
 }
 
 .login-left {
-  flex: 1;
+  flex: 1.15;
+  min-width: 0;
   background: linear-gradient(135deg, #4a90e2 0%, #1e3c72 50%, #ff8a65 100%);
   display: flex;
-  align-items: center;
+  align-items: stretch;
   justify-content: center;
   color: #fff;
-  padding: 60px 40px;
+  padding: 36px 32px;
   position: relative;
   overflow: hidden;
 }
@@ -388,15 +386,27 @@ const backToLogin = () => {
 }
 
 .left-content {
-  text-align: center;
+  width: 100%;
+  max-width: 520px;
   position: relative;
   z-index: 2;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  height: 100%;
+  margin: 0 auto;
+}
+
+.brand-block {
+  text-align: center;
+  margin-bottom: 24px;
+  flex-shrink: 0;
 }
 
 .logo-box {
-  width: 100px;
-  height: 100px;
-  margin: 0 auto 30px;
+  width: 84px;
+  height: 84px;
+  margin: 0 auto 18px;
   background: linear-gradient(135deg, rgba(255, 255, 255, 0.25), rgba(255, 138, 101, 0.3));
   border-radius: 50%;
   display: flex;
@@ -434,14 +444,23 @@ const backToLogin = () => {
 }
 
 .left-content h1 {
-  font-size: 42px;
-  margin-bottom: 16px;
+  font-size: 30px;
+  margin-bottom: 8px;
   font-weight: 700;
-  letter-spacing: 1px;
+  letter-spacing: 0.5px;
   background: linear-gradient(135deg, #ffffff, #ffe0b5);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.brand-subtitle {
+  font-size: 14px;
+  opacity: 0.92;
+  margin: 0;
+  color: rgba(255, 255, 255, 0.88);
+  font-weight: 500;
+  line-height: 1.5;
 }
 
 .left-content p {
@@ -452,24 +471,33 @@ const backToLogin = () => {
   font-weight: 500;
 }
 
-.feature-list {
-  text-align: left;
-  max-width: 280px;
-  margin: 0 auto;
+.feature-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  flex-shrink: 0;
 }
 
 .feature-item {
   display: flex;
   align-items: center;
-  margin-bottom: 20px;
+  gap: 10px;
+  min-height: 48px;
+  box-sizing: border-box;
   background: linear-gradient(135deg, rgba(255, 255, 255, 0.15), rgba(255, 138, 101, 0.1));
-  padding: 14px 20px;
+  padding: 12px 14px;
   border-radius: 12px;
   backdrop-filter: blur(10px);
   border: 1px solid rgba(255, 255, 255, 0.2);
   transition: all 0.3s ease;
   position: relative;
   overflow: hidden;
+}
+
+.feature-item:last-child:nth-child(odd) {
+  grid-column: 1 / -1;
+  width: calc(50% - 5px);
+  justify-self: center;
 }
 
 .feature-item::before {
@@ -494,21 +522,24 @@ const backToLogin = () => {
 }
 
 .feature-item .el-icon {
-  margin-right: 12px;
-  font-size: 22px;
+  margin-right: 0;
+  font-size: 18px;
   color: #ffe0b5;
   filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.1));
+  flex-shrink: 0;
 }
 
 .feature-item span {
-  font-size: 16px;
+  font-size: 13px;
   color: rgba(255, 255, 255, 0.95);
   font-weight: 500;
+  line-height: 1.45;
 }
 
 .login-right {
+  flex: 0 0 400px;
   width: 400px;
-  padding: 60px 40px;
+  padding: 48px 36px;
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -698,37 +729,46 @@ const backToLogin = () => {
     width: 95%;
     height: auto;
     flex-direction: column;
-    max-height: 90vh;
+    max-height: 92vh;
     overflow-y: auto;
   }
 
   .login-left {
-    padding: 40px 20px;
+    padding: 28px 20px 24px;
   }
 
-  .logo-box {
-    width: 80px;
-    height: 80px;
+  .brand-block {
     margin-bottom: 20px;
   }
 
+  .logo-box {
+    width: 72px;
+    height: 72px;
+    margin-bottom: 14px;
+  }
+
   .left-content h1 {
-    font-size: 32px;
-    margin-bottom: 12px;
+    font-size: 26px;
+    margin-bottom: 6px;
   }
 
-  .left-content p {
-    font-size: 18px;
-    margin-bottom: 30px;
+  .brand-subtitle {
+    font-size: 13px;
   }
 
-  .feature-list {
-    max-width: 240px;
+  .feature-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .feature-item:last-child:nth-child(odd) {
+    grid-column: auto;
+    width: 100%;
+    justify-self: stretch;
   }
 
   .feature-item {
-    padding: 12px 16px;
-    margin-bottom: 16px;
+    min-height: auto;
+    padding: 10px 12px;
   }
 
   .feature-item:hover {
@@ -736,8 +776,9 @@ const backToLogin = () => {
   }
 
   .login-right {
+    flex: 1 1 auto;
     width: 100%;
-    padding: 40px 20px;
+    padding: 32px 20px 36px;
   }
 
   .login-header {

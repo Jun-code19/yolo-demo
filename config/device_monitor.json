@@ -1,0 +1,16 @@
+{
+  "check_interval": 300,
+  "push_interval": 10,
+  "offline_threshold": 3,
+  "enable_ping": false,
+  "enable_push": true,
+  "push_tags": ["device_online_status"],
+  "rtsp_stream_for_probe": "sub",
+  "default_methods_by_type": {
+    "camera": ["rtsp", "tcp"],
+    "nvr": ["rtsp", "tcp"],
+    "edge_server": ["tcp", "http_dahua"],
+    "storage_node": ["tcp"],
+    "default": ["rtsp", "tcp", "http_dahua"]
+  }
+}

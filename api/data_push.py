@@ -4,8 +4,9 @@ from typing import List, Optional
 from pydantic import BaseModel
 from datetime import datetime
 import logging
+import time
 
-from src.database import get_db, DataPushConfig, PushMethod, DetectionConfig
+from src.database import get_db, DataPushConfig, PushMethod, DetectionConfig, DataPushLog
 from api.auth import get_current_user, User
 from api.logger import log_action
 # 导入独立的数据推送模块
@@ -83,7 +84,57 @@ class PushResponse(BaseModel):
 @router.get("/stats")
 async def get_push_stats():
     """获取所有数据推送的统计信息"""
-    return data_pusher.get_push_stats()
+    return {"status": "success", "data": data_pusher.get_push_stats()}
+
+
+@router.get("/logs")
+async def list_push_logs(
+    push_id: Optional[str] = None,
+    status: Optional[str] = None,
+    skip: int = 0,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+):
+    """查询推送执行记录"""
+    try:
+        query = db.query(DataPushLog)
+        if push_id:
+            query = query.filter(DataPushLog.push_id == push_id)
+        if status in ("success", "failure"):
+            query = query.filter(DataPushLog.status == status)
+
+        total = query.count()
+        rows = (
+            query.order_by(DataPushLog.created_at.desc())
+            .offset(skip)
+            .limit(min(limit, 200))
+            .all()
+        )
+        return {
+            "status": "success",
+            "data": [
+                {
+                    "log_id": row.log_id,
+                    "push_id": row.push_id,
+                    "push_name": row.push_name,
+                    "push_method": row.push_method,
+                    "status": row.status,
+                    "target_summary": row.target_summary,
+                    "message": row.message,
+                    "tags": row.tags or [],
+                    "config_id": row.config_id,
+                    "duration_ms": row.duration_ms,
+                    "payload_preview": row.payload_preview,
+                    "is_test": row.is_test,
+                    "created_at": row.created_at.isoformat() if row.created_at else None,
+                }
+                for row in rows
+            ],
+            "total": total,
+        }
+    except Exception as e:
+        logger.error(f"查询推送记录失败: {e}")
+        raise HTTPException(status_code=500, detail=f"查询推送记录失败: {str(e)}")
 
 @router.get("/overview")
 async def get_push_overview(db: Session = Depends(get_db)):
@@ -383,16 +434,39 @@ async def test_push_config(push_id: str, db: Session = Depends(get_db)): # 测�
 
         # 根据推送方法进行测试
         success = False
+        message = "推送测试失败"
+        started = time.time()
         if push_config.push_method == PushMethod.http or push_config.push_method == PushMethod.https:
-            success = data_pusher._push_http(push_config, test_data)
+            success, message = data_pusher._push_http(push_config, test_data)
         elif push_config.push_method == PushMethod.tcp:
-            success = data_pusher._push_tcp(push_config, test_data)
+            success, message = data_pusher._push_tcp(push_config, test_data)
         elif push_config.push_method == PushMethod.mqtt:
-            success = data_pusher._push_mqtt(push_config, test_data)
+            success, message = data_pusher._push_mqtt(push_config, test_data)
+
+        duration_ms = int((time.time() - started) * 1000)
+        data_pusher.record_push_log(
+            push_config,
+            success,
+            message=message,
+            duration_ms=duration_ms,
+            payload_preview=data_pusher._payload_preview(test_data),
+            is_test=True,
+        )
+        if success:
+            with data_pusher.lock:
+                if push_id not in data_pusher.push_stats:
+                    data_pusher.push_stats[push_id] = {"success": 0, "fail": 0, "last_success": None}
+                data_pusher.push_stats[push_id]["success"] += 1
+                data_pusher.push_stats[push_id]["last_success"] = datetime.now()
+        else:
+            with data_pusher.lock:
+                if push_id not in data_pusher.push_stats:
+                    data_pusher.push_stats[push_id] = {"success": 0, "fail": 0, "last_success": None}
+                data_pusher.push_stats[push_id]["fail"] += 1
 
         return {
             "status": "success" if success else "failure",
-            "message": "推送测试成功" if success else "推送测试失败"
+            "message": message if success else message,
         }
 
     except Exception as e:

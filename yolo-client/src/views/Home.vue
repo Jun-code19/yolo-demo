@@ -81,28 +81,28 @@
     </el-row>
 
     <!-- 模块统计卡片 -->
-    <el-row :gutter="20" class="module-stats-row">
-      <el-col :md="8" :sm="12" :xs="24">
+    <el-row :gutter="20">
+      <el-col :lg="6" :md="12" :sm="12" :xs="24" class="module-col">
         <el-card class="module-card">
           <template #header>
             <div class="card-header">
-              <span>模型管理</span>
+              <span>检测与模型</span>
               <el-tag type="success">{{ comprehensiveData.summary?.active_models || 0 }}/{{
                 comprehensiveData.summary?.total_models || 0 }}</el-tag>
             </div>
           </template>
           <div class="module-content">
             <div class="module-item">
-              <span class="label">活跃模型:</span>
+              <span class="label">活跃 YOLO 模型</span>
               <span class="value">{{ comprehensiveData.summary?.active_models || 0 }}</span>
             </div>
             <div class="module-item">
-              <span class="label">检测配置:</span>
+              <span class="label">检测配置</span>
               <span class="value">{{ comprehensiveData.summary?.active_detection_configs || 0 }}/{{
                 comprehensiveData.summary?.total_detection_configs || 0 }}</span>
             </div>
             <div class="module-item">
-              <span class="label">人群分析:</span>
+              <span class="label">人群分析</span>
               <span class="value">{{ comprehensiveData.summary?.active_crowd_jobs || 0 }}/{{
                 comprehensiveData.summary?.total_crowd_jobs || 0 }}</span>
             </div>
@@ -110,7 +110,35 @@
         </el-card>
       </el-col>
 
-      <el-col :md="8" :sm="12" :xs="24">
+      <el-col :lg="6" :md="12" :sm="12" :xs="24" class="module-col">
+        <el-card class="module-card">
+          <template #header>
+            <div class="card-header">
+              <span>VLM 能力</span>
+              <el-tag type="warning">{{ comprehensiveData.summary?.today_vlm_inspection_alerts || 0 }} 今日告警</el-tag>
+            </div>
+          </template>
+          <div class="module-content">
+            <div class="module-item">
+              <span class="label">VLM 推理配置</span>
+              <span class="value">{{ comprehensiveData.summary?.active_vlm_pipeline_configs || 0 }}/{{
+                comprehensiveData.summary?.vlm_pipeline_configs || 0 }}</span>
+            </div>
+            <div class="module-item">
+              <span class="label">VLM 模型</span>
+              <span class="value">{{ comprehensiveData.summary?.active_vlm_models || 0 }}/{{
+                comprehensiveData.summary?.total_vlm_models || 0 }}</span>
+            </div>
+            <div class="module-item">
+              <span class="label">VLM 巡检</span>
+              <span class="value">{{ comprehensiveData.summary?.active_vlm_inspection_jobs || 0 }}/{{
+                comprehensiveData.summary?.total_vlm_inspection_jobs || 0 }}</span>
+            </div>
+          </div>
+        </el-card>
+      </el-col>
+
+      <el-col :lg="6" :md="12" :sm="12" :xs="24" class="module-col">
         <el-card class="module-card">
           <template #header>
             <div class="card-header">
@@ -121,17 +149,17 @@
           </template>
           <div class="module-content">
             <div class="module-item">
-              <span class="label">推送配置:</span>
+              <span class="label">推送配置</span>
               <span class="value">{{ comprehensiveData.summary?.active_push_configs || 0 }}/{{
                 comprehensiveData.summary?.total_push_configs || 0 }}</span>
             </div>
             <div class="module-item">
-              <span class="label">数据监听:</span>
+              <span class="label">数据监听</span>
               <span class="value">{{ comprehensiveData.summary?.active_listeners || 0 }}/{{
                 comprehensiveData.summary?.total_listeners || 0 }}</span>
             </div>
             <div class="module-item">
-              <span class="label">边缘设备:</span>
+              <span class="label">边缘设备</span>
               <span class="value">{{ comprehensiveData.summary?.online_edge_servers || 0 }}/{{
                 comprehensiveData.summary?.total_edge_servers || 0 }}</span>
             </div>
@@ -139,25 +167,25 @@
         </el-card>
       </el-col>
 
-      <el-col :md="8" :sm="12" :xs="24">
+      <el-col :lg="6" :md="12" :sm="12" :xs="24" class="module-col">
         <el-card class="module-card">
           <template #header>
             <div class="card-header">
               <span>系统管理</span>
-              <el-tag type="warning">{{ comprehensiveData.summary?.total_users || 0 }} 用户</el-tag>
+              <el-tag type="info">{{ comprehensiveData.summary?.total_users || 0 }} 用户</el-tag>
             </div>
           </template>
           <div class="module-content">
             <div class="module-item">
-              <span class="label">系统用户:</span>
+              <span class="label">系统用户</span>
               <span class="value">{{ comprehensiveData.summary?.total_users || 0 }}</span>
             </div>
             <div class="module-item">
-              <span class="label">系统日志:</span>
+              <span class="label">系统日志</span>
               <span class="value">{{ comprehensiveData.summary?.total_system_logs || 0 }}</span>
             </div>
             <div class="module-item">
-              <span class="label">检测日志:</span>
+              <span class="label">检测日志</span>
               <span class="value">{{ comprehensiveData.summary?.total_detection_logs || 0 }}</span>
             </div>
           </div>
@@ -212,8 +240,8 @@
                   <div class="activity-text">{{ activity.content }}</div>
                   <div class="activity-meta">
                     <span class="activity-time">{{ activity.timestamp }}</span>
-                    <el-tag size="small" :type="activity.source === 'detection' ? 'primary' : 'success'">
-                      {{ activity.source === 'detection' ? '本地检测' : '外部事件' }}
+                    <el-tag size="small" :type="getActivityTagType(activity)">
+                      {{ getActivitySourceLabel(activity) }}
                     </el-tag>
                   </div>
                 </div>
@@ -224,68 +252,55 @@
       </el-col>
     </el-row>
 
-    <!-- 检测事件统计 -->
-    <el-row :gutter="20" class="distribution-row">
-      <el-col :md="12" :sm="24">
-        <el-card>
+    <!-- 分布统计（单行 4 卡，每卡可切换维度） -->
+    <el-row :gutter="16" class="distribution-row pie-panel-row">
+      <el-col
+        v-for="panel in piePanels"
+        :key="panel.key"
+        :lg="6"
+        :md="12"
+        :sm="12"
+        :xs="24"
+        class="pie-panel-col"
+      >
+        <el-card class="pie-panel-card">
           <template #header>
-            <div class="card-header">
-              <span>检测事件分布统计</span>
+            <div class="pie-panel-header">
+              <span class="pie-panel-title">{{ panel.title }}</span>
+              <el-radio-group
+                v-model="pieViewMode[panel.key]"
+                size="small"
+                @change="() => renderSwitchablePie(panel.key)"
+              >
+                <el-radio-button
+                  v-for="view in panel.views"
+                  :key="view.value"
+                  :value="view.value"
+                >
+                  {{ view.label }}
+                </el-radio-button>
+              </el-radio-group>
             </div>
           </template>
-          <div class="dual-chart-container">
-            <div class="chart-section">
-              <div class="chart-title">状态分布</div>
-              <div class="distribution-chart">
-                <div ref="detectionStatusChartRef" class="chart"></div>
-              </div>
-            </div>
-            <div class="chart-section">
-              <div class="chart-title">类型分布</div>
-              <div class="distribution-chart">
-                <div ref="detectionTypeChartRef" class="chart"></div>
-              </div>
-            </div>
-          </div>
-        </el-card>
-      </el-col>
-
-      <el-col :md="12" :sm="24">
-        <el-card>
-          <template #header>
-            <div class="card-header">
-              <span>外部事件分布统计</span>
-            </div>
-          </template>
-          <div class="dual-chart-container">
-            <div class="chart-section">
-              <div class="chart-title">状态分布</div>
-              <div class="distribution-chart">
-                <div ref="externalStatusChartRef" class="chart"></div>
-              </div>
-            </div>
-            <div class="chart-section">
-              <div class="chart-title">引擎分布</div>
-              <div class="distribution-chart">
-                <div ref="externalEngineChartRef" class="chart"></div>
-              </div>
-            </div>
+          <div class="distribution-chart distribution-chart-compact">
+            <div :ref="(el) => bindPieChartRef(panel.key, el)" class="chart"></div>
           </div>
         </el-card>
       </el-col>
     </el-row>
 
-    <!-- 人群分析统计 -->
+    <!-- 订阅事件与人群分析 -->
     <el-row :gutter="20" class="distribution-row">
       <el-col :md="12" :sm="24">
         <el-card>
           <template #header>
             <div class="card-header">
-              <span>人群分析任务统计</span>
+              <span>订阅事件统计</span>
+              <span class="section-hint">按订阅方案 Top 20</span>
             </div>
           </template>
-          <div class="distribution-chart">
-            <div ref="crowdJobChartRef" class="chart"></div>
+          <div class="distribution-chart distribution-chart-bar">
+            <div ref="schemeEventChartRef" class="chart"></div>
           </div>
         </el-card>
       </el-col>
@@ -295,9 +310,10 @@
           <template #header>
             <div class="card-header">
               <span>人群分析趋势</span>
+              <span class="section-hint">各任务平均 / 峰值人数</span>
             </div>
           </template>
-          <div class="distribution-chart">
+          <div class="distribution-chart distribution-chart-bar">
             <div ref="crowdTrendChartRef" class="chart"></div>
           </div>
         </el-card>
@@ -313,12 +329,7 @@ import {
   VideoCameraFilled,
   Warning,
   DataLine,
-  Timer,
-  CircleCheck,
-  VideoCamera,
-  Hide,
-  ArrowUp,
-  ArrowDown
+  Timer
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import * as echarts from 'echarts'
@@ -326,31 +337,78 @@ import deviceApi from '@/api/device'
 
 const router = useRouter()
 const chartRef = ref(null)
-const detectionStatusChartRef = ref(null)
-const detectionTypeChartRef = ref(null)
-const externalStatusChartRef = ref(null)
-const externalEngineChartRef = ref(null)
-const crowdJobChartRef = ref(null)
+const schemeEventChartRef = ref(null)
 const crowdTrendChartRef = ref(null)
 const activityContainer = ref(null)
 
+const piePanels = [
+  {
+    key: 'detection',
+    title: '检测事件',
+    views: [
+      { value: 'type', label: '类型' },
+      { value: 'status', label: '状态' }
+    ]
+  },
+  {
+    key: 'modelPipeline',
+    title: '模型与推理',
+    views: [
+      { value: 'modelType', label: '模型' },
+      { value: 'pipeline', label: '推理' }
+    ]
+  },
+  {
+    key: 'vlm',
+    title: 'VLM 巡检',
+    views: [
+      { value: 'jobStatus', label: '任务' },
+      { value: 'alertJob', label: '告警' }
+    ]
+  },
+  {
+    key: 'external',
+    title: '外部事件',
+    views: [
+      { value: 'status', label: '状态' },
+      { value: 'engine', label: '引擎' }
+    ]
+  }
+]
+
+const pieViewMode = reactive({
+  detection: 'type',
+  modelPipeline: 'modelType',
+  vlm: 'jobStatus',
+  external: 'status'
+})
+
+const pieChartRefMap = {}
+const pieChartInstanceMap = {}
+
+const bindPieChartRef = (key, el) => {
+  if (el) {
+    pieChartRefMap[key] = el
+  }
+}
+
 let chart = null
-let detectionStatusChart = null
-let detectionTypeChart = null
-let externalStatusChart = null
-let externalEngineChart = null
-let crowdJobChart = null
+let schemeEventChart = null
 let crowdTrendChart = null
+
+const PIE_COLORS = ['#409EFF', '#67C23A', '#E6A23C', '#F56C6C', '#626AEF', '#909399', '#36CFC9', '#B37FEB']
 
 const comprehensiveData = reactive({
   summary: {},
   events: {},
   distributions: {},
+  inference_pipeline: {},
   users: {},
   performance: {},
   trends: {},
   recent_activities: [],
-  crowd_analysis: {}
+  crowd_analysis: {},
+  vlm_inspection: {}
 })
 
 const loading = ref(false)
@@ -397,12 +455,218 @@ const startActivityScroll = () => {
 // 渲染所有图表
 const renderCharts = () => {
   renderTrendChart()
-  renderDetectionStatusChart()
-  renderDetectionTypeChart()
-  renderExternalStatusChart()
-  renderExternalEngineChart()
-  renderCrowdJobChart()
+  renderAllSwitchablePies()
+  renderSchemeEventChart()
   renderCrowdTrendChart()
+}
+
+const initChartInstance = (chartInstance, chartRef) => {
+  if (!chartRef.value) return chartInstance
+  if (!chartInstance) {
+    chartInstance = echarts.init(chartRef.value)
+  }
+  return chartInstance
+}
+
+const setEmptyBarChart = (chartInstance, chartRef, emptyText = '暂无数据') => {
+  const instance = initChartInstance(chartInstance, chartRef)
+  if (!instance) return chartInstance
+  instance.setOption({
+    title: {
+      text: emptyText,
+      left: 'center',
+      top: 'middle',
+      textStyle: { color: '#909399', fontSize: 14, fontWeight: 'normal' }
+    },
+    grid: { show: false },
+    xAxis: { show: false },
+    yAxis: { show: false },
+    series: []
+  }, true)
+  return instance
+}
+
+const truncateAxisLabel = (value, maxLen = 10) => {
+  const text = String(value || '')
+  return text.length > maxLen ? `${text.slice(0, maxLen)}…` : text
+}
+
+const getSwitchablePieData = (key, mode) => {
+  if (key === 'detection') {
+    if (mode === 'type') {
+      const typeDistribution = comprehensiveData.events?.detection_events?.type_distribution || {}
+      return {
+        seriesName: '检测事件类型',
+        items: Object.entries(typeDistribution).map(([type, count]) => ({
+          name: getEventTypeName(type),
+          value: count
+        }))
+      }
+    }
+    const statusDistribution = comprehensiveData.events?.detection_events?.status_distribution || {}
+    return {
+      seriesName: '检测事件状态',
+      items: Object.entries(statusDistribution).map(([status, count]) => ({
+        name: getStatusLabel(status),
+        value: count
+      }))
+    }
+  }
+
+  if (key === 'modelPipeline') {
+    if (mode === 'pipeline') {
+      const modeDistribution = comprehensiveData.inference_pipeline?.mode_distribution || {}
+      return {
+        seriesName: '推理模式',
+        items: Object.entries(modeDistribution).map(([pipelineMode, count]) => ({
+          name: getPipelineModeName(pipelineMode),
+          value: count
+        }))
+      }
+    }
+    const typeDistribution = comprehensiveData.distributions?.model_types || {}
+    return {
+      seriesName: '模型类型',
+      items: Object.entries(typeDistribution).map(([type, count]) => ({
+        name: getModelTypeName(type),
+        value: count
+      }))
+    }
+  }
+
+  if (key === 'vlm') {
+    if (mode === 'alertJob') {
+      const jobDistribution = comprehensiveData.vlm_inspection?.job_alert_distribution || []
+      return {
+        seriesName: '巡检告警任务',
+        items: jobDistribution.map((job) => ({
+          name: job.job_name,
+          value: job.count
+        }))
+      }
+    }
+    const statusDistribution = comprehensiveData.vlm_inspection?.job_status_distribution || {}
+    return {
+      seriesName: '巡检任务状态',
+      items: [
+        { name: '运行中', value: statusDistribution.active || 0 },
+        { name: '已暂停', value: statusDistribution.inactive || 0 }
+      ]
+    }
+  }
+
+  if (mode === 'engine') {
+    const engineDistribution = comprehensiveData.events?.external_events?.engine_distribution || {}
+    return {
+      seriesName: '外部事件引擎',
+      items: Object.entries(engineDistribution).map(([engine, count]) => ({
+        name: engine || '未知引擎',
+        value: count
+      }))
+    }
+  }
+
+  const statusDistribution = comprehensiveData.events?.external_events?.status_distribution || {}
+  return {
+    seriesName: '外部事件状态',
+    items: Object.entries(statusDistribution).map(([status, count]) => ({
+      name: getStatusLabel(status),
+      value: count
+    }))
+  }
+}
+
+const renderSwitchablePie = (key) => {
+  const chartEl = pieChartRefMap[key]
+  if (!chartEl) return
+
+  const { seriesName, items } = getSwitchablePieData(key, pieViewMode[key])
+  pieChartInstanceMap[key] = renderPieChart(
+    pieChartInstanceMap[key],
+    { value: chartEl },
+    seriesName,
+    items,
+    { compact: true }
+  )
+}
+
+const renderAllSwitchablePies = () => {
+  nextTick(() => {
+    piePanels.forEach((panel) => renderSwitchablePie(panel.key))
+  })
+}
+
+const renderPieChart = (chartInstance, chartRef, seriesName, items, { compact = false } = {}) => {
+  if (!chartRef.value) return chartInstance
+
+  if (!chartInstance) {
+    chartInstance = echarts.init(chartRef.value)
+  }
+
+  const data = (items || []).filter((item) => item.value > 0)
+  if (!data.length) {
+    chartInstance.setOption({
+      title: {
+        text: '暂无数据',
+        left: 'center',
+        top: 'middle',
+        textStyle: { color: '#909399', fontSize: 14, fontWeight: 'normal' }
+      },
+      series: []
+    }, true)
+    return chartInstance
+  }
+
+  chartInstance.setOption({
+    color: PIE_COLORS,
+    title: { show: false },
+    tooltip: {
+      trigger: 'item',
+      formatter: '{b}<br/>{c} ({d}%)'
+    },
+    legend: {
+      type: 'scroll',
+      bottom: 0,
+      left: 'center',
+      itemWidth: 10,
+      itemHeight: 10,
+      textStyle: { fontSize: compact ? 10 : 11 }
+    },
+    series: [
+      {
+        name: seriesName,
+        type: 'pie',
+        radius: compact ? ['34%', '56%'] : ['40%', '65%'],
+        center: compact ? ['50%', '48%'] : ['50%', '44%'],
+        avoidLabelOverlap: true,
+        itemStyle: {
+          borderRadius: 6,
+          borderColor: '#fff',
+          borderWidth: 2
+        },
+        label: {
+          show: true,
+          formatter: (params) => (params.percent >= (compact ? 10 : 8) ? `${params.name}\n${params.percent.toFixed(0)}%` : ''),
+          fontSize: compact ? 10 : 11
+        },
+        labelLine: {
+          show: true,
+          length: 8,
+          length2: 6
+        },
+        emphasis: {
+          itemStyle: {
+            shadowBlur: 10,
+            shadowOffsetX: 0,
+            shadowColor: 'rgba(0, 0, 0, 0.15)'
+          }
+        },
+        data
+      }
+    ]
+  }, true)
+
+  return chartInstance
 }
 
 // 渲染趋势图表
@@ -481,10 +745,38 @@ const renderTrendChart = () => {
 }
 
 // 获取模型类型名称
+const getModelTypeName = (type) => {
+  const typeMap = {
+    object_detection: '目标检测',
+    vlm: 'VLM 模型',
+    smart_behavior: '智能行为',
+    smart_person: '人员场景',
+    smart_counting: '智能人数统计',
+    segmentation: '图像分割',
+    keypoint: '关键点检测',
+    pose: '姿态估计',
+    face: '人脸识别',
+    other: '其他类型'
+  }
+  return typeMap[type] || type
+}
+
+const getPipelineModeName = (mode) => {
+  const modeMap = {
+    yolo_only: '仅 YOLO',
+    yolo_then_verify: 'YOLO + VLM 复检',
+    yolo_then_analyze: 'YOLO + VLM 分析'
+  }
+  return modeMap[mode] || mode
+}
+
 const getEventTypeName = (eventType) => {
   const typeMap = {
     'object_detection': '目标检测',
+    'yolo_verify': 'VLM 复检',
+    'yolo_analyze': 'VLM 行为分析',
     'smart_behavior': '智能行为',
+    'smart_person': '人员场景',
     'smart_counting': '智能人数统计',
     'segmentation': '图像分割',
     'keypoint': '关键点检测',
@@ -493,6 +785,20 @@ const getEventTypeName = (eventType) => {
     'other': '其他类型'
   }
   return typeMap[eventType] || eventType
+}
+
+const getActivitySourceLabel = (activity) => {
+  const content = activity?.content || ''
+  if (content.includes('[VLM推理]')) return 'VLM 推理'
+  if (activity?.source === 'external') return '外部事件'
+  return '本地检测'
+}
+
+const getActivityTagType = (activity) => {
+  const content = activity?.content || ''
+  if (content.includes('[VLM推理]')) return 'warning'
+  if (activity?.source === 'external') return 'success'
+  return 'primary'
 }
 
 // 获取状态标签
@@ -506,367 +812,210 @@ const getStatusLabel = (status) => {
   return map[status] || status;
 };
 
-// 渲染检测事件状态分布图表
-const renderDetectionStatusChart = () => {
-  if (!detectionStatusChartRef.value) return
-
-  if (!detectionStatusChart) {
-    detectionStatusChart = echarts.init(detectionStatusChartRef.value)
+// 渲染订阅事件条形图
+const renderSchemeEventChart = () => {
+  const distribution = comprehensiveData.events?.scheme_events?.scheme_distribution || []
+  if (!distribution.length) {
+    schemeEventChart = setEmptyBarChart(schemeEventChart, schemeEventChartRef)
+    return
   }
 
-  const statusDistribution = comprehensiveData.events?.detection_events?.status_distribution || {}
-  const data = Object.entries(statusDistribution).map(([status, count]) => ({
-    name: getStatusLabel(status),
-    value: count
-  }))
+  schemeEventChart = initChartInstance(schemeEventChart, schemeEventChartRef)
+  if (!schemeEventChart) return
 
-  const option = {
-    tooltip: {
-      trigger: 'item',
-      formatter: '{a} <br/>{b}: {c} ({d}%)'
-    },
-    series: [
-      {
-        name: '检测事件状态',
-        type: 'pie',
-        radius: ['25%', '55%'],
-        center: ['50%', '50%'],
-        data: data,
-        label: {
-          show: true,
-          position: 'outside',
-          formatter: function (params) {
-            // 如果数值为0，不显示标签
-            if (params.value === 0) return '';
-            // 如果百分比小于5%，不显示标签
-            // if (params.percent < 5) return '';
-            // 显示名称和百分比
-            return params.name + '\n' + params.percent.toFixed(0) + '%';
-          },
-          fontSize: 10,
-          lineHeight: 12
-        },
-        labelLine: {
-          show: true,
-          length: 8,
-          length2: 8,
-          smooth: true
-        },
-        emphasis: {
-          itemStyle: {
-            shadowBlur: 10,
-            shadowOffsetX: 0,
-            shadowColor: 'rgba(0, 0, 0, 0.5)'
-          }
-        }
-      }
-    ]
-  }
+  const sorted = [...distribution].sort((a, b) => b.count - a.count)
+  const names = sorted.map((item) => item.scheme_name)
+  const counts = sorted.map((item) => item.count)
 
-  detectionStatusChart.setOption(option)
-}
-
-// 渲染检测事件类型分布图表
-const renderDetectionTypeChart = () => {
-  if (!detectionTypeChartRef.value) return
-
-  if (!detectionTypeChart) {
-    detectionTypeChart = echarts.init(detectionTypeChartRef.value)
-  }
-
-  const typeDistribution = comprehensiveData.events?.detection_events?.type_distribution || {}
-  const data = Object.entries(typeDistribution).map(([type, count]) => ({
-    name: getEventTypeName(type),
-    value: count
-  }))
-
-  const option = {
-    tooltip: {
-      trigger: 'item',
-      formatter: '{a} <br/>{b}: {c} ({d}%)'
-    },
-    series: [
-      {
-        name: '检测事件类型',
-        type: 'pie',
-        radius: ['25%', '55%'],
-        center: ['50%', '50%'],
-        data: data,
-        label: {
-          show: true,
-          position: 'outside',
-          formatter: function (params) {
-            // 如果数值为0，不显示标签
-            if (params.value === 0) return '';
-            // 如果百分比小于5%，不显示标签
-            // if (params.percent < 5) return '';
-            // 显示名称和百分比
-            return params.name + '\n' + params.percent.toFixed(0) + '%';
-          },
-          fontSize: 10,
-          lineHeight: 12
-        },
-        labelLine: {
-          show: true,
-          length: 8,
-          length2: 8,
-          smooth: true
-        },
-        emphasis: {
-          itemStyle: {
-            shadowBlur: 10,
-            shadowOffsetX: 0,
-            shadowColor: 'rgba(0, 0, 0, 0.5)'
-          }
-        }
-      }
-    ]
-  }
-
-  detectionTypeChart.setOption(option)
-}
-
-// 渲染外部事件状态分布图表
-const renderExternalStatusChart = () => {
-  if (!externalStatusChartRef.value) return
-
-  if (!externalStatusChart) {
-    externalStatusChart = echarts.init(externalStatusChartRef.value)
-  }
-
-  const statusDistribution = comprehensiveData.events?.external_events?.status_distribution || {}
-  const data = Object.entries(statusDistribution).map(([status, count]) => ({
-    name: getStatusLabel(status),
-    value: count
-  }))
-
-  const option = {
-    tooltip: {
-      trigger: 'item',
-      formatter: '{a} <br/>{b}: {c} ({d}%)'
-    },
-    series: [
-      {
-        name: '外部事件状态',
-        type: 'pie',
-        radius: ['25%', '55%'],
-        center: ['50%', '50%'],
-        data: data,
-        label: {
-          show: true,
-          position: 'outside',
-          formatter: function (params) {
-            // 如果数值为0，不显示标签
-            if (params.value === 0) return '';
-            // 如果百分比小于5%，不显示标签
-            // if (params.percent < 5) return '';
-            // 显示名称和百分比
-            return params.name + '\n' + params.percent.toFixed(0) + '%';
-          },
-          fontSize: 10,
-          lineHeight: 12
-        },
-        labelLine: {
-          show: true,
-          length: 8,
-          length2: 8,
-          smooth: true
-        },
-        emphasis: {
-          itemStyle: {
-            shadowBlur: 10,
-            shadowOffsetX: 0,
-            shadowColor: 'rgba(0, 0, 0, 0.5)'
-          }
-        }
-      }
-    ]
-  }
-
-  externalStatusChart.setOption(option)
-}
-
-// 渲染外部事件引擎分布图表
-const renderExternalEngineChart = () => {
-  if (!externalEngineChartRef.value) return
-
-  if (!externalEngineChart) {
-    externalEngineChart = echarts.init(externalEngineChartRef.value)
-  }
-
-  const engineDistribution = comprehensiveData.events?.external_events?.engine_distribution || {}
-  const data = Object.entries(engineDistribution).map(([engine, count]) => ({
-    name: engine || '未知引擎',
-    value: count
-  }))
-
-  const option = {
-    tooltip: {
-      trigger: 'item',
-      formatter: '{a} <br/>{b}: {c} ({d}%)'
-    },
-    series: [
-      {
-        name: '外部事件引擎',
-        type: 'pie',
-        radius: ['25%', '55%'],
-        center: ['50%', '50%'],
-        data: data,
-        label: {
-          show: true,
-          position: 'outside',
-          formatter: function (params) {
-            // 如果数值为0，不显示标签
-            if (params.value === 0) return '';
-            // 如果百分比小于5%，不显示标签
-            // if (params.percent < 5) return '';
-            // 显示名称和百分比
-            return params.name + '\n' + params.percent.toFixed(0) + '%';
-          },
-          fontSize: 10,
-          lineHeight: 12
-        },
-        labelLine: {
-          show: true,
-          length: 8,
-          length2: 8,
-          smooth: true
-        },
-        emphasis: {
-          itemStyle: {
-            shadowBlur: 10,
-            shadowOffsetX: 0,
-            shadowColor: 'rgba(0, 0, 0, 0.5)'
-          }
-        }
-      }
-    ]
-  }
-
-  externalEngineChart.setOption(option)
-}
-
-// 渲染人群分析任务统计图表
-const renderCrowdJobChart = () => {
-  if (!crowdJobChartRef.value) return
-
-  if (!crowdJobChart) {
-    crowdJobChart = echarts.init(crowdJobChartRef.value)
-  }
-
-  const jobDistribution = comprehensiveData.crowd_analysis?.job_distribution || []
-  const data = jobDistribution.map(job => ({
-    name: job.job_name,
-    value: job.count
-  }))
-
-  const option = {
-    tooltip: {
-      trigger: 'item',
-      formatter: '{a} <br/>{b}: {c} ({d}%)'
-    },
-    series: [
-      {
-        name: '人群分析任务',
-        type: 'pie',
-        radius: ['25%', '55%'],
-        center: ['50%', '50%'],
-        data: data,
-        label: {
-          show: true,
-          position: 'outside',
-          formatter: function (params) {
-            // 如果数值为0，不显示标签
-            if (params.value === 0) return '';
-            // 如果百分比小于5%，不显示标签
-            // if (params.percent < 5) return '';
-            // 显示名称和百分比
-            return params.name + '\n' + params.percent.toFixed(0) + '%';
-          },
-          fontSize: 10,
-          lineHeight: 12
-        },
-        labelLine: {
-          show: true,
-          length: 8,
-          length2: 8,
-          smooth: true
-        },
-        emphasis: {
-          itemStyle: {
-            shadowBlur: 10,
-            shadowOffsetX: 0,
-            shadowColor: 'rgba(0, 0, 0, 0.5)'
-          }
-        }
-      }
-    ]
-  }
-
-  crowdJobChart.setOption(option)
-}
-
-// 渲染人群分析趋势图表
-const renderCrowdTrendChart = () => {
-  if (!crowdTrendChartRef.value) return
-
-  if (!crowdTrendChart) {
-    crowdTrendChart = echarts.init(crowdTrendChartRef.value)
-  }
-
-  const jobDistribution = comprehensiveData.crowd_analysis?.job_distribution || []
-  const jobNames = jobDistribution.map(job => job.job_name)
-  const avgCounts = jobDistribution.map(job => job.avg_count)
-  const maxCounts = jobDistribution.map(job => job.max_count)
-
-  const option = {
+  schemeEventChart.setOption({
+    title: { show: false },
     tooltip: {
       trigger: 'axis',
-      axisPointer: {
-        type: 'shadow'
+      axisPointer: { type: 'shadow' },
+      formatter: (params) => {
+        const item = sorted[params[0]?.dataIndex]
+        if (!item) return ''
+        return [
+          item.scheme_name,
+          `事件数：${item.count}`,
+          item.device_name ? `设备：${item.device_name}` : ''
+        ].filter(Boolean).join('<br/>')
       }
     },
-    legend: {
-      data: ['平均人数', '最大人数']
-    },
     grid: {
-      left: '3%',
-      right: '4%',
-      bottom: '3%',
+      left: 12,
+      right: 12,
+      top: 32,
+      bottom: 56,
       containLabel: true
     },
+    dataZoom: sorted.length > 10 ? [
+      {
+        type: 'inside',
+        xAxisIndex: 0,
+        start: 0,
+        end: Math.min(100, Math.round(10 / sorted.length * 100))
+      },
+      {
+        type: 'slider',
+        xAxisIndex: 0,
+        height: 18,
+        bottom: 4,
+        start: 0,
+        end: Math.min(100, Math.round(10 / sorted.length * 100)),
+        borderColor: '#ebeef5',
+        fillerColor: 'rgba(245, 108, 108, 0.15)',
+        handleSize: '80%'
+      }
+    ] : undefined,
     xAxis: {
       type: 'category',
-      data: jobNames,
+      data: names,
+      axisTick: { alignWithLabel: true },
+      axisLine: { lineStyle: { color: '#ebeef5' } },
       axisLabel: {
-        rotate: 30
+        color: '#606266',
+        interval: 0,
+        rotate: 35,
+        fontSize: 11,
+        formatter: (value) => truncateAxisLabel(value, 8)
       }
     },
     yAxis: {
       type: 'value',
-      name: '人数'
+      minInterval: 1,
+      splitLine: {
+        lineStyle: { type: 'dashed', color: '#ebeef5' }
+      }
+    },
+    series: [
+      {
+        name: '订阅事件',
+        type: 'bar',
+        data: counts,
+        barMaxWidth: 28,
+        itemStyle: {
+          borderRadius: [6, 6, 0, 0],
+          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+            { offset: 0, color: '#f56c6c' },
+            { offset: 1, color: '#fab6b6' }
+          ])
+        },
+        label: {
+          show: true,
+          position: 'top',
+          color: '#606266',
+          fontSize: 11
+        }
+      }
+    ]
+  }, true)
+}
+
+// 渲染人群分析趋势图表
+const renderCrowdTrendChart = () => {
+  const jobDistribution = comprehensiveData.crowd_analysis?.job_distribution || []
+  if (!jobDistribution.length) {
+    crowdTrendChart = setEmptyBarChart(crowdTrendChart, crowdTrendChartRef)
+    return
+  }
+
+  crowdTrendChart = initChartInstance(crowdTrendChart, crowdTrendChartRef)
+  if (!crowdTrendChart) return
+
+  const sorted = [...jobDistribution].sort((a, b) => b.max_count - a.max_count)
+  const jobNames = sorted.map((job) => job.job_name)
+  const avgCounts = sorted.map((job) => Number(job.avg_count || 0))
+  const maxCounts = sorted.map((job) => Number(job.max_count || 0))
+  const sampleCounts = sorted.map((job) => Number(job.count || 0))
+
+  crowdTrendChart.setOption({
+    title: { show: false },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      formatter: (params) => {
+        const index = params[0]?.dataIndex ?? 0
+        const job = sorted[index]
+        if (!job) return ''
+        return [
+          job.job_name,
+          `采样次数：${sampleCounts[index]}`,
+          ...params.map((item) => `${item.marker}${item.seriesName}：${item.value}`)
+        ].join('<br/>')
+      }
+    },
+    legend: {
+      top: 0,
+      right: 0,
+      itemWidth: 12,
+      itemHeight: 12,
+      textStyle: { fontSize: 12, color: '#606266' }
+    },
+    grid: {
+      left: 12,
+      right: 20,
+      top: 36,
+      bottom: 8,
+      containLabel: true
+    },
+    xAxis: {
+      type: 'value',
+      minInterval: 1,
+      name: '人数',
+      nameTextStyle: { color: '#909399', fontSize: 12 },
+      splitLine: {
+        lineStyle: { type: 'dashed', color: '#ebeef5' }
+      }
+    },
+    yAxis: {
+      type: 'category',
+      data: jobNames,
+      inverse: true,
+      axisTick: { show: false },
+      axisLine: { show: false },
+      axisLabel: {
+        color: '#606266',
+        formatter: (value) => truncateAxisLabel(value, 12)
+      }
     },
     series: [
       {
         name: '平均人数',
         type: 'bar',
         data: avgCounts,
+        barMaxWidth: 14,
+        barGap: '20%',
         itemStyle: {
-          color: '#409EFF'
+          borderRadius: [0, 4, 4, 0],
+          color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
+            { offset: 0, color: '#79bbff' },
+            { offset: 1, color: '#409eff' }
+          ])
         }
       },
       {
-        name: '最大人数',
+        name: '峰值人数',
         type: 'bar',
         data: maxCounts,
+        barMaxWidth: 14,
         itemStyle: {
-          color: '#67C23A'
+          borderRadius: [0, 4, 4, 0],
+          color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
+            { offset: 0, color: '#95d475' },
+            { offset: 1, color: '#67c23a' }
+          ])
+        },
+        label: {
+          show: true,
+          position: 'right',
+          color: '#606266',
+          fontSize: 11,
+          formatter: ({ value }) => (value > 0 ? value : '')
         }
       }
     ]
-  }
-
-  crowdTrendChart.setOption(option)
+  }, true)
 }
 
 // 查看更多事件
@@ -877,11 +1026,8 @@ const viewMoreEvents = () => {
 // 窗口大小变化时调整图表大小
 const handleResize = () => {
   if (chart) chart.resize()
-  if (detectionStatusChart) detectionStatusChart.resize()
-  if (detectionTypeChart) detectionTypeChart.resize()
-  if (externalStatusChart) externalStatusChart.resize()
-  if (externalEngineChart) externalEngineChart.resize()
-  if (crowdJobChart) crowdJobChart.resize()
+  Object.values(pieChartInstanceMap).forEach((instance) => instance?.resize())
+  if (schemeEventChart) schemeEventChart.resize()
   if (crowdTrendChart) crowdTrendChart.resize()
 }
 
@@ -901,25 +1047,13 @@ onUnmounted(() => {
     chart.dispose()
     chart = null
   }
-  if (detectionStatusChart) {
-    detectionStatusChart.dispose()
-    detectionStatusChart = null
-  }
-  if (detectionTypeChart) {
-    detectionTypeChart.dispose()
-    detectionTypeChart = null
-  }
-  if (externalStatusChart) {
-    externalStatusChart.dispose()
-    externalStatusChart = null
-  }
-  if (externalEngineChart) {
-    externalEngineChart.dispose()
-    externalEngineChart = null
-  }
-  if (crowdJobChart) {
-    crowdJobChart.dispose()
-    crowdJobChart = null
+  Object.keys(pieChartInstanceMap).forEach((key) => {
+    pieChartInstanceMap[key]?.dispose()
+    delete pieChartInstanceMap[key]
+  })
+  if (schemeEventChart) {
+    schemeEventChart.dispose()
+    schemeEventChart = null
   }
   if (crowdTrendChart) {
     crowdTrendChart.dispose()
@@ -928,7 +1062,7 @@ onUnmounted(() => {
 })
 
 // 监听数据变化，更新图表
-watch(() => comprehensiveData.trends, () => {
+watch(comprehensiveData, () => {
   renderCharts()
 }, { deep: true })
 </script>
@@ -1025,22 +1159,35 @@ watch(() => comprehensiveData.trends, () => {
   color: #E6A23C;
 }
 
-.module-stats-row {
-  margin-bottom: 24px;
+.module-col {
+  display: flex;
+  margin-bottom: 20px;
+}
+
+.module-card {
+  flex: 1;
+  width: 100%;
+}
+
+.module-card :deep(.el-card__body) {
+  min-height: 132px;
 }
 
 .card-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .module-item {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 12px;
-  padding: 8px 0;
+  gap: 12px;
+  margin-bottom: 10px;
+  padding: 6px 0;
   border-bottom: 1px solid #f0f0f0;
 }
 
@@ -1051,13 +1198,17 @@ watch(() => comprehensiveData.trends, () => {
 
 .module-item .label {
   color: #606266;
-  font-size: 14px;
+  font-size: 13px;
+  flex: 1;
+  min-width: 0;
 }
 
 .module-item .value {
   color: #303133;
   font-weight: 500;
-  font-size: 14px;
+  font-size: 13px;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .chart-row {
@@ -1159,6 +1310,67 @@ watch(() => comprehensiveData.trends, () => {
   margin-bottom: 20px;
 }
 
+.pie-panel-row {
+  margin-bottom: 20px;
+}
+
+.pie-panel-col {
+  margin-bottom: 16px;
+}
+
+.pie-panel-card {
+  height: 100%;
+}
+
+.pie-panel-card :deep(.el-card__header) {
+  padding: 12px 16px;
+}
+
+.pie-panel-card :deep(.el-card__body) {
+  padding: 8px 12px 12px;
+}
+
+.pie-panel-header {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.pie-panel-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #303133;
+  line-height: 1.2;
+}
+
+.distribution-chart-compact {
+  height: 280px;
+}
+
+.distribution-chart-bar {
+  height: 340px;
+}
+
+.section-hint {
+  font-size: 12px;
+  color: #909399;
+  font-weight: normal;
+}
+
+@media (min-width: 1200px) {
+  .pie-panel-header {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .pie-panel-header .el-radio-group {
+    flex-shrink: 0;
+  }
+}
+
 .distribution-chart {
   height: 300px;
   width: 100%;
@@ -1167,7 +1379,7 @@ watch(() => comprehensiveData.trends, () => {
 .dual-chart-container {
   display: flex;
   gap: 20px;
-  height: 350px;
+  height: 380px;
 }
 
 .chart-section {
@@ -1210,6 +1422,14 @@ watch(() => comprehensiveData.trends, () => {
 
   .distribution-chart {
     height: 200px;
+  }
+
+  .distribution-chart-compact {
+    height: 240px;
+  }
+
+  .distribution-chart-bar {
+    height: 280px;
   }
 
   .chart-legend {

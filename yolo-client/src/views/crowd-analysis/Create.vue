@@ -280,10 +280,15 @@ const fetchAvailableDevices = async () => {
   }
 }
 
+const isCrowdAnalysisModel = (model) => {
+  const type = (model?.model_type || model?.models_type || '').toLowerCase()
+  return type !== 'vlm' && model?.is_active
+}
+
 const fetchAvailableModels = async () => {
   try {
     const res = await crowdAnalysisApi.getAvailableModels()
-    availableModels.value = res.data.filter(model => model.is_active);
+    availableModels.value = (res.data || []).filter(isCrowdAnalysisModel)
   } catch (error) {
     ElMessage.error('获取检测模型列表失败')
   }

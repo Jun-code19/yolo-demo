@@ -3,7 +3,7 @@
     <div class="header">
       <h2>{{ job.job_name || '任务详情' }}</h2>
       <div>
-        <el-button @click="router.push('/crowd-analysis')">返回列表</el-button>
+        <el-button @click="goBack">返回列表</el-button>
         <el-button type="primary" @click="runJob">立即执行</el-button>
         <el-button :type="job.is_active ? 'warning' : 'success'" @click="toggleJobStatus">
           {{ job.is_active ? '停止任务' : '启动任务' }}
@@ -32,20 +32,21 @@
       <el-descriptions :column="2" border>
         <el-descriptions-item label="任务ID">{{ job.job_id }}</el-descriptions-item>
         <el-descriptions-item label="任务名称">{{ job.job_name }}</el-descriptions-item>
-        <el-descriptions-item label="执行频率">
-          <span v-if="job.cron_expression">{{ job.cron_expression }}</span>
-          <span v-else>每{{ job.interval }}秒</span>
-        </el-descriptions-item>
+        <el-descriptions-item label="整轮间隔">{{ job.interval || 0 }}秒/轮</el-descriptions-item>
         <el-descriptions-item label="当前状态">
           <el-tag :type="getStatusType(job.status)">{{ job.status }}</el-tag>
         </el-descriptions-item>
         <el-descriptions-item label="创建时间">{{ formatDate(job.created_at) }}</el-descriptions-item>
         <el-descriptions-item label="最近执行">{{ job.last_run ? formatDate(job.last_run) : '未执行' }}</el-descriptions-item>
+        <el-descriptions-item label="设备来源">
+          {{ job.device_mode === 'group' ? '按设备分组' : '手动选择' }}
+        </el-descriptions-item>
+        <el-descriptions-item label="生效时段">{{ scheduleSummary }}</el-descriptions-item>
         <el-descriptions-item label="监控设备数量">{{ job.device_ids?.length || 0 }}</el-descriptions-item>
         <el-descriptions-item label="检测模型">{{ modelInfo?.model_name || job.models_id }}</el-descriptions-item>
         <el-descriptions-item label="置信度阈值">{{ Math.round((job.confidence_threshold || 0.5) * 100) }}%</el-descriptions-item>
         <el-descriptions-item label="标签">
-          <el-tag v-for="tag in job.tags" :key="tag" size="small" style="margin-right: 5px">
+          <el-tag v-for="tag in (job.tags || [])" :key="tag" size="small" style="margin-right: 5px">
             {{ tag }}
           </el-tag>
         </el-descriptions-item>
@@ -90,16 +91,21 @@
         <el-table-column prop="ip_address" label="IP地址" width="180" />
         <el-table-column prop="channel" label="通道号" width="180" />
         <el-table-column prop="location" label="位置信息" width="180" />
-        <el-table-column v-if="job.last_result" label="人数" width="180">
+        <el-table-column v-if="job.last_result?.camera_counts" label="人数" width="180">
           <template #default="scope">
-            {{ job.last_result.camera_counts.find(item => item.device_id === scope.row.device_id)?.person_count || 0 }}
+            {{ job.last_result.camera_counts?.find(item => item.device_id === scope.row.device_id)?.person_count || 0 }}
           </template>
         </el-table-column>
-        <el-table-column v-if="job.last_result" label="预览图" width="150">
+        <el-table-column v-if="job.last_result?.camera_counts" label="预览图" width="150">
           <template #default="scope">
-            <el-image v-if="cameraCounts.find(item => item.device_id === scope.row.device_id)?.preview_image" :src="getImageUrl(cameraCounts.find(item => item.device_id === scope.row.device_id)?.preview_image)"
-              style="max-height: 160px; max-width: 280px; cursor: pointer;" fit="contain" :initial-index="0"
-              :z-index="3000" @click="showFullImage(cameraCounts.find(item => item.device_id === scope.row.device_id))" />
+            <el-button
+              v-if="getCameraPreview(scope.row.device_id)"
+              link
+              type="primary"
+              @click="showFullImage(getCameraPreview(scope.row.device_id))"
+            >
+              查看
+            </el-button>
             <span v-else>无预览图</span>
           </template>
         </el-table-column>
@@ -117,56 +123,54 @@
       <template #header>
         <div class="card-header">
           <span>历史数据</span>
-          <el-date-picker v-model="dateRange" type="daterange" range-separator="至" start-placeholder="开始日期"
-            end-placeholder="结束日期" @change="fetchHistoryData" size="small" style="width: 300px;" />
+          <div class="history-toolbar">
+            <el-radio-group v-model="chartViewMode" size="small" @change="renderHistoryChart">
+              <el-radio-button label="total">总人数</el-radio-button>
+              <el-radio-button label="stack">设备堆叠</el-radio-button>
+              <el-radio-button label="heatmap">热力图</el-radio-button>
+            </el-radio-group>
+            <el-date-picker
+              v-model="dateRange"
+              type="daterange"
+              range-separator="至"
+              start-placeholder="开始日期"
+              end-placeholder="结束日期"
+              size="small"
+              style="width: 300px;"
+              @change="fetchHistoryData"
+            />
+          </div>
         </div>
       </template>
 
-      <div class="chart-container" ref="chartContainer" v-loading="historyLoading">
-        <div id="historyChart" style="width: 100%; height: 400px;"></div>
+      <div class="chart-summary" v-if="hasHistoryData && historySummary">
+        <div class="summary-item">
+          <span class="summary-label">峰值人数</span>
+          <span class="summary-value peak">{{ historySummary.peak }}</span>
+        </div>
+        <div class="summary-item">
+          <span class="summary-label">平均人数</span>
+          <span class="summary-value">{{ historySummary.avg }}</span>
+        </div>
+        <div class="summary-item">
+          <span class="summary-label">采样点数</span>
+          <span class="summary-value">{{ historySummary.points }}</span>
+        </div>
+        <div class="summary-item" v-if="job.warning_threshold">
+          <span class="summary-label">预警阈值</span>
+          <span class="summary-value warn">{{ job.warning_threshold }}人</span>
+        </div>
       </div>
 
-      <div class="no-data" v-if="!hasHistoryData">
+      <div class="chart-container" ref="chartContainer" v-loading="historyLoading">
+        <div id="historyChart" :style="{ width: '100%', height: chartHeight + 'px' }"></div>
+      </div>
+
+      <div class="no-data" v-if="!hasHistoryData && !historyLoading">
         <el-empty description="暂无历史数据" />
       </div>
 
-      <!-- 历史数据表格视图 -->
-      <div class="history-table-view" v-if="hasHistoryData">
-        <div class="table-header">
-          <div>
-            <h4>历史记录</h4>
-            <p class="data-hint">表格显示完整数据，图表显示采样数据</p>
-          </div>
-          <div class="table-controls">
-            <el-radio-group v-model="historyViewMode" size="small" style="margin-left: 10px;">
-              <el-radio-button value="chart">图表</el-radio-button>
-              <el-radio-button value="table">表格</el-radio-button>
-            </el-radio-group>
-          </div>
-        </div>
-
-        <el-table v-if="historyViewMode === 'table'" :data="historyData" border size="small"
-          style="width: 100%; margin-top: 15px;">
-          <el-table-column label="时间" width="180">
-            <template #default="scope">
-              {{ formatDateTime(scope.row.timestamp) }}
-            </template>
-          </el-table-column>
-          <el-table-column label="总人数" width="100">
-            <template #default="scope">
-              {{ scope.row.total_person_count }}
-            </template>
-          </el-table-column>
-          <el-table-column label="设备人数详情">
-            <template #default="scope">
-              <el-tag v-for="camera in scope.row.camera_counts" :key="camera.device_id"
-                style="margin-right: 5px; margin-bottom: 5px;" :type="camera.person_count > 0 ? 'primary' : 'info'">
-                {{ camera.device_name || camera.device_id }}: {{ camera.person_count }}人
-              </el-tag>
-            </template>
-          </el-table-column>
-        </el-table>
-      </div>
+      <p v-if="hasHistoryData" class="chart-hint">{{ chartHintText }}</p>
     </el-card>
 
     <el-card class="error-card" v-if="job.last_error">
@@ -221,15 +225,24 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { crowdAnalysisApi } from '@/api/crowd_analysis'
 import { formatDate, formatDateTime } from '@/utils/date'
+import {
+  scheduleFromBackend,
+  legacyRuntimeToSchedule,
+  formatScheduleSummary
+} from '@/utils/weeklySchedule'
 import * as echarts from 'echarts'
 
 const router = useRouter()
 const route = useRoute()
+
+const goBack = () => {
+  router.replace({ name: 'CrowdAnalysis' })
+}
 const loading = ref(false)
 const job = ref({})
 const devicesList = ref([])
@@ -240,90 +253,158 @@ const modelInfo = ref(null)
 const fullImageVisible = ref(false)
 const currentImage = ref(null)
 const historyLoading = ref(false)
-const historyViewMode = ref('chart')
+const chartViewMode = ref('total')
 const historyData = ref([])
+const sampledHistoryData = ref([])
+const historySummary = ref(null)
+const chartHeight = ref(420)
 let chart = null
+let chartResizeHandler = null
+let initChartTimer = null
+let statusCheckInterval = null
+let statusCheckTimeout = null
+let pageAlive = false
+
+const isPageActive = () => pageAlive
+
+const clearStatusPolling = () => {
+  if (statusCheckInterval) {
+    clearInterval(statusCheckInterval)
+    statusCheckInterval = null
+  }
+  if (statusCheckTimeout) {
+    clearTimeout(statusCheckTimeout)
+    statusCheckTimeout = null
+  }
+}
+
+const cleanupChart = () => {
+  if (chartResizeHandler) {
+    window.removeEventListener('resize', chartResizeHandler)
+    chartResizeHandler = null
+  }
+  if (chart) {
+    try {
+      chart.dispose()
+    } catch {
+      // ignore dispose errors
+    }
+    chart = null
+  }
+}
+
+const cleanupPage = () => {
+  pageAlive = false
+  if (initChartTimer) {
+    clearTimeout(initChartTimer)
+    initChartTimer = null
+  }
+  clearStatusPolling()
+  cleanupChart()
+  loading.value = false
+  historyLoading.value = false
+}
+
+const scheduleSummary = computed(() => {
+  const runtime = job.value.schedule_config?.runtime
+  if (!runtime) return '全时段'
+  if (runtime.time_period_mode === 'all') return '全时段'
+  if (runtime.time_period_mode === 'weekly' && runtime.weekly_schedule) {
+    return formatScheduleSummary(scheduleFromBackend(runtime.weekly_schedule))
+  }
+  return formatScheduleSummary(legacyRuntimeToSchedule(runtime))
+})
+
+const chartHintText = computed(() => {
+  const map = {
+    total: '总人数趋势（面积图），适合查看整体客流变化与预警线。',
+    stack: '各设备人数堆叠，总高度等于总人数，便于对比设备占比。',
+    heatmap: '时间 × 设备热力图，设备多时可快速发现热点时段与点位。'
+  }
+  return map[chartViewMode.value] || ''
+})
+
+const DEVICE_COLORS = [
+  '#409EFF', '#67C23A', '#E6A23C', '#F56C6C', '#909399',
+  '#9B59B6', '#1ABC9C', '#3498DB', '#E74C3C', '#2ECC71'
+]
+
+const scheduleHistoryInit = () => {
+  if (initChartTimer) {
+    clearTimeout(initChartTimer)
+  }
+  initChartTimer = setTimeout(() => {
+    if (!isPageActive()) return
+    initChart()
+    fetchHistoryData()
+  }, 100)
+}
 
 onMounted(() => {
-  fetchJobDetail()
-  // fetchDevicesInfo()
-  // fetchModelInfo()
+  pageAlive = true
 
-  // 初始化日期范围为最近7天
   const end = new Date()
   const start = new Date()
   start.setDate(start.getDate() - 1)
   dateRange.value = [start, end]
 
-  // 延迟初始化图表，确保DOM已加载
-  setTimeout(() => {
-    initChart()
-    fetchHistoryData()
-  }, 1000)
+  fetchJobDetail()
 })
 
 onBeforeUnmount(() => {
-  if (chart) {
-    chart.dispose()
-  }
+  cleanupPage()
 })
 
 const fetchJobDetail = async () => {
+  if (!isPageActive()) return
   loading.value = true
   try {
     const jobId = route.params.id
     const res = await crowdAnalysisApi.getAnalysisJob(jobId)
+    if (!isPageActive()) return
     job.value = res.data
 
-    // 如果有最近分析结果，提取摄像头分析数据
-    if (job.value.last_result && job.value.last_result.camera_counts) {
+    if (job.value.last_result?.camera_counts) {
       cameraCounts.value = job.value.last_result.camera_counts
     }
 
-    // 获取模型信息
     if (job.value.models_id) {
       fetchModelInfo()
     }
-    // 获取设备详情
-    if (job.value.device_ids && job.value.device_ids.length > 0) {
+    if (job.value.device_ids?.length > 0) {
       fetchDevicesInfo()
     }
 
+    scheduleHistoryInit()
   } catch (error) {
-    // console.error(error)
-    ElMessage.error('获取任务详情失败')
+    if (isPageActive()) {
+      ElMessage.error('获取任务详情失败')
+    }
   } finally {
-    loading.value = false
+    if (isPageActive()) {
+      loading.value = false
+    }
   }
 }
 
 const fetchDevicesInfo = async () => {
   try {
-    // 使用真实API获取设备详情
     if (!job.value.device_ids || job.value.device_ids.length === 0) return
 
-    const res = await crowdAnalysisApi.getDevicesDetails(job.value.device_ids);
+    const res = await crowdAnalysisApi.getDevicesDetails(job.value.device_ids)
+    if (!isPageActive()) return
     if (res.data) {
-      devicesList.value = res.data;
+      devicesList.value = res.data
     }
   } catch (error) {
-    // console.error('获取设备信息失败', error);
-    // 出错时使用备用模拟数据
-    const devicePromises = job.value.device_ids.map(id =>
-      new Promise(resolve => {
-        setTimeout(() => {
-          resolve({
-            device_id: id,
-            device_name: `设备 ${id}`,
-            ip_address: `192.168.1.${parseInt(Math.random() * 255)}`,
-            location: `位置 ${id}`,
-            status: Math.random() > 0.2 ? 'online' : 'offline'
-          })
-        }, 300)
-      })
-    );
-
-    devicesList.value = await Promise.all(devicePromises);
+    if (!isPageActive()) return
+    devicesList.value = job.value.device_ids.map(id => ({
+      device_id: id,
+      device_name: `设备 ${id}`,
+      ip_address: '-',
+      location: '-',
+      status: 'offline'
+    }))
   }
 }
 
@@ -370,69 +451,79 @@ const getLocationInfo = () => {
 }
 
 const getImageUrl = (imageData) => {
-  // 如果imageData是base64编码的图像数据
+  if (!imageData) return ''
   if (typeof imageData === 'string') {
     if (imageData.startsWith('data:image')) {
-      return imageData;
-    } else {
-      // 如果是纯base64字符串，添加前缀
-      return `data:image/jpeg;base64,${imageData}`;
+      return imageData
     }
+    return `data:image/jpeg;base64,${imageData}`
   }
+  return `data:image/jpeg;base64,${imageData}`
+}
 
-  // 其他情况下可能需要构建URL或处理二进制数据
-  // 这里假设后端已经返回了可用的URL或base64数据
-  return `data:image/jpeg;base64,${imageData}`;
+const getCameraPreview = (deviceId) => {
+  const item = cameraCounts.value.find(entry => entry.device_id === deviceId)
+  if (!item?.preview_image) return null
+  return item
 }
 
 const runJob = async () => {
+  if (!job.value?.job_id) {
+    ElMessage.warning('任务信息尚未加载完成')
+    return
+  }
   try {
     await crowdAnalysisApi.runAnalysisJobNow(job.value.job_id)
     ElMessage.success('任务已开始执行')
 
-    // 创建定时器，每3秒刷新一次任务详情，直到任务状态变为完成或出错
-    const statusCheckInterval = setInterval(async () => {
+    clearStatusPolling()
+
+    statusCheckInterval = setInterval(async () => {
+      if (!isPageActive()) {
+        clearStatusPolling()
+        return
+      }
       await fetchJobDetail()
-      // 检查当前任务状态
-      if (['completed', 'error'].includes(job.value.status)) {
-        clearInterval(statusCheckInterval)
-        if (job.value.status === 'completed') {
+      const shouldStopPolling =
+        !job.value.is_active ||
+        ['completed', 'error', 'paused'].includes(job.value.status)
+      if (shouldStopPolling) {
+        clearStatusPolling()
+        if (isPageActive() && job.value.status === 'completed') {
           ElMessage.success('任务执行完成')
-        } else if (job.value.status === 'error') {
+        } else if (isPageActive() && job.value.status === 'error') {
           ElMessage.error(`任务执行出错: ${job.value.last_error || '未知错误'}`)
         }
       }
     }, 3000)
 
-    // 30分钟后自动停止检查，避免无限循环
-    setTimeout(() => {
-      clearInterval(statusCheckInterval)
+    statusCheckTimeout = setTimeout(() => {
+      clearStatusPolling()
     }, 30 * 60 * 1000)
 
-    // 立即刷新一次
     fetchJobDetail()
   } catch (error) {
     ElMessage.error('执行任务失败')
-    // console.error(error)
   }
 }
 
 const toggleJobStatus = async () => {
+  if (!job.value?.job_id) {
+    ElMessage.warning('任务信息尚未加载完成')
+    return
+  }
   try {
     if (job.value.is_active) {
-      // 暂停任务
       await crowdAnalysisApi.pauseAnalysisJob(job.value.job_id)
       ElMessage.success('任务已暂停')
+      clearStatusPolling()
     } else {
-      // 恢复任务
       await crowdAnalysisApi.resumeAnalysisJob(job.value.job_id)
       ElMessage.success('任务已恢复')
     }
-    // 刷新任务详情
     fetchJobDetail()
   } catch (error) {
     ElMessage.error(`${job.value.is_active ? '暂停' : '恢复'}任务失败`)
-    // console.error(error)
   }
 }
 
@@ -479,240 +570,322 @@ const generateCSV = (data) => {
   return content
 }
 
-const initChart = () => {
-  const chartDom = document.getElementById('historyChart')
-  if (!chartDom) return
+const formatAxisTime = (value) => {
+  const date = new Date(value)
+  return `${date.getMonth() + 1}-${date.getDate()} ${date.getHours()}:${String(date.getMinutes()).padStart(2, '0')}`
+}
 
-  chart = echarts.init(chartDom)
+const sampleDataByInterval = (data, intervalMs) => {
+  if (data.length <= 1) return data
 
-  // 基础配置
-  const option = {
+  const sampled = [data[0]]
+  let lastSampledTime = new Date(data[0].timestamp).getTime()
+
+  for (let i = 1; i < data.length; i++) {
+    const currentTime = new Date(data[i].timestamp).getTime()
+    if (currentTime - lastSampledTime >= intervalMs) {
+      sampled.push(data[i])
+      lastSampledTime = currentTime
+    }
+  }
+
+  if (sampled[sampled.length - 1] !== data[data.length - 1]) {
+    sampled.push(data[data.length - 1])
+  }
+
+  return sampled
+}
+
+const buildDeviceNameMap = (data) => {
+  const map = {}
+  data.forEach(item => {
+    item.camera_counts?.forEach(camera => {
+      map[camera.device_id] = camera.device_name || `设备${camera.device_id}`
+    })
+  })
+  return map
+}
+
+const computeHistorySummary = (data) => {
+  if (!data.length) return null
+  const totals = data.map(item => Number(item.total_person_count) || 0)
+  const peak = Math.max(...totals)
+  const avg = Math.round(totals.reduce((a, b) => a + b, 0) / totals.length)
+  return { peak, avg, points: data.length }
+}
+
+const buildTotalChartOption = (data) => {
+  const seriesData = data.map(item => [new Date(item.timestamp).getTime(), item.total_person_count || 0])
+  const threshold = job.value.warning_threshold
+
+  return {
     title: {
-      text: '人数变化趋势 (每30分钟采样)',
+      text: '总人数变化趋势',
       left: 'center',
-      subtext: '图表显示采样数据，表格显示完整数据',
-      subtextStyle: {
-        fontSize: 12,
-        color: '#909399'
-      }
+      subtext: '按小时采样',
+      subtextStyle: { fontSize: 12, color: '#909399' }
     },
     tooltip: {
       trigger: 'axis',
-      formatter: function (params) {
-        if (params.length === 0) return '';
-        const date = new Date(params[0].value[0]);
-        let res = formatDateTime(date) + '<br/>';
-
-        params.forEach(param => {
-          res += param.marker + ' ' + param.seriesName + ': ' + param.value[1] + '人<br/>';
-        });
-
-        return res;
+      formatter: (params) => {
+        const point = params?.[0]
+        if (!point) return ''
+        return `${formatDateTime(new Date(point.value[0]))}<br/>${point.marker} 总人数：<b>${point.value[1]}</b> 人`
       }
     },
-    legend: {
-      data: ['总人数'],
-      bottom: 0
-    },
-    grid: {
-      left: '3%',
-      right: '4%',
-      bottom: '60px',
-      top: '60px',
-      containLabel: true
-    },
+    grid: { left: 48, right: 24, top: 72, bottom: 72, containLabel: true },
     toolbox: {
       feature: {
-        saveAsImage: {
-          title: '保存'
-        },
+        saveAsImage: { title: '保存' },
         myRefresh: {
           show: true,
           title: '刷新',
-          icon: 'path://M838.016 596.48a21.333333 21.333333 0 0 1 15.018667 26.154667 352.725333 352.725333 0 0 1-340.010667 259.84c-123.818667 0-236.629333-65.792-299.690667-167.637334v146.304a21.333333 21.333333 0 1 1-42.666666 0v-240.128a21.333333 21.333333 0 0 1 21.333333-21.333333c0.981333 0 1.834667 0.426667 2.730667 0.554667a20.906667 20.906667 0 0 1 20.565333 15.189333c37.674667 132.096 160.085333 224.384 297.728 224.384 139.52 0 262.4-93.866667 298.837333-228.309333a21.333333 21.333333 0 0 1 26.154667-15.018667z m-647.253333-144.042667a21.333333 21.333333 0 0 1-14.037334-26.709333 350.506667 350.506667 0 0 1 336.298667-247.210667 349.866667 349.866667 0 0 1 295.722667 162.090667V192a21.333333 21.333333 0 1 1 42.666666 0v240.042667c0 11.818667-9.514667 21.333333-21.333333 21.333333-0.853333 0-1.578667-0.384-2.432-0.469333-1.152-0.085333-2.133333-0.426667-3.285333-0.682667-1.109333-0.298667-2.218667-0.469333-3.242667-0.938667a21.077333 21.077333 0 0 1-12.586667-13.226666 308.224 308.224 0 0 0-295.509333-216.874667 308.010667 308.010667 0 0 0-295.552 217.216 21.333333 21.333333 0 0 1-26.709333 14.037333z',
-          onclick: function () {
-            refreshHistoryData();
-          }
-        },
-        myDataSift: {
-          show: true,
-          title: '数据筛选',
-          icon: 'path://M192 809.472a21.333333 21.333333 0 0 1-19.029333-30.976l183.552-363.52a21.333333 21.333333 0 1 1 38.101333 19.285333l-183.594667 363.52a21.333333 21.333333 0 0 1-19.029333 11.690667 M551.68 794.453333a21.248 21.248 0 0 1-18.986667-11.690666l-176.128-348.501334a21.333333 21.333333 0 1 1 38.058667-19.285333l176.128 348.501333a21.333333 21.333333 0 0 1-19.029333 31.018667 M551.68 794.453333a21.290667 21.290667 0 0 1-18.176-32.426666l269.781333-442.154667a21.333333 21.333333 0 1 1 36.437334 22.186667L569.941333 784.213333a21.290667 21.290667 0 0 1-18.218666 10.24 M641.706667 394.752a21.290667 21.290667 0 0 1-6.144-41.813333l179.626666-53.376a21.290667 21.290667 0 1 1 12.16 40.874666L647.765333 393.813333a21.76 21.76 0 0 1-6.101333 0.853334 M874.666667 520.917333a21.290667 21.290667 0 0 1-20.437334-15.232L800.853333 326.101333a21.333333 21.333333 0 0 1 40.96-12.202666l53.333334 179.626666a21.333333 21.333333 0 0 1-20.437334 27.392',
-          onclick: function () {
-            // console.log('数据筛选,功能开发中...')
-          }
+          icon: 'path://M512 64a448 448 0 1 1 0 896 448 448 0 0 1 0-896zm-38.4 224a32 32 0 0 0-49.92 40.32L512 316.8l87.68 108.16a32 32 0 1 0 49.92-40.32L512 236.8l-38.4 47.36z',
+          onclick: () => refreshHistoryData()
         }
       }
     },
-    dataZoom: [{
-      type: 'inside',
-      start: 0,
-      end: 100
-    }, {
-      start: 0,
-      end: 100
-    }],
+    dataZoom: [{ type: 'inside' }, { type: 'slider', height: 18, bottom: 8 }],
     xAxis: {
       type: 'time',
-      splitLine: {
-        show: false
-      },
-      axisLabel: {
-        formatter: function (value) {
-          const date = new Date(value);
-          return `${date.getMonth() + 1}-${date.getDate()} ${date.getHours()}:${date.getMinutes().toString().padStart(2, '0')}`;
-        }
-      }
+      splitLine: { show: false },
+      axisLabel: { formatter: formatAxisTime }
     },
     yAxis: {
       type: 'value',
       name: '人数',
-      splitLine: {
-        lineStyle: {
-          type: 'dashed'
-        }
-      },
-      min: 0
+      min: 0,
+      splitLine: { lineStyle: { type: 'dashed' } }
     },
     series: [{
       name: '总人数',
       type: 'line',
       smooth: true,
-      lineStyle: {
-        width: 3,
-        shadowColor: 'rgba(0,0,0,0.3)',
-        shadowBlur: 10,
-        shadowOffsetY: 8
+      showSymbol: false,
+      areaStyle: {
+        color: {
+          type: 'linear',
+          x: 0, y: 0, x2: 0, y2: 1,
+          colorStops: [
+            { offset: 0, color: 'rgba(64,158,255,0.35)' },
+            { offset: 1, color: 'rgba(64,158,255,0.04)' }
+          ]
+        }
       },
-      itemStyle: {
-        color: '#409EFF'
-      },
-      data: []
+      lineStyle: { width: 2, color: '#409EFF' },
+      itemStyle: { color: '#409EFF' },
+      markLine: threshold ? {
+        silent: true,
+        symbol: 'none',
+        lineStyle: { color: '#F56C6C', type: 'dashed' },
+        label: { formatter: `预警 ${threshold}人` },
+        data: [{ yAxis: threshold }]
+      } : undefined,
+      data: seriesData
     }]
   }
+}
 
-  chart.setOption(option)
+const buildStackChartOption = (data) => {
+  const deviceNames = buildDeviceNameMap(data)
+  const deviceIds = Object.keys(deviceNames)
+  const timestamps = data.map(item => new Date(item.timestamp).getTime())
 
-  // 监听窗口大小变化，调整图表大小
-  window.addEventListener('resize', () => {
-    chart && chart.resize()
+  const series = deviceIds.map((deviceId, index) => ({
+    name: deviceNames[deviceId],
+    type: 'line',
+    stack: 'total',
+    smooth: true,
+    showSymbol: false,
+    areaStyle: { opacity: 0.85 },
+    emphasis: { focus: 'series' },
+    lineStyle: { width: 1 },
+    itemStyle: { color: DEVICE_COLORS[index % DEVICE_COLORS.length] },
+    data: data.map(item => {
+      const camera = item.camera_counts?.find(c => c.device_id === deviceId)
+      return camera?.person_count || 0
+    })
+  }))
+
+  return {
+    title: {
+      text: '各设备人数堆叠',
+      left: 'center',
+      subtext: '总高度 = 总人数',
+      subtextStyle: { fontSize: 12, color: '#909399' }
+    },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'cross' }
+    },
+    legend: {
+      type: 'scroll',
+      bottom: 0,
+      data: deviceIds.map(id => deviceNames[id])
+    },
+    grid: { left: 48, right: 24, top: 72, bottom: deviceIds.length > 6 ? 96 : 72, containLabel: true },
+    toolbox: { feature: { saveAsImage: { title: '保存' } } },
+    dataZoom: [{ type: 'inside' }, { type: 'slider', height: 18, bottom: 28 }],
+    xAxis: {
+      type: 'category',
+      boundaryGap: false,
+      data: timestamps.map(ts => formatAxisTime(ts))
+    },
+    yAxis: {
+      type: 'value',
+      name: '人数',
+      min: 0,
+      splitLine: { lineStyle: { type: 'dashed' } }
+    },
+    series
+  }
+}
+
+const buildHeatmapOption = (data) => {
+  const deviceNames = buildDeviceNameMap(data)
+  const deviceIds = Object.keys(deviceNames)
+  const timeLabels = data.map(item => formatAxisTime(item.timestamp))
+  const heatData = []
+  let maxCount = 0
+
+  data.forEach((item, timeIndex) => {
+    deviceIds.forEach((deviceId, deviceIndex) => {
+      const camera = item.camera_counts?.find(c => c.device_id === deviceId)
+      const count = camera?.person_count || 0
+      maxCount = Math.max(maxCount, count)
+      heatData.push([timeIndex, deviceIndex, count])
+    })
   })
+
+  chartHeight.value = Math.max(420, deviceIds.length * 36 + 160)
+
+  return {
+    title: {
+      text: '设备人数热力图',
+      left: 'center',
+      subtext: '颜色越深人数越多',
+      subtextStyle: { fontSize: 12, color: '#909399' }
+    },
+    tooltip: {
+      position: 'top',
+      formatter: (params) => {
+        const [x, y, value] = params.value
+        return `${timeLabels[x]}<br/>${deviceNames[deviceIds[y]]}：<b>${value}</b> 人`
+      }
+    },
+    grid: { left: 120, right: 48, top: 72, bottom: 72, containLabel: false },
+    toolbox: { feature: { saveAsImage: { title: '保存' } } },
+    dataZoom: [{ type: 'inside', xAxisIndex: 0 }, { type: 'slider', xAxisIndex: 0, height: 18, bottom: 8 }],
+    xAxis: {
+      type: 'category',
+      data: timeLabels,
+      splitArea: { show: true },
+      axisLabel: { rotate: timeLabels.length > 12 ? 35 : 0, fontSize: 11 }
+    },
+    yAxis: {
+      type: 'category',
+      data: deviceIds.map(id => deviceNames[id]),
+      splitArea: { show: true },
+      axisLabel: { width: 100, overflow: 'truncate' }
+    },
+    visualMap: {
+      min: 0,
+      max: Math.max(maxCount, 1),
+      calculable: true,
+      orient: 'horizontal',
+      left: 'center',
+      bottom: 32,
+      inRange: { color: ['#eef5ff', '#409EFF', '#1d39c4'] }
+    },
+    series: [{
+      name: '人数',
+      type: 'heatmap',
+      data: heatData,
+      label: { show: maxCount <= 8, formatter: ({ value }) => (value[2] ? value[2] : '') },
+      emphasis: { itemStyle: { shadowBlur: 8, shadowColor: 'rgba(0,0,0,0.2)' } }
+    }]
+  }
+}
+
+const renderHistoryChart = () => {
+  if (!isPageActive() || !chart || !sampledHistoryData.value.length) return
+
+  chartHeight.value = chartViewMode.value === 'heatmap'
+    ? Math.max(420, Object.keys(buildDeviceNameMap(sampledHistoryData.value)).length * 36 + 160)
+    : 420
+
+  let option
+  if (chartViewMode.value === 'stack') {
+    option = buildStackChartOption(sampledHistoryData.value)
+  } else if (chartViewMode.value === 'heatmap') {
+    option = buildHeatmapOption(sampledHistoryData.value)
+  } else {
+    option = buildTotalChartOption(sampledHistoryData.value)
+  }
+
+  try {
+    chart.clear()
+    chart.setOption(option, true)
+    chart.resize()
+  } catch {
+    // ignore
+  }
+}
+
+const initChart = () => {
+  if (!isPageActive()) return
+  const chartDom = document.getElementById('historyChart')
+  if (!chartDom) return
+
+  cleanupChart()
+  try {
+    chart = echarts.init(chartDom)
+  } catch {
+    return
+  }
+
+  chartResizeHandler = () => chart && chart.resize()
+  window.addEventListener('resize', chartResizeHandler)
+  renderHistoryChart()
 }
 
 const fetchHistoryData = async () => {
-  if (!job.value.job_id || !dateRange.value || dateRange.value.length < 2) return;
+  if (!isPageActive() || !job.value.job_id || !dateRange.value || dateRange.value.length < 2) return
 
+  historyLoading.value = true
   try {
-    historyLoading.value = true;
-    const [startDate, endDate] = dateRange.value;
+    const [startDate, endDate] = dateRange.value
+    const res = await crowdAnalysisApi.getAnalysisHistory(job.value.job_id, startDate, endDate)
+    if (!isPageActive()) return
 
-    const res = await crowdAnalysisApi.getAnalysisHistory(job.value.job_id, startDate, endDate);
-    historyData.value = res.data.data_points || [];
-    hasHistoryData.value = historyData.value.length > 0;
+    historyData.value = res.data.data_points || []
+    hasHistoryData.value = historyData.value.length > 0
 
-    // 更新图表 - 每半小时抽取一条数据
-    if (chart && hasHistoryData.value) {
-      // 对数据进行排序，确保时间顺序正确
-      const sortedData = [...historyData.value].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-      
-      // 每半小时抽取一条数据（30分钟 = 30 * 60 * 1000毫秒）
-      const sampledData = sampleDataByInterval(sortedData, 60 * 60 * 1000);
-      
-      // 准备总人数数据（使用采样后的数据）
-      const totalPersonData = sampledData.map(item => {
-        const timestamp = new Date(item.timestamp).getTime();
-        return [timestamp, item.total_person_count];
-      });
+    if (!hasHistoryData.value) {
+      sampledHistoryData.value = []
+      historySummary.value = null
+      return
+    }
 
-      // 准备各设备数据（使用采样后的数据）
-      const deviceData = {};
-      const deviceNames = {};
+    const sortedData = [...historyData.value].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
+    sampledHistoryData.value = sampleDataByInterval(sortedData, 60 * 60 * 1000)
+    historySummary.value = computeHistorySummary(sampledHistoryData.value)
 
-      sampledData.forEach(item => {
-        if (item.camera_counts && item.camera_counts.length) {
-          item.camera_counts.forEach(camera => {
-            if (!deviceData[camera.device_id]) {
-              deviceData[camera.device_id] = [];
-              deviceNames[camera.device_id] = camera.device_name || `设备${camera.device_id}`;
-            }
-
-            const timestamp = new Date(item.timestamp).getTime();
-            deviceData[camera.device_id].push([
-              timestamp,
-              camera.person_count
-            ]);
-          });
-        }
-      });
-
-      // 构建图表系列
-      const series = [{
-        name: '总人数',
-        type: 'line',
-        smooth: true,
-        lineStyle: {
-          width: 3,
-          shadowColor: 'rgba(0,0,0,0.3)',
-          shadowBlur: 10,
-          shadowOffsetY: 8
-        },
-        itemStyle: {
-          color: '#409EFF'
-        },
-        data: totalPersonData
-      }];
-
-      // 添加各设备的数据线
-      Object.keys(deviceData).forEach(deviceId => {
-        series.push({
-          name: deviceNames[deviceId],
-          type: 'line',
-          smooth: true,
-          symbol: 'emptyCircle',
-          symbolSize: 6,
-          data: deviceData[deviceId]
-        });
-      });
-
-      // 更新图表配置
-      chart.setOption({
-        legend: {
-          data: ['总人数', ...Object.values(deviceNames)],
-          bottom: 0
-        },
-        series: series
-      });
+    if (!chart) {
+      initChart()
+    } else {
+      renderHistoryChart()
     }
   } catch (error) {
-    // console.error('获取历史数据失败', error);
-    ElMessage.error('获取历史数据失败');
+    if (isPageActive()) {
+      ElMessage.error('获取历史数据失败')
+    }
   } finally {
-    historyLoading.value = false;
-  }
-};
-
-// 按时间间隔采样数据的函数
-const sampleDataByInterval = (data, intervalMs) => {
-  if (data.length <= 1) return data;
-  
-  const sampled = [data[0]]; // 保留第一条数据
-  let lastSampledTime = new Date(data[0].timestamp).getTime();
-  
-  for (let i = 1; i < data.length; i++) {
-    const currentTime = new Date(data[i].timestamp).getTime();
-    if (currentTime - lastSampledTime >= intervalMs) {
-      sampled.push(data[i]);
-      lastSampledTime = currentTime;
+    if (isPageActive()) {
+      historyLoading.value = false
     }
   }
-  
-  // 确保最后一条数据也被包含
-  if (sampled[sampled.length - 1] !== data[data.length - 1]) {
-    sampled.push(data[data.length - 1]);
-  }
-  
-  return sampled;
-};
+}
 
 const showFullImage = (image) => {
   // 深拷贝对象，避免修改原始数据
@@ -814,10 +987,62 @@ const refreshHistoryData = async () => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.history-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.chart-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  padding: 12px 16px;
+  margin-bottom: 8px;
+  background: #f5f7fa;
+  border-radius: 6px;
+}
+
+.summary-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.summary-label {
+  font-size: 12px;
+  color: #909399;
+}
+
+.summary-value {
+  font-size: 20px;
+  font-weight: 600;
+  color: #303133;
+}
+
+.summary-value.peak {
+  color: #409EFF;
+}
+
+.summary-value.warn {
+  color: #F56C6C;
 }
 
 .chart-container {
-  margin-top: 20px;
+  position: relative;
+  margin-top: 8px;
+}
+
+.chart-hint {
+  margin: 12px 0 0;
+  font-size: 12px;
+  color: #909399;
+  text-align: center;
 }
 
 .no-data {
@@ -884,29 +1109,6 @@ const refreshHistoryData = async () => {
   color: #303133;
 }
 
-.history-table-view {
-  margin-top: 20px;
-}
-
-.table-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 10px;
-}
-
-.table-controls {
-  display: flex;
-  align-items: center;
-}
-
-.data-hint {
-  margin: 5px 0 0 0;
-  font-size: 12px;
-  color: #909399;
-  font-weight: normal;
-}
-
 .hint,
 .cron-hint {
   font-size: 12px;
@@ -935,68 +1137,5 @@ const refreshHistoryData = async () => {
 
 .full-image-dialog {
   z-index: 9999;
-}
-
-.edit-dialog {
-  z-index: 9999;
-}
-</style>
-
-<style>
-/* 全局样式确保对话框最高优先级 */
-.full-image-dialog .el-dialog__wrapper,
-.edit-dialog .el-dialog__wrapper {
-  z-index: 10000 !important;
-}
-
-.full-image-dialog .el-overlay,
-.edit-dialog .el-overlay {
-  z-index: 9999 !important;
-}
-
-.full-image-dialog .el-dialog,
-.edit-dialog .el-dialog {
-  z-index: 10000 !important;
-}
-
-/* 通用对话框优先级保障 */
-.el-dialog__wrapper {
-  z-index: 9999 !important;
-}
-
-.el-overlay {
-  z-index: 9998 !important;
-}
-
-/* 确保下拉框选项在对话框中正常显示 */
-.el-select-dropdown {
-  z-index: 10001 !important;
-}
-
-.el-popper {
-  z-index: 10001 !important;
-}
-
-/* 特别针对编辑对话框中的下拉框 */
-.edit-dialog .el-select-dropdown {
-  z-index: 10002 !important;
-}
-
-.edit-dialog .el-popper {
-  z-index: 10002 !important;
-}
-
-/* 专门针对编辑对话框的下拉框弹出层 */
-.edit-dialog-select {
-  z-index: 10003 !important;
-}
-
-/* 日期选择器等其他popper元素 */
-.el-picker-panel {
-  z-index: 10001 !important;
-}
-
-.edit-dialog .el-picker-panel {
-  z-index: 10002 !important;
 }
 </style>

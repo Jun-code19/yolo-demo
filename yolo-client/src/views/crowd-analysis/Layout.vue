@@ -1,11 +1,15 @@
 <template>
   <div class="crowd-analysis-container">
-    <router-view />
+    <router-view :key="routeKey" />
   </div>
 </template>
 
 <script setup>
-// Vue 3组件不需要name属性
+import { computed } from 'vue'
+import { useRoute } from 'vue-router'
+
+const route = useRoute()
+const routeKey = computed(() => route.name + ':' + (route.params.id || ''))
 </script>
 
 <style scoped>

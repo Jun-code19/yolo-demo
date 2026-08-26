@@ -402,6 +402,57 @@
             </el-descriptions>
           </div>
 
+          <!-- VLM 管道详情 -->
+          <div class="detail-section" v-if="getVlmMeta(selectedEvent)">
+            <h4>VLM 分析结果</h4>
+            <el-descriptions :column="2" border size="small">
+              <el-descriptions-item label="推理模式">
+                {{ selectedEvent.meta_data.pipeline_mode === 'yolo_then_verify' ? 'YOLO + 复检' : 'YOLO + 行为分析' }}
+              </el-descriptions-item>
+              <el-descriptions-item label="VLM 模型">
+                {{ getVlmMeta(selectedEvent).model_id || '-' }}
+              </el-descriptions-item>
+              <el-descriptions-item label="Prompt">
+                {{ getVlmMeta(selectedEvent).prompt_id || '-' }}
+              </el-descriptions-item>
+              <el-descriptions-item label="耗时">
+                {{ getVlmMeta(selectedEvent).latency_ms ?? '-' }} ms
+              </el-descriptions-item>
+              <el-descriptions-item label="VLM 摘要" :span="2">
+                {{ getVlmMeta(selectedEvent).result?.summary || getVlmMeta(selectedEvent).result?.reason || '-' }}
+              </el-descriptions-item>
+              <el-descriptions-item label="告警标签" :span="2">
+                {{ formatVlmLabels(selectedEvent) }}
+              </el-descriptions-item>
+              <el-descriptions-item
+                v-if="selectedEvent.event_type === 'yolo_verify'"
+                label="复检结论"
+              >
+                <el-tag :type="getVlmMeta(selectedEvent).result?.verified ? 'success' : 'info'" size="small">
+                  {{ getVlmMeta(selectedEvent).result?.verified ? '通过' : '未通过' }}
+                </el-tag>
+                <span v-if="getVlmMeta(selectedEvent).result?.confidence != null" style="margin-left: 8px">
+                  置信度 {{ (getVlmMeta(selectedEvent).result.confidence * 100).toFixed(1) }}%
+                </span>
+              </el-descriptions-item>
+            </el-descriptions>
+            <el-table
+              v-if="getVlmFindings(selectedEvent).length"
+              :data="getVlmFindings(selectedEvent)"
+              size="small"
+              style="width: 100%; margin-top: 12px"
+            >
+              <el-table-column prop="label" label="标签" width="120" />
+              <el-table-column prop="description" label="描述" min-width="180" show-overflow-tooltip />
+              <el-table-column label="置信度" width="100">
+                <template #default="{ row }">
+                  {{ row.confidence != null ? `${(row.confidence * 100).toFixed(1)}%` : '-' }}
+                </template>
+              </el-table-column>
+              <el-table-column prop="severity" label="级别" width="90" />
+            </el-table>
+          </div>
+
           <!-- 检测目标详情 -->
           <div class="detail-section" v-if="getDetectionTargets(selectedEvent).length > 0">
             <h4>检测目标 ({{ getDetectionTargets(selectedEvent).length }}个)</h4>
@@ -527,7 +578,10 @@ export default defineComponent({
     const deviceList = ref([]);
     const eventTypes = ref([
       { label: '目标检测', value: 'object_detection' },
+      { label: 'VLM 复检', value: 'yolo_verify' },
+      { label: 'VLM 行为分析', value: 'yolo_analyze' },
       { label: '智能行为', value: 'smart_behavior' },
+      { label: '人员场景', value: 'smart_person' },
       { label: '智能人数统计', value: 'smart_counting' },
       { label: '图像分割', value: 'segmentation' },
       { label: '关键点检测', value: 'keypoint' },
@@ -583,7 +637,10 @@ export default defineComponent({
     const getEventTypeColor = (eventType) => {
       const colorMap = {
         'object_detection': 'primary',
+        'yolo_verify': 'success',
+        'yolo_analyze': 'danger',
         'smart_behavior': 'success',
+        'smart_person': 'danger',
         'smart_counting': 'warning',
         'segmentation': 'success',
         'keypoint': 'warning',
@@ -598,7 +655,10 @@ export default defineComponent({
     const getEventTypeName = (eventType) => {
       const typeMap = {
         'object_detection': '目标检测',
+        'yolo_verify': 'VLM 复检',
+        'yolo_analyze': 'VLM 行为分析',
         'smart_behavior': '智能行为',
+        'smart_person': '人员场景',
         'smart_counting': '智能人数统计',
         'segmentation': '图像分割',
         'keypoint': '关键点检测',
@@ -606,7 +666,24 @@ export default defineComponent({
         'face': '人脸识别',
         'other': '其他类型'
       }
-      return typeMap[eventType] || 'default'
+      return typeMap[eventType] || eventType || '未知类型'
+    }
+
+    const getVlmMeta = (event) => {
+      if (!event?.meta_data?.vlm) return null
+      return event.meta_data.vlm
+    }
+
+    const getVlmFindings = (event) => {
+      const vlm = getVlmMeta(event)
+      const findings = vlm?.result?.findings
+      return Array.isArray(findings) ? findings : []
+    }
+
+    const formatVlmLabels = (event) => {
+      const vlm = getVlmMeta(event)
+      const labels = vlm?.result?.alert_labels
+      return Array.isArray(labels) && labels.length ? labels.join('、') : '-'
     }
 
     // 获取状态标签
@@ -887,6 +964,16 @@ export default defineComponent({
     const getDetectionTargets = (event) => {
       if (!event) return [];
 
+      // 从 meta_data.yolo.detections 获取（VLM 管道事件）
+      if (event.meta_data?.yolo?.detections?.length > 0) {
+        return event.meta_data.yolo.detections.map(item => ({
+          class_id: item.class_id,
+          class_name: item.class_name || '未知',
+          confidence: item.confidence || 0,
+          bbox: item.bbox
+        }));
+      }
+
       // 从bounding_box获取（主要数据源）
       if (event.bounding_box && Array.isArray(event.bounding_box) && event.bounding_box.length > 0) {
         return event.bounding_box.map(item => ({
@@ -1106,6 +1193,9 @@ export default defineComponent({
       getStatusColor,
       formatDateTime,
       getDetectionTargets,
+      getVlmMeta,
+      getVlmFindings,
+      formatVlmLabels,
       formatBoundingBox,
       openImagePreview,
       handleImageError,

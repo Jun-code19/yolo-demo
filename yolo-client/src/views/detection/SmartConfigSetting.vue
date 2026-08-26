@@ -1,291 +1,226 @@
 <template>
   <div class="smart-config-setting-page">
-    <!-- 页面头部 -->
-    <div class="page-header">
+    <header class="page-header">
       <div class="header-left">
         <el-button @click="goBack" class="back-btn">
-          <el-icon>
-            <ArrowLeft />
-          </el-icon>
+          <el-icon><ArrowLeft /></el-icon>
           返回
         </el-button>
         <div class="header-info">
           <h2>智能方案设置</h2>
-          <p v-if="deviceInfo">设备：{{ deviceInfo.device_name }} ({{ deviceInfo.device_id }})</p>
+          <p v-if="deviceInfo">{{ deviceInfo.device_name }} · {{ deviceInfo.device_id }}</p>
         </div>
       </div>
       <div class="header-right">
         <el-button @click="resetConfig">重置</el-button>
-        <el-button type="primary" @click="saveConfig" :loading="saveLoading" :disabled="!canSave()">
-          保存配置
-        </el-button>
+        <el-button type="primary" @click="saveConfig" :loading="saveLoading">保存配置</el-button>
       </div>
-    </div>
+    </header>
 
-    <div class="page-content">
-      <!-- 左侧：画线设置 -->
-      <div class="left-panel">
-        <el-card class="drawing-card">
+    <div class="page-body">
+      <!-- 场景列表 -->
+      <el-card class="section-card scenario-table-card" shadow="never">
+        <template #header>
+          <div class="card-title-row card-title-row--start">
+            <el-dropdown trigger="click" @command="addScenario">
+              <el-button type="primary">添加场景</el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <template v-for="group in scenarioGroups" :key="group.key">
+                    <el-dropdown-item disabled class="menu-group-label">{{ group.label }}</el-dropdown-item>
+                    <el-dropdown-item v-for="item in group.items" :key="item.type" :command="item.type">
+                      {{ item.label }}
+                    </el-dropdown-item>
+                  </template>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
+            <!-- <span class="section-title">场景列表</span> -->
+          </div>
+        </template>
+        <div class="scenario-table-wrap">
+          <el-table
+            :data="multiConfig.scenarios"
+            row-key="id"
+            height="200"
+            table-layout="fixed"
+            highlight-current-row
+            :current-row-key="activeScenarioId"
+            empty-text="暂无场景"
+            :row-class-name="getRowClassName"
+            @row-click="(row) => selectScenario(row.id)"
+            class="scenario-table"
+          >
+            <el-table-column label="序号" align="center">
+              <template #default="{ $index }">{{ $index + 1 }}</template>
+            </el-table-column>
+            <el-table-column label="名称" align="center">
+              <template #default="{ row }">
+                <el-input v-model="row.name" class="table-input" @click.stop />
+              </template>
+            </el-table-column>
+            <el-table-column label="类型" align="center" show-overflow-tooltip>
+              <template #default="{ row }">{{ getRuleDisplayType(row) }}</template>
+            </el-table-column>
+            <el-table-column label="启用" align="center">
+              <template #default="{ row }">
+                <el-switch v-model="row.enabled" @click.stop />
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" align="center">
+              <template #default="{ row }">
+                <el-button type="danger" link @click.stop="removeScenario(row.id)">删除</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
+      </el-card>
+
+      <!-- 画线 + 参数 -->
+      <div class="workspace">
+        <el-card class="section-card preview-card" shadow="never">
           <template #header>
-            <div class="card-header">
-              <span>画线设置</span>
-              <div class="drawing-status">
-                <el-tag v-if="configForm.coordinates.behaviorType" type="success">
-                  当前模式：{{ getDrawingModeLabel() }}
-                </el-tag>
-              </div>
+            <div class="card-title-row card-title-row--start">
+              <span class="section-title">画线设置</span>
+              <el-tag v-if="activeScenario" size="small" type="success" class="section-subtitle-tag">
+                {{ activeScenario.name }}
+              </el-tag>
             </div>
           </template>
 
-          <!-- 设备画面预览和绘制区域 -->
-          <div class="image-preview-container">
-            <div v-if="imageLoading" class="loading-wrapper">
-              <el-skeleton animated :rows="8" />
-              <div class="loading-text">正在获取设备画面...</div>
-            </div>
-            <div v-else-if="imageError" class="error-wrapper">
-              <el-icon :size="64">
-                <CircleClose />
-              </el-icon>
-              <p>{{ imageError }}</p>
-              <div class="error-actions">
-                <el-button @click="loadDeviceImage" type="primary">重试</el-button>
+          <div class="preview-body">
+            <div class="image-preview-container">
+              <div v-if="imageLoading" class="state-box">
+                <el-skeleton animated :rows="5" />
               </div>
-              <div class="error-tips">
-                <p><strong>设备抓图失败的可能原因：</strong></p>
-                <ul>
-                  <li>设备离线或网络不通</li>
-                  <li>设备用户名或密码错误</li>
-                  <li>设备不支持抓图API</li>
-                  <li>后端服务未启动或配置错误</li>
-                  <li>网络防火墙阻止后端访问设备</li>
-                </ul>
-                <p>建议：检查设备连接状态和后端服务状态</p>
+              <div v-else-if="imageError" class="state-box error">
+                <p>{{ imageError }}</p>
+                <el-button type="primary" @click="loadDeviceImage">重试</el-button>
+              </div>
+              <div v-else-if="!deviceImage" class="state-box">
+                <el-icon :size="40"><VideoCamera /></el-icon>
+                <p>暂无画面</p>
+              </div>
+              <div v-else class="image-wrapper">
+                <img ref="deviceImageRef" :src="deviceImage" class="device-image" @load="onImageLoaded" />
+                <canvas
+                  ref="drawingCanvas"
+                  class="drawing-canvas"
+                  @mousedown="handleMouseDown"
+                  @mousemove="handleMouseMove"
+                  @contextmenu.prevent="handleRightClick"
+                />
               </div>
             </div>
-            <div v-else-if="!deviceImage" class="image-placeholder">
-              <el-icon :size="64">
-                <VideoCamera />
-              </el-icon>
-              <p>暂无设备画面</p>
+            <div class="draw-actions">
+              <el-button type="primary" @click="startDrawing" :disabled="!activeScenario">
+                {{ isMultiAreaOccupancy() ? '绘制区域' : '开始绘制' }}
+              </el-button>
+              <el-button v-if="isMultiAreaOccupancy() && isDrawing" @click="finishDrawingAll">
+                完成全部
+              </el-button>
+              <el-button @click="clearDrawing" :disabled="!activeScenario">清除</el-button>
+              <el-button @click="loadDeviceImage" :loading="isSnapshotLoading">刷新画面</el-button>
             </div>
-            <div v-else class="image-wrapper">
-              <img ref="deviceImageRef" :src="deviceImage" class="device-image" @load="onImageLoaded" />
-              <canvas ref="drawingCanvas" class="drawing-canvas" @mousedown="handleMouseDown"
-                @mousemove="handleMouseMove" @contextmenu.prevent="handleRightClick">
-              </canvas>
-              <div class="drawing-controls">
-                <el-button type="primary" @click="startDrawing"
-                  :disabled="!configForm.analysisType || configForm.analysisType === 'none'">
-                  {{ isMultiAreaOccupancy() ? '绘制区域' : '开始绘制' }}
-                </el-button>
-                <el-button v-if="isMultiAreaOccupancy() && isDrawing" @click="finishDrawingAll">
-                  完成全部
-                </el-button>
-                <el-button @click="clearDrawing" :disabled="configForm.analysisType === 'none'">
-                  {{ isMultiAreaOccupancy() ? '清除全部' : '清除' }}
-                </el-button>
-              </div>
-            </div>
-          </div>
-
-          <div class="drawing-hints">
-            <el-alert title="绘制提示" type="info" :closable="false"
-              v-if="configForm.analysisType && configForm.analysisType !== 'none' && isMultiAreaOccupancy()">
-              <p>• 左键点击添加顶点，右键完成当前区域</p>
-              <p>• 可连续绘制多个区域，完成后点击「完成全部」</p>
-              <p>• 各区域独立计数，报警阈值按总人数生效</p>
-            </el-alert>
-            <el-alert title="绘制提示" type="info" :closable="false"
-              v-else-if="configForm.analysisType && configForm.analysisType !== 'none'">
-              <p>• 左键点击添加顶点</p>
-              <p>• 右键点击完成绘制</p>
-              <p>• 请先在右侧选择智能方案类型</p>
-            </el-alert>
-            <el-alert title="当前配置" type="success" :closable="false" v-else-if="configForm.analysisType === 'none'">
-              <p>• 已选择"无智能方案"</p>
-              <p>• 系统将进行普通目标检测</p>
-              <p>• 无需绘制区域或拌线</p>
-            </el-alert>
-            <el-alert title="绘制提示" type="warning" :closable="false" v-else>
-              <p>• 请先在右侧选择智能方案类型</p>
-            </el-alert>
           </div>
         </el-card>
-      </div>
 
-      <!-- 右侧：智能方案设置 -->
-      <div class="right-panel">
-        <el-form :model="configForm" label-position="top" class="smart-config-form">
-          <!-- 智能方案选择 -->
-          <el-card class="config-card">
-            <template #header>
-              <div class="card-header">
-                <el-icon>
-                  <Operation />
-                </el-icon>
-                <span>智能方案</span>
-              </div>
-            </template>
-
-            <el-radio-group v-model="configForm.analysisType" @change="handleAnalysisTypeChange"
-              class="analysis-type-selector">
-              <div class="analysis-option" :class="{ active: configForm.analysisType === 'behavior' }">
-                <el-radio value="behavior">
-                  <div class="option-content">
-                    <div class="option-header">
-                      <el-icon>
-                        <VideoCamera />
-                      </el-icon>
-                      <span class="option-title">通用行为分析</span>
-                    </div>
-                    <div class="option-desc">检测区域内的行为活动和拌线穿越事件</div>
-                  </div>
-                </el-radio>
-              </div>
-              <div class="analysis-option" :class="{ active: configForm.analysisType === 'counting' }">
-                <el-radio value="counting">
-                  <div class="option-content">
-                    <div class="option-header">
-                      <el-icon>
-                        <Files />
-                      </el-icon>
-                      <span class="option-title">人数统计分析</span>
-                    </div>
-                    <div class="option-desc">统计区域内人数变化和人流通过数量</div>
-                  </div>
-                </el-radio>
-              </div>
-              <div class="analysis-option" :class="{ active: configForm.analysisType === 'none' }">
-                <el-radio value="none">
-                  <div class="option-content">
-                    <div class="option-header">
-                      <el-icon>
-                        <CircleClose />
-                      </el-icon>
-                      <span class="option-title">无智能方案</span>
-                    </div>
-                    <div class="option-desc">普通目标检测功能</div>
-                  </div>
-                </el-radio>
-              </div>
-            </el-radio-group>
-          </el-card>
-
-          <!-- 通用行为分析配置 -->
-          <el-card v-if="configForm.analysisType === 'behavior'" class="config-card">
-            <template #header>
-              <div class="card-header">
-                <el-icon>
-                  <Setting />
-                </el-icon>
-                <span>行为分析配置</span>
-              </div>
-            </template>
-
-            <!-- 检测类型选择 -->
-            <el-form-item label="检测类型">
-              <el-radio-group v-model="configForm.coordinates.behaviorType" @change="handleDetectionTypeChange">
-                <div class="type-options">
-                  <div class="type-card" :class="{ active: configForm.coordinates.behaviorType === 'area' }">
-                    <el-radio value="area">
-                      <div class="type-content">
-                        <div class="type-header">
-                          <el-icon>
-                            <Operation />
-                          </el-icon>
-                          <span class="type-title">区域检测</span>
-                        </div>
-                        <div class="type-desc">检测区域内的行为活动</div>
-                      </div>
-                    </el-radio>
-                  </div>
-                  <div class="type-card" :class="{ active: configForm.coordinates.behaviorType === 'line' }">
-                    <el-radio value="line">
-                      <div class="type-content">
-                        <div class="type-header">
-                          <el-icon>
-                            <Edit />
-                          </el-icon>
-                          <span class="type-title">拌线检测</span>
-                        </div>
-                        <div class="type-desc">检测穿越拌线的行为</div>
-                      </div>
-                    </el-radio>
-                  </div>
+        <el-card class="section-card config-card" shadow="never">
+          <template #header>
+            <span class="section-title">场景配置</span>
+          </template>
+          <div class="config-layout">
+            <div class="config-main">
+              <div class="config-block">
+                <div class="block-title">
+                  {{ activeScenario ? activeScenario.name : '场景参数' }}
+                  <span v-if="activeScenario" class="block-subtitle">{{ getRuleDisplayType(activeScenario) }}</span>
                 </div>
-              </el-radio-group>
-            </el-form-item>
 
-            <!-- 检测模式选择 -->
-            <el-form-item label="检测模式" v-if="configForm.coordinates.behaviorType">
-              <el-radio-group v-model="configForm.coordinates.behaviorSubtype">
-                <el-radio value="simple">普通检测</el-radio>
-                <el-radio value="directional">方向检测</el-radio>
-              </el-radio-group>
-            </el-form-item>
+                <el-empty v-if="!activeScenario" description="请选择场景" :image-size="56" />
 
-            <!-- 方向选择 -->
-            <el-form-item label="检测方向" v-if="configForm.coordinates.behaviorSubtype === 'directional'">
-              <el-radio-group v-model="configForm.coordinates.behaviorDirection">
-                <el-radio value="in">进入区域/线</el-radio>
-                <el-radio value="out">离开区域/线</el-radio>
-              </el-radio-group>
-            </el-form-item>
-          </el-card>
-
-          <!-- 人数统计分析配置 -->
-          <el-card v-if="configForm.analysisType === 'counting'" class="config-card">
-            <template #header>
-              <div class="card-header">
-                <el-icon>
-                  <Setting />
-                </el-icon>
-                <span>人数统计配置</span>
-              </div>
+                <el-form v-else label-position="top" class="param-form">
+            <!-- 聚集 / 离岗 / 徘徊 -->
+            <template v-if="isDurationScenario(activeScenario)">
+              <el-row :gutter="12">
+                <el-col :span="12">
+                  <el-form-item :label="activeScenario.type === 'leave_post' ? '最少在岗人数' : '人数阈值'">
+                    <el-input-number v-model="activeScenario.params.minPersons" :min="1" :max="100" controls-position="right" class="ctrl-full" />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="12">
+                  <el-form-item label="持续时长">
+                    <div class="input-with-unit">
+                      <el-input-number v-model="activeScenario.params.durationSec" :min="5" :max="3600" controls-position="right" class="ctrl-full" />
+                      <span class="unit-label">秒</span>
+                    </div>
+                  </el-form-item>
+                </el-col>
+              </el-row>
             </template>
 
-            <!-- 统计类型选择 -->
-            <el-form-item label="统计类型">
-              <el-radio-group v-model="configForm.coordinates.countingType" @change="handleCountingTypeChange">
-                <div class="type-options">
-                  <div class="type-card" :class="{ active: configForm.coordinates.countingType === 'occupancy' }">
-                    <el-radio value="occupancy">
-                      <div class="type-content">
-                        <div class="type-header">
-                          <el-icon>
-                            <Operation />
-                          </el-icon>
-                          <span class="type-title">区域人数统计</span>
-                        </div>
-                        <div class="type-desc">统计区域内当前人数</div>
-                      </div>
-                    </el-radio>
-                  </div>
-                  <div class="type-card" :class="{ active: configForm.coordinates.countingType === 'flow' }">
-                    <el-radio value="flow">
-                      <div class="type-content">
-                        <div class="type-header">
-                          <el-icon>
-                            <Edit />
-                          </el-icon>
-                          <span class="type-title">人流统计</span>
-                        </div>
-                        <div class="type-desc">统计通过的人数流量</div>
-                      </div>
-                    </el-radio>
-                  </div>
-                </div>
-              </el-radio-group>
-            </el-form-item>
+            <!-- 绊线 / 人流 -->
+            <template v-if="isLineScenario(activeScenario)">
+              <el-form-item label="检测模式">
+                <el-radio-group v-model="activeScenario.behaviorSubtype" v-if="activeScenario.type === 'behavior'">
+                  <el-radio value="simple">普通检测</el-radio>
+                  <el-radio value="directional">方向检测</el-radio>
+                </el-radio-group>
+                <el-select
+                  v-else-if="activeScenario.catalogType === 'flow_count' || activeScenario.countingType === 'flow'"
+                  v-model="activeScenario.flowDirection"
+                  class="ctrl-full"
+                >
+                  <el-option label="双向统计" value="bidirectional" />
+                  <el-option label="仅进入" value="in" />
+                  <el-option label="仅离开" value="out" />
+                </el-select>
+                <el-radio-group v-else v-model="activeScenario.behaviorSubtype">
+                  <el-radio value="simple">双向穿越</el-radio>
+                  <el-radio value="directional">单向穿越</el-radio>
+                </el-radio-group>
+              </el-form-item>
+              <el-form-item
+                v-if="activeScenario.behaviorSubtype === 'directional' || activeScenario.flowDirection === 'in' || activeScenario.flowDirection === 'out'"
+                label="穿越方向"
+              >
+                <el-radio-group
+                  v-if="activeScenario.catalogType !== 'flow_count' && activeScenario.countingType !== 'flow'"
+                  v-model="activeScenario.behaviorDirection"
+                >
+                  <el-radio value="in">进入</el-radio>
+                  <el-radio value="out">离开</el-radio>
+                </el-radio-group>
+                <el-select v-else v-model="activeScenario.flowPeriod" class="ctrl-full">
+                  <el-option label="向下为进入" value="detect_in" />
+                  <el-option label="向上为进入" value="detect_out" />
+                </el-select>
+              </el-form-item>
+            </template>
 
-            <!-- 区域人数统计配置 -->
-            <div v-if="configForm.coordinates.countingType === 'occupancy'" class="counting-config">
-              <el-row :gutter="20">
+            <!-- 区域入侵 -->
+            <template v-if="activeScenario.catalogType === 'area_intrusion'">
+              <el-form-item label="检测模式">
+                <el-radio-group v-model="activeScenario.behaviorSubtype">
+                  <el-radio value="simple">进入/离开</el-radio>
+                  <el-radio value="directional">指定方向</el-radio>
+                </el-radio-group>
+              </el-form-item>
+              <el-form-item v-if="activeScenario.behaviorSubtype === 'directional'" label="触发方向">
+                <el-radio-group v-model="activeScenario.behaviorDirection">
+                  <el-radio value="in">进入区域</el-radio>
+                  <el-radio value="out">离开区域</el-radio>
+                </el-radio-group>
+              </el-form-item>
+            </template>
+
+            <!-- 区域人数 -->
+            <template v-if="isOccupancyScenario(activeScenario)">
+              <el-row :gutter="12">
                 <el-col :span="12">
                   <el-form-item label="统计间隔">
                     <div class="input-with-unit">
-                      <el-input-number v-model="configForm.coordinates.countingInterval" :min="1" :max="60" :step="1" />
+                      <el-input-number v-model="activeScenario.countingInterval" :min="1" :max="60" controls-position="right" class="ctrl-full" />
                       <span class="unit-label">秒</span>
                     </div>
                   </el-form-item>
@@ -293,18 +228,17 @@
                 <el-col :span="12">
                   <el-form-item label="最大容量">
                     <div class="input-with-unit">
-                      <el-input-number v-model="configForm.coordinates.maxCapacity" :min="1" :max="1000" :step="1" />
+                      <el-input-number v-model="activeScenario.maxCapacity" :min="1" :max="1000" controls-position="right" class="ctrl-full" />
                       <span class="unit-label">人</span>
                     </div>
                   </el-form-item>
                 </el-col>
               </el-row>
-
-              <el-row :gutter="20">
+              <el-row :gutter="12">
                 <el-col :span="12">
                   <el-form-item label="平滑窗口">
                     <div class="input-with-unit">
-                      <el-input-number v-model="configForm.coordinates.smoothWindow" :min="1" :max="10" :step="1" />
+                      <el-input-number v-model="activeScenario.smoothWindow" :min="1" :max="10" controls-position="right" class="ctrl-full" />
                       <span class="unit-label">帧</span>
                     </div>
                   </el-form-item>
@@ -312,33 +246,31 @@
                 <el-col :span="12">
                   <el-form-item label="下降延迟">
                     <div class="input-with-unit">
-                      <el-input-number v-model="configForm.coordinates.decreaseHoldFrames" :min="0" :max="10" :step="1" />
+                      <el-input-number v-model="activeScenario.decreaseHoldFrames" :min="0" :max="10" controls-position="right" class="ctrl-full" />
                       <span class="unit-label">次</span>
                     </div>
                   </el-form-item>
                 </el-col>
               </el-row>
-
-              <el-row :gutter="20">
+              <el-row :gutter="12">
                 <el-col :span="12">
                   <el-form-item label="校正偏移">
                     <div class="input-with-unit">
-                      <el-input-number v-model="configForm.coordinates.countBias" :min="-50" :max="50" :step="1" />
+                      <el-input-number v-model="activeScenario.countBias" :min="-50" :max="50" controls-position="right" class="ctrl-full" />
                       <span class="unit-label">人</span>
                     </div>
                   </el-form-item>
                 </el-col>
                 <el-col :span="12">
                   <el-form-item label="校正系数">
-                    <el-input-number v-model="configForm.coordinates.countScale" :min="0.5" :max="2" :step="0.05" :precision="2" style="width: 100%;" />
+                    <el-input-number v-model="activeScenario.countScale" :min="0.5" :max="2" :step="0.05" :precision="2" controls-position="right" class="ctrl-full" />
                   </el-form-item>
                 </el-col>
               </el-row>
-
-              <el-row :gutter="20">
+              <el-row :gutter="12">
                 <el-col :span="12">
                   <el-form-item label="判定点">
-                    <el-select v-model="configForm.coordinates.countPointMode" style="width: 100%;">
+                    <el-select v-model="activeScenario.countPointMode" class="ctrl-full">
                       <el-option label="脚点（推荐）" value="foot" />
                       <el-option label="框中心" value="center" />
                       <el-option label="底边三点" value="bottom_edge" />
@@ -348,196 +280,116 @@
                 <el-col :span="12">
                   <el-form-item label="稳定帧数">
                     <div class="input-with-unit">
-                      <el-input-number v-model="configForm.coordinates.countMinHits" :min="1" :max="10" :step="1" />
+                      <el-input-number v-model="activeScenario.countMinHits" :min="1" :max="10" controls-position="right" class="ctrl-full" />
                       <span class="unit-label">帧</span>
                     </div>
                   </el-form-item>
                 </el-col>
               </el-row>
-
-              <div class="form-hint">
-                平滑窗口用于抑制单帧漏检抖动；下降延迟表示人数减少需连续确认的次数。校正偏移/系数用于与现场人工点数对齐。
-              </div>
-
-              <div v-if="configForm.coordinates.occupancyAreas?.length" class="occupancy-area-list">
-                <div class="area-list-title">已绘制区域（{{ configForm.coordinates.occupancyAreas.length }}）</div>
-                <div
-                  v-for="(area, index) in configForm.coordinates.occupancyAreas"
-                  :key="area.id"
-                  class="occupancy-area-item"
-                >
+              <el-form-item label="超限报警">
+                <el-switch v-model="activeScenario.enableAlert" />
+              </el-form-item>
+              <el-form-item v-if="activeScenario.enableAlert" label="报警阈值">
+                <div class="input-with-unit">
+                  <el-input-number v-model="activeScenario.alertThreshold" :min="1" :max="1000" controls-position="right" />
+                  <span class="unit-label">人</span>
+                </div>
+              </el-form-item>
+              <div v-if="activeScenario.occupancyAreas?.length" class="occupancy-area-list">
+                <div class="area-list-title">已绘制区域（{{ activeScenario.occupancyAreas.length }}）</div>
+                <div v-for="(area, index) in activeScenario.occupancyAreas" :key="area.id" class="occupancy-area-item">
                   <span class="area-color-dot" :style="{ backgroundColor: getAreaColor(index).stroke }"></span>
-                  <el-input
-                    v-model="area.name"
-                    size="small"
-                    :placeholder="formatOccupancyAreaName(index + 1)"
-                    class="area-name-input"
-                  />
-                  <span class="area-point-count">{{ area.points.length }} 个顶点</span>
-                  <el-button type="danger" link size="small" @click="removeOccupancyArea(index)">删除</el-button>
+                  <el-input v-model="area.name" class="area-name-input" />
+                  <el-button type="danger" link @click="removeOccupancyArea(index)">删除</el-button>
                 </div>
               </div>
-            </div>
-
-            <!-- 人流统计配置 -->
-            <div v-if="configForm.coordinates.countingType === 'flow'" class="counting-config">
-              <el-row :gutter="20">
-                <el-col :span="12">
-                  <el-form-item label="统计方向">
-                    <el-select v-model="configForm.coordinates.flowDirection" style="width: 100%">
-                      <el-option label="双向统计" value="bidirectional" />
-                      <el-option label="仅进入" value="in" />
-                      <el-option label="仅离开" value="out" />
-                    </el-select>
-                  </el-form-item>
-                </el-col>
-                <el-col :span="12">
-                  <el-form-item label="检测方向" >
-                    <template #label>
-                      <span>检测方向 </span>
-                      <el-tooltip effect="dark" content="简单的Y坐标判断，默认向下为进，向上为出" placement="top">
-                        <el-icon><InfoFilled /></el-icon>
-                      </el-tooltip>
-                    </template>
-                    <el-select v-model="configForm.coordinates.flowPeriod" style="width: 100%">
-                      <el-option label="进入" value="detect_in" />
-                      <el-option label="离开" value="detect_out" />                     
-                    </el-select>
-                  </el-form-item>                  
-                </el-col>
-              </el-row>
-            </div>
-
-            <!-- 设置绘制类型提示 -->
-            <div class="auto-draw-type">
-              <el-alert :title="getCountingDrawingTypeHint()" type="info" :closable="false" show-icon />
-            </div>
-          </el-card>
-
-          <!-- 高级设置 -->
-          <el-card v-if="configForm.analysisType" class="config-card">
-            <template #header>
-              <div class="card-header">
-                <el-icon>
-                  <Setting />
-                </el-icon>
-                <span>高级设置</span>
-              </div>
             </template>
+                </el-form>
+              </div>
 
-            <el-row :gutter="20">
-              <el-col :span="10">
-                <el-form-item label="推送标签">
-                  <el-input v-model="configForm.coordinates.pushLabel" placeholder="请输入推送标签" maxlength="50"
-                    show-word-limit />
-                </el-form-item>
-              </el-col>
-              <el-col :span="14">
-                <el-form-item label="推送间隔(秒)">
-                  <el-input-number v-model="configForm.coordinates.alarm_interval" :min="0" :max="3600" :step="1"
-                    style="width: 50%;" />
-                </el-form-item>
-              </el-col>
-            </el-row>
-
-            <div class="form-hint">
-              推送标签将在事件数据中标识该智能方案的来源；推送间隔为事件推送的间隔时间，单位为秒。
+              <div class="config-block config-block-muted">
+                <div class="block-title">推送设置</div>
+                <el-form label-position="top" class="param-form">
+                  <el-row :gutter="12">
+                    <el-col :span="14">
+                      <el-form-item label="推送标签">
+                        <el-input v-model="multiConfig.pushLabel" placeholder="可选" maxlength="50" show-word-limit />
+                      </el-form-item>
+                    </el-col>
+                    <el-col :span="10">
+                      <el-form-item label="推送间隔">
+                        <div class="input-with-unit">
+                          <el-input-number v-model="multiConfig.alarm_interval" :min="0" :max="3600" controls-position="right" class="ctrl-full" />
+                          <span class="unit-label">秒</span>
+                        </div>
+                      </el-form-item>
+                    </el-col>
+                  </el-row>
+                </el-form>
+              </div>
             </div>
-
-            <el-form-item label="报警设置" v-if="configForm.analysisType === 'counting'">
-              <el-switch v-model="configForm.coordinates.enableAlert" active-text="启用报警" inactive-text="关闭报警" />
-            </el-form-item>
-
-            <div v-if="configForm.coordinates.enableAlert" class="alert-config">
-              <el-row :gutter="20">
-                <el-col :span="12">
-                  <el-form-item label="报警阈值">
-                    <div class="input-with-unit">
-                      <el-input-number v-model="configForm.coordinates.alertThreshold" :min="1" :max="1000" />
-                      <span class="unit-label">人</span>
-                    </div>
-                  </el-form-item>
-                </el-col>
-              </el-row>
-            </div>
-
-          </el-card>
-        </el-form>
+          </div>
+        </el-card>
       </div>
     </div>
   </div>
 </template>
 
 <script>
-import { defineComponent, ref, reactive, onMounted, onUnmounted } from 'vue';
+import { defineComponent, ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { ElMessage } from 'element-plus';
-import { ArrowLeft, Operation, Setting, Edit, VideoCamera, Files, CircleClose, InfoFilled } from '@element-plus/icons-vue';
+import { ArrowLeft, VideoCamera } from '@element-plus/icons-vue';
 import deviceApi from '@/api/device';
 import { detectionConfigApi } from '@/api/detection';
+import {
+  SCENARIO_GROUPS,
+  createScenario,
+  migrateAreaCoordinates,
+  buildAreaCoordinatesPayload,
+  getRuleDisplayType,
+  shouldCloseScenarioArea,
+  validateScenario,
+  createDefaultRuleName,
+  isDurationScenario,
+  isLineScenario,
+  isOccupancyScenario,
+} from '@/utils/smartScenarios';
 
 export default defineComponent({
   name: 'SmartConfigSetting',
-  components: {
-    ArrowLeft,
-    Operation,
-    Setting,
-    Edit,
-    VideoCamera,
-    Files,
-    CircleClose,
-    InfoFilled
-  },
+  components: { ArrowLeft, VideoCamera },
   setup() {
     const router = useRouter();
     const route = useRoute();
-
-    // 获取路由参数
     const configId = route.params.configId;
 
-    // 响应式数据
     const saveLoading = ref(false);
     const deviceInfo = ref(null);
     const deviceList = ref([]);
+    const activeScenarioId = ref(null);
+    const scenarioGroups = SCENARIO_GROUPS;
 
-    // 配置表单数据
-    const configForm = reactive({
-      analysisType: null,
-      coordinates: {
-        behaviorType: null,
-        points: [],
-        behaviorSubtype: "simple",
-        behaviorDirection: "in",
-        countingType: null,
-        occupancyAreas: [],
-        countingInterval: 5,
-        maxCapacity: 100,
-        smoothWindow: 3,
-        decreaseHoldFrames: 2,
-        countBias: 0,
-        countScale: 1,
-        countPointMode: 'foot',
-        countMinHits: 3,
-        flowDirection: 'bidirectional',
-        flowPeriod: 'detect_in',
-        alarm_interval: 0,
-        pushLabel: '',
-        enableAlert: false,
-        alertThreshold: 50,
-      }
+    const multiConfig = reactive({
+      version: 2,
+      alarm_interval: 15,
+      pushLabel: '',
+      scenarios: [],
     });
 
-    // 图片预览相关
+    const activeScenario = computed(() =>
+      multiConfig.scenarios.find((item) => item.id === activeScenarioId.value) || null
+    );
+
     const imageLoading = ref(false);
     const imageError = ref(null);
     const deviceImage = ref(null);
     const deviceImageRef = ref(null);
     const drawingCanvas = ref(null);
     let canvasResizeObserver = null;
-
-    // 绘制相关状态
     const isDrawing = ref(false);
     const points = ref([]);
+    const isSnapshotLoading = ref(false);
 
     const AREA_COLORS = [
       { stroke: '#00ff00', fill: 'rgba(0, 255, 0, 0.15)' },
@@ -547,311 +399,147 @@ export default defineComponent({
       { stroke: '#aa44ff', fill: 'rgba(170, 68, 255, 0.15)' },
     ];
 
-    const isMultiAreaOccupancy = () => {
-      return configForm.analysisType === 'counting' && configForm.coordinates.countingType === 'occupancy';
-    };
+    const isMultiAreaOccupancy = () => isOccupancyScenario(activeScenario.value);
 
     const createAreaId = () => `area-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-
     const getOccupancyAreaDevicePrefix = () => deviceInfo.value?.device_id || 'device';
-
     const formatOccupancyAreaName = (index) => `${getOccupancyAreaDevicePrefix()}-${index}`;
 
     const getNextOccupancyAreaIndex = () => {
       const prefix = getOccupancyAreaDevicePrefix();
-      const areas = configForm.coordinates.occupancyAreas || [];
+      const areas = activeScenario.value?.occupancyAreas || [];
       const usedIndexes = new Set();
-
       for (const area of areas) {
         const name = area?.name;
-        if (typeof name !== 'string' || !name.startsWith(`${prefix}-`)) {
-          continue;
-        }
-        const suffix = parseInt(name.slice(prefix.length + 1), 10);
-        if (!Number.isNaN(suffix) && suffix > 0) {
-          usedIndexes.add(suffix);
+        if (typeof name === 'string' && name.startsWith(`${prefix}-`)) {
+          const suffix = parseInt(name.slice(prefix.length + 1), 10);
+          if (!Number.isNaN(suffix) && suffix > 0) usedIndexes.add(suffix);
         }
       }
-
       let next = 1;
-      while (usedIndexes.has(next)) {
-        next += 1;
-      }
+      while (usedIndexes.has(next)) next += 1;
       return next;
     };
 
     const getAreaColor = (index) => AREA_COLORS[index % AREA_COLORS.length];
 
-    const normalizeOccupancyAreas = (coordinates) => {
-      if (!coordinates || coordinates.countingType !== 'occupancy') return;
-      if (Array.isArray(coordinates.occupancyAreas) && coordinates.occupancyAreas.length > 0) {
-        return;
-      }
-      if (coordinates.points && coordinates.points.length >= 3) {
-        coordinates.occupancyAreas = [{
-          id: createAreaId(),
-          name: formatOccupancyAreaName(1),
-          points: [...coordinates.points]
-        }];
-      } else if (!coordinates.occupancyAreas) {
-        coordinates.occupancyAreas = [];
+    const normalizeOccupancyAreas = (scenario) => {
+      if (!scenario || scenario.countingType !== 'occupancy') return;
+      if (Array.isArray(scenario.occupancyAreas) && scenario.occupancyAreas.length > 0) return;
+      if (scenario.points?.length >= 3) {
+        scenario.occupancyAreas = [{ id: createAreaId(), name: formatOccupancyAreaName(1), points: [...scenario.points] }];
+      } else if (!scenario.occupancyAreas) {
+        scenario.occupancyAreas = [];
       }
     };
 
     const syncOccupancyPoints = () => {
-      if (!isMultiAreaOccupancy()) return;
-      const areas = configForm.coordinates.occupancyAreas || [];
-      configForm.coordinates.points = areas.length > 0 ? [...areas[0].points] : [];
+      if (!isMultiAreaOccupancy() || !activeScenario.value) return;
+      const areas = activeScenario.value.occupancyAreas || [];
+      activeScenario.value.points = areas.length > 0 ? [...areas[0].points] : [];
     };
 
-    const getOccupancyAreaCount = () => (configForm.coordinates.occupancyAreas || []).length;
+    const getOccupancyAreaCount = () => (activeScenario.value?.occupancyAreas || []).length;
 
-    // 设备抓图相关
-    const isSnapshotLoading = ref(false);
+    const getRowClassName = ({ row }) => (row.id === activeScenarioId.value ? 'is-active-row' : '');
 
-    // 页面操作方法
-    const goBack = () => {
-      router.go(-1);
+    const selectScenario = (scenarioId) => {
+      activeScenarioId.value = scenarioId;
+      points.value = [];
+      isDrawing.value = false;
+      redrawCanvas();
     };
+
+    const addScenario = (type) => {
+      try {
+        const scenario = createScenario(type);
+        scenario.name = createDefaultRuleName(multiConfig.scenarios.length + 1);
+        multiConfig.scenarios.push(scenario);
+        selectScenario(scenario.id);
+      } catch (error) {
+        ElMessage.warning(error.message);
+      }
+    };
+
+    const removeScenario = (scenarioId) => {
+      const index = multiConfig.scenarios.findIndex((item) => item.id === scenarioId);
+      if (index === -1) return;
+      multiConfig.scenarios.splice(index, 1);
+      if (activeScenarioId.value === scenarioId) {
+        activeScenarioId.value = multiConfig.scenarios[0]?.id || null;
+      }
+      redrawCanvas();
+    };
+
+    const goBack = () => router.go(-1);
 
     const resetConfig = () => {
-      configForm.analysisType = null;
-      configForm.coordinates = {
-        behaviorType: null,
-        points: [],
-        behaviorSubtype: "simple",
-        behaviorDirection: "in",
-        countingType: null,
-        occupancyAreas: [],
-        countingInterval: 5,
-        maxCapacity: 100,
-        smoothWindow: 3,
-        decreaseHoldFrames: 2,
-        countBias: 0,
-        countScale: 1,
-        countPointMode: 'foot',
-        countMinHits: 3,
-        flowDirection: 'bidirectional',
-        flowPeriod: 'detect_in',
-        alarm_interval: 0,
-        pushLabel: '',
-        enableAlert: false,
-        alertThreshold: 50,
-      };
+      multiConfig.alarm_interval = 15;
+      multiConfig.pushLabel = '';
+      multiConfig.scenarios = [];
+      activeScenarioId.value = null;
       clearDrawing();
-      ElMessage.success('配置已重置');
+      ElMessage.success('已重置');
+    };
+
+    const syncOccupancyPointsForScenario = (scenario) => {
+      const areas = scenario.occupancyAreas || [];
+      scenario.points = areas.length > 0 ? [...areas[0].points] : [];
     };
 
     const saveConfig = async () => {
       try {
-        if (!configForm.analysisType) {
-          throw new Error('请选择智能方案类型');
-        }
-
-        // 如果选择了"无智能方案"，直接保存空配置
-        if (configForm.analysisType === 'none') {
-          saveLoading.value = true;
-
-          await detectionConfigApi.updateConfig(configId, {
-            area_coordinates: {
-              analysisType: null,
-              points: [],
-              behaviorType: null,
-              countingType: null,
-              behaviorSubtype: 'simple',
-              behaviorDirection: 'in',
-              countingInterval: 5,
-              maxCapacity: 100,
-              smoothWindow: 3,
-              decreaseHoldFrames: 2,
-              countBias: 0,
-              countScale: 1,
-              countPointMode: 'foot',
-              countMinHits: 3,
-              flowDirection: 'bidirectional',
-              flowPeriod: 'detect_in',
-              alarm_interval: configForm.coordinates.alarm_interval || 0,
-              pushLabel: configForm.coordinates.pushLabel || '',
-              enableAlert: false,
-              alertThreshold: 50
-            }
-          });
-
-          ElMessage.success('已清空智能方案配置');
-          goBack();
-          return;
-        }
-
-        // 智能方案的验证逻辑
-        if (isMultiAreaOccupancy()) {
-          normalizeOccupancyAreas(configForm.coordinates);
-          const areas = configForm.coordinates.occupancyAreas || [];
-          if (areas.length === 0) {
-            throw new Error('请至少绘制一个统计区域');
+        const enabledScenarios = multiConfig.scenarios.filter((item) => item.enabled !== false);
+        for (let i = 0; i < enabledScenarios.length; i += 1) {
+          if (isOccupancyScenario(enabledScenarios[i])) {
+            normalizeOccupancyAreas(enabledScenarios[i]);
+            syncOccupancyPointsForScenario(enabledScenarios[i]);
           }
-          for (let i = 0; i < areas.length; i++) {
-            if (!areas[i].points || areas[i].points.length < 3) {
-              throw new Error(`${areas[i].name || formatOccupancyAreaName(i + 1)}无效（至少需要3个点）`);
-            }
-          }
-          syncOccupancyPoints();
-        } else if (!configForm.coordinates.points || configForm.coordinates.points.length === 0) {
-          throw new Error('请绘制有效的区域或拌线');
+          validateScenario(enabledScenarios[i], i);
         }
-
-        if (configForm.analysisType === 'behavior') {
-          if (!configForm.coordinates.behaviorType) {
-            throw new Error('请选择检测类型（区域检测或拌线检测）');
-          }
-        } else if (configForm.analysisType === 'counting') {
-          if (!configForm.coordinates.countingType) {
-            throw new Error('请选择统计类型（区域人数统计或人流统计）');
-          }
-        }
-
-        if (!isMultiAreaOccupancy()) {
-          const shouldClose = getShouldCloseArea();
-          const minPoints = shouldClose ? 3 : 2;
-          if (configForm.coordinates.points.length < minPoints) {
-            const typeLabel = shouldClose ? '区域' : '拌线';
-            throw new Error(`请绘制有效的${typeLabel}（至少需要${minPoints}个点）`);
-          }
-        }
-
         saveLoading.value = true;
-
-        const configData = {
-          ...configForm.coordinates,
-          analysisType: configForm.analysisType,
-        };
-
+        const payload = buildAreaCoordinatesPayload(multiConfig);
         await detectionConfigApi.updateConfig(configId, {
-          area_coordinates: configData
+          area_coordinates: payload.scenarios.length ? payload : {
+            version: 2, scenarios: [], alarm_interval: payload.alarm_interval, pushLabel: payload.pushLabel,
+          },
         });
-
-        ElMessage.success('智能方案配置保存成功');
+        ElMessage.success('保存成功');
         goBack();
       } catch (error) {
-        ElMessage.error(`保存失败: ${error.message}`);
+        ElMessage.error(error.message || '保存失败');
       } finally {
         saveLoading.value = false;
       }
     };
 
-    const canSave = () => {
-      if (!configForm.analysisType) return false;
+    const getShouldCloseArea = () => shouldCloseScenarioArea(activeScenario.value);
 
-      // 如果选择了"无智能方案"，总是可以保存
-      if (configForm.analysisType === 'none') {
-        return true;
-      }
-
-      if (configForm.analysisType === 'behavior') {
-        return configForm.coordinates.behaviorType && configForm.coordinates.points.length > 0;
-      } else if (configForm.analysisType === 'counting') {
-        if (!configForm.coordinates.countingType) return false;
-        if (configForm.coordinates.countingType === 'occupancy') {
-          return getOccupancyAreaCount() > 0;
-        }
-        return configForm.coordinates.points.length > 0;
-      }
-
-      return false;
-    };
-
-    // 辅助方法
-    const getShouldCloseArea = () => {
-      if (configForm.analysisType === 'none') {
-        return false;
-      } else if (configForm.analysisType === 'behavior') {
-        // 行为分析：区域闭合，拌线不闭合
-        return configForm.coordinates.behaviorType === 'area';
-      } else if (configForm.analysisType === 'counting') {
-        // 人数统计：区域人数统计闭合，人流统计不闭合
-        return configForm.coordinates.countingType === 'occupancy';
-      }
-      return false;
-    };
-
-    const getDrawingModeLabel = () => {
-      if (!configForm.coordinates.behaviorType) return '';
-
-      const typeLabel = configForm.coordinates.behaviorType === 'area' ? '区域' : '拌线';
-      const subtypeLabel = configForm.coordinates.behaviorSubtype === 'directional' ? '方向检测' : '普通检测';
-
-      return `${typeLabel}${subtypeLabel}`;
-    };
-
-    const getCountingDrawingTypeHint = () => {
-      if (configForm.coordinates.countingType === 'occupancy') {
-        return '区域人数统计可绘制多个封闭区域，各区域独立计数，报警阈值按总人数生效';
-      } else if (configForm.coordinates.countingType === 'flow') {
-        return '人流统计需要绘制拌线，用于统计穿越该线的人数';
-      }
-      return '';
-    };
-
-    // 事件处理方法
-    const handleAnalysisTypeChange = (type) => {
+    const handleDetectionTypeChange = () => {
       clearDrawing();
-      configForm.coordinates.behaviorType = null;
-      configForm.coordinates.countingType = null;
-      configForm.coordinates.occupancyAreas = [];
-      configForm.coordinates.behaviorSubtype = 'simple';
-      configForm.coordinates.behaviorDirection = 'in';
-      configForm.coordinates.enableAlert = false;
-
-      if (type === 'counting') {
-        configForm.coordinates.countingType = 'occupancy';
-        configForm.coordinates.behaviorType = 'area';
-      } else if (type === 'none') {
-        // 清空所有智能分析相关设置
-        configForm.coordinates.points = [];
-        configForm.coordinates.occupancyAreas = [];
-        // configForm.coordinates.pushLabel = '';
-        // configForm.coordinates.alarm_interval = 0;
-        configForm.coordinates.alertThreshold = 50;
-      }
+      if (!activeScenario.value) return;
+      activeScenario.value.behaviorSubtype = 'simple';
+      activeScenario.value.behaviorDirection = 'in';
+      activeScenario.value.points = [];
     };
 
-    const handleDetectionTypeChange = (type) => {
+    const handleCountingTypeChange = () => {
       clearDrawing();
-      configForm.coordinates.behaviorSubtype = 'simple';
-      configForm.coordinates.behaviorDirection = 'in';
+      if (!activeScenario.value) return;
+      activeScenario.value.occupancyAreas = [];
+      activeScenario.value.points = [];
     };
 
-    const handleCountingTypeChange = (type) => {
-      clearDrawing();
-      configForm.coordinates.occupancyAreas = [];
-      if (type === 'occupancy') {
-        configForm.coordinates.behaviorType = 'area';
-      } else if (type === 'flow') {
-        configForm.coordinates.behaviorType = 'line';
-      }
-    };
-
-    // 计算 object-fit: contain 下图片的真实显示区域
     const getImageDisplayRect = () => {
       const image = deviceImageRef.value;
       const wrapper = image?.parentElement;
-      if (!image || !wrapper || !image.naturalWidth || !image.naturalHeight) {
-        return null;
-      }
-
+      if (!image || !wrapper || !image.naturalWidth || !image.naturalHeight) return null;
       const containerWidth = wrapper.clientWidth;
       const containerHeight = wrapper.clientHeight;
-      if (!containerWidth || !containerHeight) {
-        return null;
-      }
-
+      if (!containerWidth || !containerHeight) return null;
       const imageRatio = image.naturalWidth / image.naturalHeight;
       const containerRatio = containerWidth / containerHeight;
-
-      let displayWidth;
-      let displayHeight;
-      let offsetX;
-      let offsetY;
-
+      let displayWidth, displayHeight, offsetX, offsetY;
       if (imageRatio > containerRatio) {
         displayWidth = containerWidth;
         displayHeight = containerWidth / imageRatio;
@@ -863,410 +551,52 @@ export default defineComponent({
         offsetX = (containerWidth - displayWidth) / 2;
         offsetY = 0;
       }
-
       return { displayWidth, displayHeight, offsetX, offsetY };
     };
 
     const syncCanvasLayout = () => {
       if (!drawingCanvas.value || !deviceImageRef.value) return false;
-
       const rect = getImageDisplayRect();
       if (!rect) return false;
-
       const canvas = drawingCanvas.value;
       const { displayWidth, displayHeight, offsetX, offsetY } = rect;
-      const devicePixelRatio = window.devicePixelRatio || 1;
-
+      const dpr = window.devicePixelRatio || 1;
       canvas.style.left = `${offsetX}px`;
       canvas.style.top = `${offsetY}px`;
       canvas.style.width = `${displayWidth}px`;
       canvas.style.height = `${displayHeight}px`;
-
-      canvas.width = Math.round(displayWidth * devicePixelRatio);
-      canvas.height = Math.round(displayHeight * devicePixelRatio);
-
+      canvas.width = Math.round(displayWidth * dpr);
+      canvas.height = Math.round(displayHeight * dpr);
       const ctx = canvas.getContext('2d');
-      ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
-      ctx.imageSmoothingEnabled = false;
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       return true;
     };
 
-    const refreshCanvasDrawing = () => {
-      if (syncCanvasLayout()) {
-        redrawCanvas();
-      }
-    };
+    const refreshCanvasDrawing = () => { if (syncCanvasLayout()) redrawCanvas(); };
 
     const setupCanvasResizeObserver = () => {
-      if (canvasResizeObserver) {
-        canvasResizeObserver.disconnect();
-        canvasResizeObserver = null;
-      }
-
+      if (canvasResizeObserver) { canvasResizeObserver.disconnect(); canvasResizeObserver = null; }
       const wrapper = deviceImageRef.value?.parentElement;
-      if (!wrapper || typeof ResizeObserver === 'undefined') {
-        return;
-      }
-
-      canvasResizeObserver = new ResizeObserver(() => {
-        refreshCanvasDrawing();
-      });
+      if (!wrapper || typeof ResizeObserver === 'undefined') return;
+      canvasResizeObserver = new ResizeObserver(() => refreshCanvasDrawing());
       canvasResizeObserver.observe(wrapper);
     };
 
     const onImageLoaded = () => {
-      requestAnimationFrame(() => {
-        refreshCanvasDrawing();
-        setupCanvasResizeObserver();
-      });
+      requestAnimationFrame(() => { refreshCanvasDrawing(); setupCanvasResizeObserver(); });
     };
 
-    const getDeviceImageUrl = (ipAddress, channel) => {
-      const imagePath = `storage/devices/${ipAddress}_ch${channel}.jpg`;
-      return `/api/v2/data-listeners/images/${encodeURIComponent(imagePath)}`;
-    };
+    const getDeviceImageUrl = (ipAddress, channel) =>
+      `/api/v2/data-listeners/images/${encodeURIComponent(`storage/devices/${ipAddress}_ch${channel}.jpg`)}`;
 
     const loadDeviceImage = async () => {
-      if (!deviceInfo.value) {
-        imageError.value = '设备信息不完整';
-        return;
-      }
-
-      imageLoading.value = true;
-      imageError.value = null;
-      deviceImage.value = null;
-
-      const ipAddress = deviceInfo.value.ip_address;
-      const channel = deviceInfo.value.channel;
-      if (!ipAddress) {
-        imageLoading.value = false;
-        imageError.value = '无法获取设备IP地址';
-        return;
-      }
-
-      // 使用设备API实时抓图
-      loadDeviceSnapshot(ipAddress, channel);
+      if (!deviceInfo.value) return;
+      const ipAddress = deviceInfo.value.ip_address || deviceInfo.value.device_ip;
+      const channel = deviceInfo.value.channel || 1;
+      if (!ipAddress) { imageError.value = '设备 IP 不可用'; return; }
+      await loadDeviceSnapshot(ipAddress, channel);
     };
 
-    // 通过设备API实时抓图
-    const loadDeviceSnapshot = async (ipAddress, channel) => {
-      try {
-        isSnapshotLoading.value = true;
-        imageLoading.value = true;
-        imageError.value = null;
-
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 5000); // 5秒超时
-
-        // 通过后端API获取设备抓图，避免CORS问题
-        const response = await fetch('/api/v1/devices/snapshot', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            device_id: deviceInfo.value.device_id,
-            ip_address: ipAddress,
-            device_type: deviceInfo.value.device_type,
-            channel: channel || 1,
-            username: deviceInfo.value.username,
-            password: deviceInfo.value.password
-          }),
-          signal: controller.signal // 添加 abort signal
-        });
-
-        clearTimeout(timeoutId);
-
-        if (response.ok) {
-
-          // 获取图像数据并转换为blob URL
-          const blob = await response.blob();
-          const imageUrl = window.URL.createObjectURL(blob);
-
-          // 更新设备图片
-          deviceImage.value = imageUrl;
-          imageLoading.value = false;
-          imageError.value = null;
-
-          ElMessage.success('设备画面刷新成功');
-        } else {
-          const errorData = await response.json().catch(() => ({}));
-          throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
-        }
-      } catch (error) {
-
-        if (error.name === 'AbortError') {
-          ElMessage.warning('获取设备实时抓图超时，尝试加载本地快照');
-        } else {
-          ElMessage.error(`获取设备实时抓图失败: ${error.message}，尝试加载本地快照`);
-        }
-        // 尝试加载本地快照
-        const fallbackImageUrl = getDeviceImageUrl(ipAddress, channel);
-        const img = new Image();
-
-        img.onload = () => {
-          deviceImage.value = fallbackImageUrl;
-          imageLoading.value = false;
-          imageError.value = null; // 清除之前的错误信息
-        };
-
-        img.onerror = () => {
-          imageLoading.value = false;
-          imageError.value = '设备画面图片不存在，请先进行设备预览以生成画面快照';
-        };
-
-        img.src = `${fallbackImageUrl}?t=${Date.now()}`;
-
-      } finally {
-        isSnapshotLoading.value = false;
-      }
-    };
-
-    const drawPolygonShape = (ctx, polygonPoints, displayWidth, displayHeight, options = {}) => {
-      const {
-        strokeStyle = '#00ff00',
-        fillStyle = 'rgba(0, 255, 0, 0.15)',
-        shouldClose = false,
-        showVertices = true,
-        isPreview = false
-      } = options;
-
-      if (!polygonPoints || polygonPoints.length === 0) return;
-
-      ctx.save();
-      ctx.strokeStyle = strokeStyle;
-      ctx.lineWidth = isPreview ? 1 : 2;
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-
-      if (polygonPoints.length > 1) {
-        ctx.beginPath();
-        const firstPoint = polygonPoints[0];
-        ctx.moveTo(
-          Math.round(firstPoint.x * displayWidth) + 0.5,
-          Math.round(firstPoint.y * displayHeight) + 0.5
-        );
-
-        for (let i = 1; i < polygonPoints.length; i++) {
-          const point = polygonPoints[i];
-          ctx.lineTo(
-            Math.round(point.x * displayWidth) + 0.5,
-            Math.round(point.y * displayHeight) + 0.5
-          );
-        }
-
-        if (shouldClose && polygonPoints.length >= 3) {
-          ctx.closePath();
-          ctx.fillStyle = fillStyle;
-          ctx.fill();
-        }
-
-        ctx.stroke();
-      }
-
-      if (showVertices) {
-        polygonPoints.forEach(point => {
-          const x = Math.round(point.x * displayWidth);
-          const y = Math.round(point.y * displayHeight);
-
-          ctx.beginPath();
-          ctx.arc(x, y, 4, 0, Math.PI * 2);
-          ctx.fillStyle = '#ff4444';
-          ctx.fill();
-          ctx.strokeStyle = '#ffffff';
-          ctx.lineWidth = 1;
-          ctx.stroke();
-        });
-      }
-
-      ctx.restore();
-    };
-
-    const drawPolygon = (polygonPoints) => {
-      if (!drawingCanvas.value || !polygonPoints || polygonPoints.length === 0) return;
-
-      const canvas = drawingCanvas.value;
-      const ctx = canvas.getContext('2d');
-      const displayWidth = canvas.clientWidth;
-      const displayHeight = canvas.clientHeight;
-
-      ctx.clearRect(0, 0, displayWidth, displayHeight);
-      drawPolygonShape(ctx, polygonPoints, displayWidth, displayHeight, {
-        shouldClose: getShouldCloseArea()
-      });
-    };
-
-    const startDrawing = () => {
-      if (configForm.coordinates.behaviorType || configForm.coordinates.countingType) {
-        isDrawing.value = true;
-        points.value = [];
-        if (!isMultiAreaOccupancy()) {
-          configForm.coordinates.points = [];
-        }
-      } else {
-        ElMessage.info('请选择检测类型');
-      }
-    };
-
-    const finishDrawingAll = () => {
-      if (!isMultiAreaOccupancy()) {
-        isDrawing.value = false;
-        return;
-      }
-
-      points.value = [];
-      isDrawing.value = false;
-      redrawCanvas();
-
-      if (getOccupancyAreaCount() === 0) {
-        ElMessage.warning('请至少绘制一个区域');
-      } else {
-        ElMessage.success(`已完成 ${getOccupancyAreaCount()} 个区域的绘制`);
-      }
-    };
-
-    const removeOccupancyArea = (index) => {
-      configForm.coordinates.occupancyAreas.splice(index, 1);
-      syncOccupancyPoints();
-      redrawCanvas();
-    };
-
-    const clearDrawing = () => {
-      const canvas = drawingCanvas.value;
-      if (canvas) {
-        const ctx = canvas.getContext('2d');
-        const displayWidth = canvas.clientWidth;
-        const displayHeight = canvas.clientHeight;
-        ctx.clearRect(0, 0, displayWidth, displayHeight);
-      }
-      points.value = [];
-      if (isMultiAreaOccupancy()) {
-        configForm.coordinates.occupancyAreas = [];
-      }
-      configForm.coordinates.points = [];
-      isDrawing.value = false;
-    };
-
-    const handleMouseDown = (e) => {
-      if (!isDrawing.value) return;
-
-      const canvas = drawingCanvas.value;
-      const rect = canvas.getBoundingClientRect();
-
-      const normalizedX = (e.clientX - rect.left) / rect.width;
-      const normalizedY = (e.clientY - rect.top) / rect.height;
-
-      if (normalizedX < 0 || normalizedX > 1 || normalizedY < 0 || normalizedY > 1) return;
-
-      points.value.push({ x: normalizedX, y: normalizedY });
-      redrawCanvas();
-    };
-
-    const handleMouseMove = (e) => {
-      if (!isDrawing.value || points.value.length === 0) return;
-
-      const canvas = drawingCanvas.value;
-      const rect = canvas.getBoundingClientRect();
-
-      const normalizedX = (e.clientX - rect.left) / rect.width;
-      const normalizedY = (e.clientY - rect.top) / rect.height;
-
-      if (normalizedX < 0 || normalizedX > 1 || normalizedY < 0 || normalizedY > 1) return;
-
-      redrawCanvas({ x: normalizedX, y: normalizedY });
-    };
-
-    const handleRightClick = () => {
-      const shouldClose = getShouldCloseArea();
-      const minPoints = shouldClose ? 3 : 2;
-
-      if (!isDrawing.value || points.value.length < minPoints) return;
-
-      if (isMultiAreaOccupancy()) {
-        const areaIndex = getNextOccupancyAreaIndex();
-        const areaName = formatOccupancyAreaName(areaIndex);
-        if (!configForm.coordinates.occupancyAreas) {
-          configForm.coordinates.occupancyAreas = [];
-        }
-        configForm.coordinates.occupancyAreas.push({
-          id: createAreaId(),
-          name: areaName,
-          points: [...points.value]
-        });
-        syncOccupancyPoints();
-        points.value = [];
-        redrawCanvas();
-        ElMessage.success(`${areaName} 绘制完成，可继续绘制下一个区域`);
-        return;
-      }
-
-      configForm.coordinates.points = [...points.value];
-      drawPolygon(points.value);
-      isDrawing.value = false;
-
-      const message = shouldClose ? '区域绘制完成' : '拌线绘制完成';
-      ElMessage.success(message);
-    };
-
-    const redrawCanvas = (previewPoint = null) => {
-      if (!drawingCanvas.value) return;
-
-      const canvas = drawingCanvas.value;
-      const ctx = canvas.getContext('2d');
-      const displayWidth = canvas.clientWidth;
-      const displayHeight = canvas.clientHeight;
-
-      ctx.clearRect(0, 0, displayWidth, displayHeight);
-
-      if (isMultiAreaOccupancy()) {
-        (configForm.coordinates.occupancyAreas || []).forEach((area, index) => {
-          const color = getAreaColor(index);
-          drawPolygonShape(ctx, area.points, displayWidth, displayHeight, {
-            strokeStyle: color.stroke,
-            fillStyle: color.fill,
-            shouldClose: true
-          });
-        });
-      } else if (configForm.coordinates.points?.length > 0 && !isDrawing.value) {
-        drawPolygonShape(ctx, configForm.coordinates.points, displayWidth, displayHeight, {
-          shouldClose: getShouldCloseArea()
-        });
-      }
-
-      if (points.value.length > 0) {
-        const currentColor = isMultiAreaOccupancy()
-          ? getAreaColor(getOccupancyAreaCount())
-          : getAreaColor(0);
-
-        drawPolygonShape(ctx, points.value, displayWidth, displayHeight, {
-          strokeStyle: currentColor.stroke,
-          fillStyle: currentColor.fill,
-          shouldClose: false
-        });
-
-        if (previewPoint) {
-          ctx.save();
-          ctx.beginPath();
-          ctx.strokeStyle = currentColor.stroke;
-          ctx.lineWidth = 1;
-          const lastPoint = points.value[points.value.length - 1];
-          ctx.moveTo(
-            Math.round(lastPoint.x * displayWidth) + 0.5,
-            Math.round(lastPoint.y * displayHeight) + 0.5
-          );
-          ctx.lineTo(
-            Math.round(previewPoint.x * displayWidth) + 0.5,
-            Math.round(previewPoint.y * displayHeight) + 0.5
-          );
-          ctx.stroke();
-          ctx.restore();
-        }
-      }
-    };
-
-    // 数据加载方法
     const loadDeviceList = async () => {
       try {
         const response = await deviceApi.getDevices();
@@ -1276,273 +606,356 @@ export default defineComponent({
       }
     };
 
-    const loadConfigData = async () => {
+    const loadDeviceSnapshot = async (ipAddress, channel) => {
       try {
-        const response = await detectionConfigApi.getConfigs();
-        const config = response.data.data.find(c => c.config_id === configId);
-
-        if (config) {
-          // 设置设备信息
-          deviceInfo.value = deviceList.value.find(d => d.device_id === config.device_id) ||
-            { device_id: config.device_id, device_name: '未知设备' };
-
-          // 设置配置数据
-          if (config.area_coordinates && Object.keys(config.area_coordinates).length > 0) {
-            const coordinates = config.area_coordinates;
-
-            configForm.analysisType = coordinates.analysisType || 'none';
-
-            Object.assign(configForm.coordinates, coordinates);
-            normalizeOccupancyAreas(configForm.coordinates);
-            syncOccupancyPoints();
-          } else {
-            // 如果没有配置数据，默认选择"无智能方案"
-            configForm.analysisType = 'none';
-          }
-
-          // 加载设备图片
-          setTimeout(() => {
-            loadDeviceImage();
-          }, 100);
+        isSnapshotLoading.value = true;
+        imageLoading.value = true;
+        imageError.value = null;
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
+        const response = await fetch('/api/v1/devices/snapshot', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            device_id: deviceInfo.value.device_id,
+            ip_address: ipAddress,
+            device_type: deviceInfo.value.device_type,
+            channel: channel || 1,
+            username: deviceInfo.value.username,
+            password: deviceInfo.value.password,
+          }),
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+        if (response.ok) {
+          deviceImage.value = window.URL.createObjectURL(await response.blob());
+          imageLoading.value = false;
+        } else {
+          throw new Error(`HTTP ${response.status}`);
         }
-      } catch (error) {
-        ElMessage.error('加载配置数据失败: ' + error.message);
+      } catch {
+        const fallbackImageUrl = getDeviceImageUrl(ipAddress, channel);
+        const img = new Image();
+        img.onload = () => { deviceImage.value = fallbackImageUrl; imageLoading.value = false; imageError.value = null; };
+        img.onerror = () => { imageLoading.value = false; imageError.value = '无法获取设备画面'; };
+        img.src = `${fallbackImageUrl}?t=${Date.now()}`;
+      } finally {
+        isSnapshotLoading.value = false;
       }
     };
 
-    // 初始化
+    const drawPolygonShape = (ctx, polygonPoints, displayWidth, displayHeight, options = {}) => {
+      const { strokeStyle = '#00ff00', fillStyle = 'rgba(0, 255, 0, 0.15)', shouldClose = false } = options;
+      if (!polygonPoints?.length) return;
+      ctx.save();
+      ctx.strokeStyle = strokeStyle;
+      ctx.lineWidth = 2;
+      if (polygonPoints.length > 1) {
+        ctx.beginPath();
+        ctx.moveTo(Math.round(polygonPoints[0].x * displayWidth) + 0.5, Math.round(polygonPoints[0].y * displayHeight) + 0.5);
+        for (let i = 1; i < polygonPoints.length; i++) {
+          ctx.lineTo(Math.round(polygonPoints[i].x * displayWidth) + 0.5, Math.round(polygonPoints[i].y * displayHeight) + 0.5);
+        }
+        if (shouldClose && polygonPoints.length >= 3) { ctx.closePath(); ctx.fillStyle = fillStyle; ctx.fill(); }
+        ctx.stroke();
+      }
+      polygonPoints.forEach((point) => {
+        ctx.beginPath();
+        ctx.arc(Math.round(point.x * displayWidth), Math.round(point.y * displayHeight), 4, 0, Math.PI * 2);
+        ctx.fillStyle = '#ff4444';
+        ctx.fill();
+      });
+      ctx.restore();
+    };
+
+    const startDrawing = () => {
+      if (!activeScenario.value) return;
+      isDrawing.value = true;
+      points.value = [];
+      if (!isMultiAreaOccupancy()) activeScenario.value.points = [];
+    };
+
+    const finishDrawingAll = () => {
+      points.value = [];
+      isDrawing.value = false;
+      redrawCanvas();
+    };
+
+    const removeOccupancyArea = (index) => {
+      activeScenario.value?.occupancyAreas?.splice(index, 1);
+      syncOccupancyPoints();
+      redrawCanvas();
+    };
+
+    const clearDrawing = () => {
+      points.value = [];
+      isDrawing.value = false;
+      if (activeScenario.value) {
+        if (isMultiAreaOccupancy()) activeScenario.value.occupancyAreas = [];
+        activeScenario.value.points = [];
+      }
+      redrawCanvas();
+    };
+
+    const handleMouseDown = (e) => {
+      if (!isDrawing.value) return;
+      const canvas = drawingCanvas.value;
+      const rect = canvas.getBoundingClientRect();
+      const x = (e.clientX - rect.left) / rect.width;
+      const y = (e.clientY - rect.top) / rect.height;
+      if (x < 0 || x > 1 || y < 0 || y > 1) return;
+      points.value.push({ x, y });
+      redrawCanvas();
+    };
+
+    const handleMouseMove = (e) => {
+      if (!isDrawing.value || !points.value.length) return;
+      const canvas = drawingCanvas.value;
+      const rect = canvas.getBoundingClientRect();
+      const x = (e.clientX - rect.left) / rect.width;
+      const y = (e.clientY - rect.top) / rect.height;
+      if (x < 0 || x > 1 || y < 0 || y > 1) return;
+      redrawCanvas({ x, y });
+    };
+
+    const handleRightClick = () => {
+      const shouldClose = getShouldCloseArea();
+      const minPoints = shouldClose ? 3 : 2;
+      if (!isDrawing.value || points.value.length < minPoints) return;
+      if (isMultiAreaOccupancy()) {
+        const areaIndex = getNextOccupancyAreaIndex();
+        if (!activeScenario.value.occupancyAreas) activeScenario.value.occupancyAreas = [];
+        activeScenario.value.occupancyAreas.push({
+          id: createAreaId(),
+          name: formatOccupancyAreaName(areaIndex),
+          points: [...points.value],
+        });
+        syncOccupancyPoints();
+        points.value = [];
+        redrawCanvas();
+        return;
+      }
+      activeScenario.value.points = [...points.value];
+      isDrawing.value = false;
+      redrawCanvas();
+    };
+
+    const redrawCanvas = (previewPoint = null) => {
+      if (!drawingCanvas.value) return;
+      const canvas = drawingCanvas.value;
+      const ctx = canvas.getContext('2d');
+      const w = canvas.clientWidth;
+      const h = canvas.clientHeight;
+      ctx.clearRect(0, 0, w, h);
+
+      const scenario = activeScenario.value;
+      if (!scenario) return;
+
+      const scenarioIndex = multiConfig.scenarios.findIndex((item) => item.id === scenario.id);
+      const color = getAreaColor(scenarioIndex >= 0 ? scenarioIndex : 0);
+
+      if (isOccupancyScenario(scenario)) {
+        (scenario.occupancyAreas || []).forEach((area, areaIndex) => {
+          const areaColor = getAreaColor(areaIndex);
+          drawPolygonShape(ctx, area.points, w, h, {
+            strokeStyle: areaColor.stroke,
+            fillStyle: areaColor.fill,
+            shouldClose: true,
+          });
+        });
+      } else if (scenario.points?.length > 0 && !isDrawing.value) {
+        drawPolygonShape(ctx, scenario.points, w, h, {
+          strokeStyle: color.stroke,
+          fillStyle: color.fill,
+          shouldClose: shouldCloseScenarioArea(scenario),
+        });
+      }
+
+      if (points.value.length > 0) {
+        const drawColor = isMultiAreaOccupancy() ? getAreaColor(getOccupancyAreaCount()) : color;
+        drawPolygonShape(ctx, points.value, w, h, {
+          strokeStyle: drawColor.stroke,
+          fillStyle: drawColor.fill,
+          shouldClose: false,
+        });
+        if (previewPoint && points.value.length) {
+          const last = points.value[points.value.length - 1];
+          ctx.beginPath();
+          ctx.strokeStyle = drawColor.stroke;
+          ctx.moveTo(last.x * w, last.y * h);
+          ctx.lineTo(previewPoint.x * w, previewPoint.y * h);
+          ctx.stroke();
+        }
+      }
+    };
+
+    const loadConfigData = async () => {
+      try {
+        const response = await detectionConfigApi.getConfig(configId);
+        const config = response.data?.data ?? response.data;
+        if (!config) return;
+        deviceInfo.value = deviceList.value.find((d) => d.device_id === config.device_id)
+          || { device_id: config.device_id, device_name: config.device_name || '未知设备' };
+        if (config.area_coordinates && Object.keys(config.area_coordinates).length > 0) {
+          const migrated = migrateAreaCoordinates(config.area_coordinates);
+          multiConfig.alarm_interval = migrated.alarm_interval;
+          multiConfig.pushLabel = migrated.pushLabel;
+          multiConfig.scenarios.splice(0, multiConfig.scenarios.length, ...migrated.scenarios);
+          multiConfig.scenarios.forEach((s) => {
+            if (isOccupancyScenario(s)) normalizeOccupancyAreas(s);
+            if (s.params == null) s.params = {};
+            if (s.enabled == null) s.enabled = true;
+          });
+          activeScenarioId.value = multiConfig.scenarios[0]?.id || null;
+        }
+        setTimeout(loadDeviceImage, 100);
+      } catch (error) {
+        ElMessage.error('加载配置失败');
+      }
+    };
+
     onMounted(async () => {
       await loadDeviceList();
       await loadConfigData();
       window.addEventListener('resize', refreshCanvasDrawing);
     });
 
+    watch(activeScenarioId, () => {
+      points.value = [];
+      isDrawing.value = false;
+      redrawCanvas();
+    });
+
     onUnmounted(() => {
       window.removeEventListener('resize', refreshCanvasDrawing);
-      if (canvasResizeObserver) {
-        canvasResizeObserver.disconnect();
-        canvasResizeObserver = null;
-      }
+      canvasResizeObserver?.disconnect();
     });
 
     return {
-      configForm,
-      deviceInfo,
-      saveLoading,
-      imageLoading,
-      imageError,
-      deviceImage,
-      deviceImageRef,
-      drawingCanvas,
-      isDrawing,
-      isSnapshotLoading,
-      isMultiAreaOccupancy,
-      getAreaColor,
-      formatOccupancyAreaName,
-      finishDrawingAll,
-      removeOccupancyArea,
-      goBack,
-      resetConfig,
-      saveConfig,
-      canSave,
-      getShouldCloseArea,
-      getDrawingModeLabel,
-      getCountingDrawingTypeHint,
-      handleAnalysisTypeChange,
-      handleDetectionTypeChange,
-      handleCountingTypeChange,
-      startDrawing,
-      clearDrawing,
-      handleMouseDown,
-      handleMouseMove,
-      handleRightClick,
-      onImageLoaded,
-      loadDeviceImage
+      multiConfig, activeScenario, activeScenarioId, scenarioGroups,
+      getRuleDisplayType, isDurationScenario, isLineScenario, isOccupancyScenario,
+      addScenario, removeScenario, selectScenario, getRowClassName,
+      deviceInfo, saveLoading, imageLoading, imageError, deviceImage, deviceImageRef, drawingCanvas,
+      isDrawing, isSnapshotLoading, isMultiAreaOccupancy, getAreaColor,
+      finishDrawingAll, removeOccupancyArea, goBack, resetConfig, saveConfig,
+      getShouldCloseArea, handleDetectionTypeChange, handleCountingTypeChange,
+      startDrawing, clearDrawing, handleMouseDown, handleMouseMove, handleRightClick,
+      onImageLoaded, loadDeviceImage,
     };
-  }
+  },
 });
 </script>
 
 <style scoped>
 .smart-config-setting-page {
-  height: calc(100vh - 100px);
+  --page-margin-x: 16px;
+  --page-padding-x: 20px;
+  --page-padding-y: 14px;
+  --title-size: 17px;
+  --body-size: 13px;
+  --ctrl-height: 32px;
+
+  min-height: calc(100vh - 100px);
   display: flex;
   flex-direction: column;
-  background-color: #f5f7fa;
+  padding: var(--page-margin-x) var(--page-margin-x) var(--page-margin-x);
+  background: #f0f2f5;
+  box-sizing: border-box;
 }
 
 .page-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 16px 24px;
-  margin: 0 24px;
-  background: white;
-  border-bottom: 1px solid #ebeef5;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  padding: var(--page-padding-y) var(--page-padding-x);
+  margin: 0 0 12px;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
 .header-left {
   display: flex;
   align-items: center;
-  gap: 20px;
+  gap: 16px;
 }
 
 .back-btn {
   display: flex;
   align-items: center;
   gap: 4px;
+  font-size: var(--body-size);
 }
 
 .header-info h2 {
-  margin: 0 0 4px 0;
-  font-size: 18px;
+  margin: 0 0 2px;
+  font-size: var(--title-size);
+  font-weight: 600;
   color: #303133;
+  line-height: 1.3;
 }
 
 .header-info p {
   margin: 0;
-  font-size: 14px;
-  color: #606266;
+  font-size: var(--body-size);
+  color: #909399;
+  line-height: 1.4;
 }
 
 .header-right {
   display: flex;
+  gap: 8px;
+}
+
+.page-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
   gap: 12px;
+  padding: 0;
+  margin: 0;
 }
 
-.page-content {
-  flex: 1;
+.section-card {
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  font-size: var(--body-size);
+}
+
+.section-card :deep(.el-card__header) {
+  padding: var(--page-padding-y) var(--page-padding-x);
+  border-bottom: 1px solid #f0f0f0;
+  min-height: var(--ctrl-height);
+  box-sizing: border-box;
   display: flex;
-  gap: 20px;
-  padding: 20px 24px;
-  overflow: hidden;
-  min-height: 0;
+  align-items: center;
 }
 
-.left-panel {
-  flex: 0.9;
+.section-card :deep(.el-card__body) {
+  padding: var(--page-padding-y) var(--page-padding-x);
+}
+
+.section-title {
+  font-size: var(--title-size);
+  font-weight: 600;
+  color: #303133;
+  line-height: 1.3;
+}
+
+.section-subtitle-tag {
+  font-size: var(--body-size);
+}
+
+.card-title-row {
   display: flex;
-  flex-direction: column;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.right-panel {
-  flex: 1;
-  overflow-y: auto;
-  max-height: calc(100vh - 120px);
-}
-
-.drawing-card {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.drawing-card :deep(.el-card__body) {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  padding: 16px;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.card-header {
-  display: flex;
+  align-items: center;
   justify-content: space-between;
-  align-items: center;
   width: 100%;
 }
 
-.drawing-status {
-  margin-left: auto;
-}
-
-.image-preview-container {
-  flex: 1 1 auto;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  background-color: #f8f9fa;
-  border-radius: 6px;
-  margin-bottom: 12px;
-  min-height: 240px;
-  max-height: calc(100vh - 340px);
-  overflow: hidden;
-}
-
-.loading-wrapper {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
-  width: 100%;
-}
-
-.loading-text {
-  margin-top: 10px;
-  color: #909399;
-}
-
-.error-wrapper {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
-  color: #f56c6c;
-  gap: 10px;
-}
-
-.error-actions {
-  display: flex;
-  gap: 10px;
-  margin-top: 10px;
-}
-
-.error-tips {
-  margin-top: 15px;
-  font-size: 13px;
-  color: #909399;
-  line-height: 1.6;
-  padding: 10px;
-  background-color: #fde2e2;
-  border: 1px solid #faeced;
-  border-radius: 4px;
-}
-
-.error-tips p {
-  margin-bottom: 5px;
-}
-
-.error-tips ul {
-  margin-bottom: 10px;
-  padding-left: 20px;
-}
-
-.error-tips li {
-  list-style: disc;
-  margin-bottom: 3px;
-}
-
-.image-placeholder {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
-  color: #909399;
-}
-
-.image-wrapper {
-  position: relative;
-  width: 100%;
-  height: 100%;
-  min-height: 0;
-  overflow: hidden;
-  border-radius: 6px;
+.card-title-row--start {
+  justify-content: flex-start;
+  gap: 12px;
 }
 
 .device-image {
@@ -1550,311 +963,271 @@ export default defineComponent({
   width: 100%;
   height: 100%;
   object-fit: contain;
-  user-select: none;
   pointer-events: none;
+  user-select: none;
 }
 
 .drawing-canvas {
   position: absolute;
   top: 0;
   left: 0;
-  z-index: 1;
   cursor: crosshair;
+  z-index: 1;
 }
 
-.drawing-controls {
-  position: absolute;
-  bottom: 16px;
-  left: 16px;
-  z-index: 2;
-  display: flex;
-  gap: 8px;
+.scenario-table-card :deep(.el-card__body) {
+  padding: 0 var(--page-padding-x) var(--page-padding-y);
 }
 
-.drawing-hints {
-  flex: 0 0 auto;
-  flex-shrink: 0;
+.scenario-table-wrap {
+  min-height: 200px;
 }
 
-.drawing-hints :deep(.el-alert) {
-  padding: 10px 14px;
+.scenario-table :deep(.el-table__cell) {
+  padding: 10px 0;
+  font-size: var(--body-size);
 }
 
-.drawing-hints :deep(.el-alert__content) {
-  line-height: 1.6;
+.scenario-table :deep(.el-input__wrapper) {
+  min-height: 32px;
 }
 
-.drawing-hints p {
-  margin: 4px 0;
+.scenario-table :deep(.el-table__header .cell) {
+  font-size: var(--body-size);
+  color: #606266;
 }
 
+.scenario-table :deep(.table-input .el-input__wrapper) {
+  box-shadow: none;
+  background: transparent;
+}
+
+.scenario-table :deep(.table-input .el-input__inner) {
+  text-align: center;
+  font-size: var(--body-size);
+}
+
+.scenario-table :deep(.table-input .el-input__wrapper:hover),
+.scenario-table :deep(.table-input .el-input__wrapper.is-focus) {
+  box-shadow: 0 0 0 1px var(--el-color-primary) inset;
+  background: #fff;
+}
+
+.scenario-table-card :deep(.is-active-row) {
+  background-color: #ecf5ff !important;
+}
+
+.workspace {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 2fr;
+  gap: 12px;
+  align-items: start;
+}
+
+.preview-card,
 .config-card {
-  margin-bottom: 20px;
-}
-
-.config-card .card-header {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  font-weight: 500;
-  color: #409eff;
+  flex-direction: column;
+  min-width: 0;
 }
 
-.analysis-type-selector {
-  /* display: flex; */
-  /* flex-direction: column; */
+.preview-card :deep(.el-card__body) {
+  display: flex;
+  flex-direction: column;
+  padding: var(--page-padding-y) var(--page-padding-x);
+}
+
+.config-card :deep(.el-card__body) {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+}
+
+.config-layout {
+  display: flex;
+  flex-direction: column;
+}
+
+.config-main {
+  padding: var(--page-padding-y) var(--page-padding-x);
+  display: flex;
+  flex-direction: column;
   gap: 12px;
 }
 
-.analysis-option {
-  border: 1px solid #dcdfe6;
-  border-radius: 6px;
-  padding: 8px;
-  transition: all 0.3s;
-  /* overflow: hidden; */
-}
-
-.analysis-option:hover {
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-}
-
-.analysis-option.active {
-  border-color: #409eff;
-  background-color: #ecf5ff;
-}
-
-.analysis-option .el-radio {
-  width: 100%;
-  margin: 0;
-  height: auto;
-}
-
-.analysis-option .el-radio__input {
-  position: absolute;
-  top: 16px;
-  right: 16px;
-}
-
-.analysis-option .el-radio__label {
-  width: 100%;
-  padding: 16px 50px 16px 16px;
-}
-
-.option-content {
-  width: 100%;
-}
-
-.option-header {
+.preview-body {
   display: flex;
-  align-items: center;
-  margin-bottom: 8px;
-}
-
-.option-header .el-icon {
-  margin-right: 10px;
-  font-size: 18px;
-  color: #409eff;
-}
-
-.option-title {
-  font-weight: 500;
-  font-size: 15px;
-  color: #303133;
-}
-
-.option-desc {
-  font-size: 13px;
-  color: #606266;
-  line-height: 1.4;
-}
-
-.type-options {
-  display: flex;
-  /* flex-direction: column; */
+  flex-direction: column;
   gap: 10px;
 }
 
-.type-card {
-  border: 1px solid #dcdfe6;
-  border-radius: 4px;
-  padding: 8px 12px;
-  transition: all 0.3s;
-  /* overflow: hidden; */
-}
-
-.type-card:hover {
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-}
-
-.type-card.active {
-  border-color: #409eff;
-  background-color: #ecf5ff;
-}
-
-.type-card .el-radio {
+.image-preview-container {
+  position: relative;
   width: 100%;
-  margin: 0;
-  height: auto;
+  aspect-ratio: 4 / 3;
+  background: #111;
+  border-radius: 6px;
+  overflow: hidden;
 }
 
-.type-card .el-radio__input {
+.state-box {
   position: absolute;
-  top: 12px;
-  right: 12px;
-}
-
-.type-card .el-radio__label {
-  width: 100%;
-  padding: 12px 40px 12px 12px;
-}
-
-.type-content {
-  width: 100%;
-}
-
-.type-header {
+  inset: 0;
   display: flex;
+  flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: 8px;
-}
-
-.type-content .el-icon {
-  font-size: 16px;
-  color: #409eff;
-}
-
-.type-title {
-  font-weight: 500;
-  /* margin-bottom: 4px; */
-  color: #303133;
-}
-
-.type-desc {
-  font-size: 13px;
   color: #909399;
+  padding: 16px;
+  font-size: var(--body-size);
+}
+
+.state-box.error { color: #f56c6c; }
+
+.image-wrapper {
+  position: absolute;
+  inset: 0;
+}
+
+.draw-actions {
+  flex-shrink: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: var(--ctrl-height);
+  align-items: center;
+}
+
+.draw-actions :deep(.el-button) {
+  font-size: var(--body-size);
+}
+
+.config-block {
+  border: 1px solid #ebeef5;
+  border-radius: 6px;
+  padding: var(--page-padding-y) var(--page-padding-x);
+  background: #fff;
+  font-size: var(--body-size);
+}
+
+.config-block-muted {
+  background: #fafafa;
+}
+
+.block-title {
+  font-size: var(--title-size);
+  font-weight: 600;
+  color: #303133;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  line-height: 1.3;
+}
+
+.block-subtitle {
+  font-size: var(--body-size);
+  font-weight: 400;
+  color: #909399;
+}
+
+.ctrl-full {
+  width: 100%;
+}
+
+.param-form :deep(.el-form-item) {
+  margin-bottom: 12px;
+}
+
+.param-form :deep(.el-form-item__label) {
+  font-size: var(--body-size);
+  color: #606266;
+  padding-bottom: 2px;
   line-height: 1.4;
 }
 
-.counting-config {
-  background-color: #f8f9fa;
-  padding: 16px;
-  border-radius: 6px;
-  margin-top: 15px;
-  border: 1px solid #e9ecef;
+.param-form :deep(.el-input-number),
+.param-form :deep(.el-select),
+.param-form :deep(.el-input),
+.param-form :deep(.el-radio__label) {
+  font-size: var(--body-size);
 }
 
-.occupancy-area-list {
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px dashed #dcdfe6;
+.param-form :deep(.el-input-number),
+.param-form :deep(.el-select),
+.param-form :deep(.el-input) {
+  width: 100%;
 }
+
+.param-form :deep(.el-input__wrapper),
+.param-form :deep(.el-select__wrapper) {
+  min-height: var(--ctrl-height);
+}
+
+.param-form :deep(.el-input-number .el-input__wrapper) {
+  min-height: var(--ctrl-height);
+}
+
+.param-form :deep(.el-radio-group) {
+  min-height: var(--ctrl-height);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.input-with-unit {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+
+.input-with-unit .el-input-number {
+  flex: 1;
+}
+
+.unit-label {
+  flex-shrink: 0;
+  font-size: var(--body-size);
+  color: #909399;
+}
+
+.occupancy-area-list { margin-top: 4px; }
 
 .area-list-title {
-  font-size: 13px;
-  color: #606266;
-  margin-bottom: 8px;
+  font-size: 12px;
+  color: #909399;
+  margin-bottom: 6px;
 }
 
 .occupancy-area-item {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 0;
+  margin-bottom: 6px;
 }
 
 .area-color-dot {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   flex-shrink: 0;
 }
 
-.area-name-input {
-  width: 120px;
+.area-name-input { flex: 1; }
+
+.menu-group-label {
+  font-size: 12px !important;
+  color: #909399 !important;
+  cursor: default !important;
 }
 
-.area-point-count {
-  font-size: 12px;
-  color: #909399;
-  flex: 1;
-}
-
-.auto-draw-type {
-  margin-top: 15px;
-}
-
-.input-with-unit {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.unit-label {
-  color: #606266;
-  font-size: 14px;
-}
-
-.form-hint {
-  font-size: 12px;
-  color: #909399;
-  margin-bottom: 15px;
-  line-height: 1.4;
-}
-
-.alert-config {
-  margin-top: 10px;
-  padding: 15px;
-  background-color: #f8f9fa;
-  border-radius: 4px;
-  border-left: 3px solid #409eff;
-}
-
-.smart-config-form .el-form-item {
-  margin-bottom: 16px;
-}
-
-.smart-config-form .el-input-number {
-  width: 120px;
-}
-
-/* 响应式设计 */
-@media screen and (max-width: 1024px) {
-  .page-content {
-    flex-direction: column;
-    gap: 15px;
-  }
-
-  .left-panel,
-  .right-panel {
-    flex: none;
-  }
-
-  .right-panel {
-    order: -1;
-    max-height: none;
+@media (max-width: 960px) {
+  .workspace {
+    grid-template-columns: 1fr;
   }
 }
-
-@media screen and (max-width: 768px) {
-  .page-header {
-    padding: 12px 16px;
-  }
-
-  .page-content {
-    padding: 16px;
-  }
-
-  .header-left {
-    gap: 12px;
-  }
-
-  .header-info h2 {
-    font-size: 16px;
-  }
-
-  .analysis-option .el-radio__label,
-  .type-card .el-radio__label {
-    padding: 10px 35px 10px 10px;
-  }
-}
-</style> 
+</style>
