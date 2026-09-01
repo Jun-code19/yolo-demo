@@ -19,6 +19,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from src.database import SessionLocal, Device, DetectionConfig
 from src.data_pusher import data_pusher
 from src.device_monitor_config import load_device_monitor_config, resolve_check_methods
+from src.frame_acquisition import open_rtsp_capture
 from src.rtsp_url import build_rtsp_url
 
 logger = logging.getLogger(__name__)
@@ -88,7 +89,7 @@ class DeviceConnectivityChecker:
 
         cap = None
         try:
-            cap = cv2.VideoCapture(rtsp_url)
+            cap = open_rtsp_capture(rtsp_url)
             if not cap.isOpened():
                 return False
             deadline = time.time() + timeout

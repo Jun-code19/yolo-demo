@@ -6,13 +6,13 @@
           <el-icon><Upload /></el-icon>
           上传地图
         </el-button>
-        <el-button @click="addArea" :disabled="!currentMap">
-          <el-icon><Plus /></el-icon>
-          添加区域
-        </el-button>
-        <el-button @click="toggleEdit" :disabled="!currentMap">
+        <el-button @click="startEditArea" :disabled="!currentMap" :type="editMode === 'area' ? 'primary' : 'default'">
           <el-icon><Edit /></el-icon>
-          {{ isEditing ? '完成编辑' : '编辑区域' }}
+          {{ editMode === 'area' ? '完成区域' : '编辑区域' }}
+        </el-button>
+        <el-button @click="startEditProject" :disabled="!currentMap" :type="editMode === 'project' ? 'primary' : 'default'">
+          <el-icon><Location /></el-icon>
+          {{ editMode === 'project' ? '完成项目' : '编辑项目' }}
         </el-button>
         <el-button @click="refreshData" :loading="refreshing">
           <el-icon><Refresh /></el-icon>
@@ -59,60 +59,126 @@
         
         <!-- 热力图图例 -->
         <div class="heatmap-legend">
-          <div class="legend-title">人数密度</div>
+          <div class="legend-title">人数分级</div>
           <div class="legend-bar">
-            <div class="legend-gradient"></div>
+            <div class="legend-gradient" :style="{ background: heatmapLegendGradient }"></div>
             <div class="legend-labels">
               <span>0</span>
-              <span>{{ maxDensity }}</span>
+              <span>{{ maxAreaCount }}</span>
             </div>
           </div>
         </div>
 
-        <!-- 区域信息面板 -->
-        <div v-if="selectedArea" class="area-info-panel">
-          <div class="panel-header">
-            <h3>{{ selectedArea.name }}</h3>
-            <el-button size="small" @click="selectedArea = null">
-              <el-icon><Close /></el-icon>
-            </el-button>
+        <!-- 编辑模式提示 -->
+        <div v-if="editMode" class="edit-mode-hint">
+          {{ editMode === 'area' ? '点击绘制区域边界，双击完成' : '点击地图设置项目位置' }}
+        </div>
+
+        <!-- 编辑框（地图内居中浮层） -->
+        <div v-if="showAreaDialog" class="feature-edit-overlay" @click.self="closeAreaPanel">
+          <div class="feature-edit-panel">
+            <div class="panel-head">
+              <div>
+                <div class="panel-type-tag">{{ areaForm.shapeType === 'point' ? '项目点' : '区域' }}</div>
+                <h3>{{ dialogTitle }}</h3>
+              </div>
+              <el-button text circle @click="closeAreaPanel">
+                <el-icon><Close /></el-icon>
+              </el-button>
+            </div>
+            <el-form :model="areaForm" :rules="areaRules" ref="areaFormRef" label-position="top" class="panel-form">
+              <el-form-item :label="areaForm.shapeType === 'point' ? '项目名称' : '区域名称'" prop="name">
+                <el-input v-model="areaForm.name" :placeholder="areaForm.shapeType === 'point' ? '请输入项目名称' : '请输入区域名称'" />
+              </el-form-item>
+              <el-form-item label="计量单位">
+                <el-input v-model="areaForm.displayUnit" placeholder="默认：人，可改为辆、台等" maxlength="8" />
+              </el-form-item>
+              <el-form-item label="数据源类型">
+                <el-radio-group v-model="areaForm.dataSourceType" @change="handleDataSourceTypeChange">
+                  <el-radio value="crowd_analysis">人群分析</el-radio>
+                  <el-radio value="smart_scheme">订阅监控</el-radio>
+                </el-radio-group>
+              </el-form-item>
+              <el-form-item v-if="areaForm.dataSourceType === 'crowd_analysis'" label="绑定任务" prop="sourceId">
+                <el-select
+                  :key="'crowd-' + (editingArea?.id || 'new')"
+                  v-model="areaForm.sourceId"
+                  placeholder="选择人群分析任务"
+                  teleported
+                  filterable
+                  style="width: 100%"
+                  @change="handleSourceChange"
+                >
+                  <el-option label="未绑定" :value="''" />
+                  <el-option
+                    v-for="job in crowdJobs"
+                    :key="job.job_id"
+                    :label="job.job_name"
+                    :value="job.job_id"
+                  />
+                </el-select>
+              </el-form-item>
+              <el-form-item v-else label="绑定订阅" prop="sourceId">
+                <el-select
+                  :key="'scheme-' + (editingArea?.id || 'new')"
+                  v-model="areaForm.sourceId"
+                  placeholder="选择人数统计订阅"
+                  teleported
+                  filterable
+                  style="width: 100%"
+                  @change="handleSourceChange"
+                >
+                  <el-option label="未绑定" :value="''" />
+                  <el-option
+                    v-for="scheme in numberStatSchemes"
+                    :key="scheme.id"
+                    :label="scheme.label"
+                    :value="scheme.id"
+                  />
+                </el-select>
+              </el-form-item>
+              <el-form-item v-if="areaForm.shapeType === 'point'" label="标记颜色" prop="color">
+                <el-color-picker v-model="areaForm.color" show-alpha />
+              </el-form-item>
+              <el-form-item v-else label="区域着色">
+                <span class="color-auto-hint">按绑定人数自动分级着色（低→高：蓝→黄→红）</span>
+              </el-form-item>
+            </el-form>
+            <div class="panel-foot">
+              <el-button v-if="editingArea" type="danger" plain @click="deleteAreaFromDialog">删除</el-button>
+              <span class="dialog-footer-spacer" />
+              <el-button @click="closeAreaPanel">取消</el-button>
+              <el-button type="primary" @click="saveArea">保存</el-button>
+            </div>
           </div>
-          <div class="panel-content">
-            <div class="info-item">
-              <label>当前人数：</label>
-              <span class="count-value">{{ selectedArea.currentCount || 0 }}</span>
-            </div>
-            <div class="info-item">
-              <label>区域面积：</label>
-              <span>{{ calculateAreaSize(selectedArea) }} m²</span>
-            </div>
-            <div class="info-item">
-              <label>人口密度：</label>
-              <span>{{ calculateDensity(selectedArea) }} 人/m²</span>
-            </div>
-            <div class="info-item">
-              <label>绑定任务：</label>
-              <el-select v-model="selectedArea.jobId" size="small" @change="updateAreaBinding">
-                <el-option label="未绑定" :value="''" />
-                <el-option
-                  v-for="job in crowdJobs"
-                  :key="job.job_id"
-                  :label="job.job_name"
-                  :value="job.job_id"
-                />
-              </el-select>
-            </div>
-            <div class="info-actions">
-              <el-button size="small" @click="editArea(selectedArea)">编辑</el-button>
-              <el-button size="small" type="danger" @click="deleteArea(selectedArea)">删除</el-button>
-            </div>
+        </div>
+
+        <!-- 图例说明 -->
+        <div class="map-feature-legend">
+          <div class="legend-row">
+            <span class="legend-area-icon" />
+            <span>区域（多边形）</span>
+          </div>
+          <div class="legend-row">
+            <span class="legend-point-icon" />
+            <span>项目点</span>
           </div>
         </div>
       </div>
     </div>
 
     <!-- 上传地图对话框 -->
-    <el-dialog v-model="showUploadDialog" title="上传地图" width="500px">
+    <el-dialog
+      v-model="showUploadDialog"
+      title="上传地图"
+      width="500px"
+      top="8vh"
+      align-center
+      append-to-body
+      destroy-on-close
+      :z-index="999999"
+      class="high-priority-dialog"
+    >
       <el-form :model="uploadForm" :rules="uploadRules" ref="uploadFormRef" label-width="80px">
         <el-form-item label="地图名称" prop="name">
           <el-input v-model="uploadForm.name" placeholder="请输入地图名称" />
@@ -150,44 +216,25 @@
         </span>
       </template>
     </el-dialog>
-
-    <!-- 区域编辑对话框 -->
-    <el-dialog v-model="showAreaDialog" :title="editingArea ? '编辑区域' : '新建区域'" width="400px">
-      <el-form :model="areaForm" :rules="areaRules" ref="areaFormRef" label-width="80px">
-        <el-form-item label="区域名称" prop="name">
-          <el-input v-model="areaForm.name" placeholder="请输入区域名称" />
-        </el-form-item>
-        <el-form-item label="绑定任务" prop="jobId">
-          <el-select v-model="areaForm.jobId" placeholder="选择人群分析任务">
-            <el-option label="未绑定" :value="''" />
-            <el-option
-              v-for="job in crowdJobs"
-              :key="job.job_id"
-              :label="job.job_name"
-              :value="job.job_id"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="区域颜色" prop="color">
-          <el-color-picker v-model="areaForm.color" show-alpha />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <span class="dialog-footer">
-          <el-button @click="showAreaDialog = false">取消</el-button>
-          <el-button type="primary" @click="saveArea">确定</el-button>
-        </span>
-      </template>
-    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, nextTick, computed, watch } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, nextTick, computed, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Upload, Plus, Edit, Refresh, PictureRounded, Close, UploadFilled } from '@element-plus/icons-vue'
+import { Upload, Edit, Refresh, PictureRounded, UploadFilled, Location, Close } from '@element-plus/icons-vue'
 import { dashboardMapApi } from '@/api/dashboard'
 import { crowdAnalysisApi } from '@/api/crowd_analysis'
+import { smartSchemeApi } from '@/api/smart_scheme'
+import {
+  HEATMAP_LEGEND_GRADIENT,
+  computeMaxAreaCount,
+  getAreaCount,
+  getHeatmapColor,
+  getHeatmapStrokeColor,
+} from '@/utils/heatmapColors'
+
+const heatmapLegendGradient = HEATMAP_LEGEND_GRADIENT
 
 // Props
 const props = defineProps({
@@ -198,7 +245,7 @@ const props = defineProps({
 })
 
 // Emits
-const emit = defineEmits(['map-selected', 'areas-updated'])
+const emit = defineEmits(['map-selected', 'areas-updated', 'maps-changed'])
 
 // 响应式数据
 const mapContainer = ref(null)
@@ -210,16 +257,16 @@ const showUploadDialog = ref(false)
 const showAreaDialog = ref(false)
 const uploading = ref(false)
 const refreshing = ref(false)
-const isEditing = ref(false)
+const editMode = ref(null) // null | 'area' | 'project'
 
 const selectedMap = ref(null)
 const currentMap = ref(null)
-const selectedArea = ref(null)
 const editingArea = ref(null)
 
 const mapList = ref([])
 const areas = ref([])
 const crowdJobs = ref([])
+const numberStatSchemes = ref([])
 const fileList = ref([])
 
 let canvas = null
@@ -227,6 +274,7 @@ let ctx = null
 let mapImage = null
 let isDrawing = false
 let currentPath = []
+let containerObserver = null
 
 // 表单数据
 const uploadForm = reactive({
@@ -238,8 +286,11 @@ const uploadForm = reactive({
 
 const areaForm = reactive({
   name: '',
-  jobId: '',
+  sourceId: '',
+  dataSourceType: 'crowd_analysis',
+  displayUnit: '人',
   color: 'rgba(74, 144, 226, 0.3)',
+  shapeType: 'polygon',
   points: []
 })
 
@@ -260,16 +311,27 @@ const areaRules = {
 }
 
 // 计算属性
-const maxDensity = computed(() => {
-  if (!areas.value.length) return 100
-  return Math.max(...areas.value.map(area => area.currentCount || 0), 100)
+const maxAreaCount = computed(() => computeMaxAreaCount(areas.value, 'polygon'))
+
+const dialogTitle = computed(() => {
+  const isPoint = areaForm.shapeType === 'point'
+  const label = isPoint ? '项目' : '区域'
+  return editingArea.value ? `编辑${label}` : `新建${label}`
 })
 
 // 初始化
 onMounted(async () => {
   await loadMapList()
   await loadCrowdJobs()
-  // 不在这里初始化canvas，等到有地图时再初始化
+  await loadNumberStatSchemes()
+})
+
+onUnmounted(() => {
+  containerObserver?.disconnect()
+  containerObserver = null
+  if (canvas?.hasResizeListener) {
+    window.removeEventListener('resize', resizeCanvas)
+  }
 })
 
 // 加载地图列表
@@ -302,18 +364,31 @@ const loadMapList = async () => {
   }
 }
 
+const loadNumberStatSchemes = async () => {
+  try {
+    const response = await smartSchemeApi.getSchemes({ page: 1, page_size: 100, event_type: 'number_stat' })
+    const items = response.data?.items || response.data?.data?.items || response.data?.data || []
+    numberStatSchemes.value = (Array.isArray(items) ? items : []).map((scheme) => ({
+      id: scheme.id,
+      label: scheme.camera_name
+        ? `${scheme.camera_name}${scheme.remarks ? ` · ${scheme.remarks}` : ''}`
+        : (scheme.remarks || scheme.id),
+    }))
+  } catch (error) {
+    console.error('加载订阅监控失败:', error)
+    numberStatSchemes.value = []
+    ElMessage.warning('加载订阅监控列表失败，请检查数据服务是否正常')
+  }
+}
+
 const loadCrowdJobs = async () => {
   try {
-    const response = await crowdAnalysisApi.getAnalysisJobs()
-    crowdJobs.value = response.data.data || []
-    console.log(crowdJobs.value)
+    const response = await crowdAnalysisApi.getAllAnalysisJobs()
+    crowdJobs.value = response.data?.data || []
   } catch (error) {
     console.error('加载人群分析任务失败:', error)
-    crowdJobs.value = [
-      { job_id: 'job1', job_name: 'A车间人数统计', people_count: 25 },
-      { job_id: 'job2', job_name: 'B车间人数统计', people_count: 18 },
-      { job_id: 'job3', job_name: 'C车间人数统计', people_count: 32 }
-    ]
+    crowdJobs.value = []
+    ElMessage.warning('加载人群分析任务失败')
   }
 }
 
@@ -323,67 +398,90 @@ const initCanvas = () => {
   })
 }
 
+const observeContainer = () => {
+  if (!mapContainer.value || containerObserver) return
+  containerObserver = new ResizeObserver(() => {
+    if (!canvas || !mapContainer.value) return
+    const { clientWidth, clientHeight } = mapContainer.value
+    if (clientWidth > 0 && clientHeight > 0) {
+      resizeCanvas()
+    }
+  })
+  containerObserver.observe(mapContainer.value)
+}
+
 const tryInitCanvas = (retryCount = 0) => {
-  if (mapCanvas.value && currentMap.value) {
+  if (mapCanvas.value && currentMap.value && mapContainer.value) {
+    const { clientWidth, clientHeight } = mapContainer.value
+    if (clientWidth <= 0 || clientHeight <= 0) {
+      observeContainer()
+      if (retryCount < 30) {
+        setTimeout(() => tryInitCanvas(retryCount + 1), 100)
+      }
+      return
+    }
+
     canvas = mapCanvas.value
     ctx = canvas.getContext('2d')
+    observeContainer()
     resizeCanvas()
-    
-    // 避免重复添加事件监听器
+
     if (!canvas.hasResizeListener) {
       window.addEventListener('resize', resizeCanvas)
       canvas.hasResizeListener = true
     }
-    
-    console.log('Canvas initialized successfully')
-  } else if (retryCount < 5) {
-    // 最多重试5次，每次间隔递增
-    const delay = (retryCount + 1) * 100
-    setTimeout(() => {
-      tryInitCanvas(retryCount + 1)
-    }, delay)
-  } else {
-    if (!currentMap.value) {
-      console.log('Canvas initialization skipped - no map selected')
-    } else {
-      console.warn('Canvas element not found after multiple retries')
-    }
+    return
+  }
+
+  if (retryCount < 10) {
+    setTimeout(() => tryInitCanvas(retryCount + 1), (retryCount + 1) * 100)
   }
 }
 
 const resizeCanvas = () => {
   if (!canvas || !mapContainer.value) return
-  
+
   const container = mapContainer.value
-  canvas.width = container.clientWidth
-  canvas.height = container.clientHeight - 60
-  
+  const width = container.clientWidth
+  const height = container.clientHeight
+  if (width <= 0 || height <= 0) return
+
+  canvas.width = width
+  canvas.height = height
+
   drawCanvas()
 }
 
-const loadMap = (mapId) => {
+const loadMap = async (mapId) => {
   const map = mapList.value.find(m => m.id === mapId)
-  if (map) {
-    currentMap.value = map
-    loadAreas(mapId)
-    loadMapImage()
-    emit('map-selected', mapId)
-    
-    // 确保canvas在地图加载后初始化
-    nextTick(() => {
-      if (!canvas) {
-        initCanvas()
-      }
-    })
-  }
+  if (!map) return
+
+  selectedMap.value = mapId
+  currentMap.value = map
+  await loadAreas(mapId)
+  updateAreaCounts()
+  loadMapImage()
+  emit('map-selected', mapId)
+
+  nextTick(() => {
+    if (!canvas) {
+      initCanvas()
+    } else {
+      resizeCanvas()
+    }
+  })
 }
 
 const loadMapImage = () => {
   if (!currentMap.value) return
-  
+
   mapImage = new Image()
   mapImage.onload = () => {
-    drawCanvas()
+    if (canvas && ctx) {
+      drawCanvas()
+    } else {
+      initCanvas()
+    }
   }
   mapImage.src = currentMap.value.imageUrl
 }
@@ -397,19 +495,26 @@ const loadAreas = async (mapId) => {
       areas.value = areasData.map(area => ({
         id: area.id.toString(),
         name: area.name,
+        shapeType: area.shape_type || 'polygon',
         points: area.points,
         color: area.color,
+        dataSourceType: area.data_source_type || 'crowd_analysis',
+        sourceId: area.data_source_id || '',
         jobId: area.data_source_id || '',
+        displayUnit: area.display_unit || '人',
         currentCount: area.current_count || 0,
+        enteredCount: area.entered_count || 0,
+        exitedCount: area.exited_count || 0,
+        stayingCount: area.staying_count ?? area.current_count ?? 0,
         maxCapacity: area.max_capacity,
         areaSize: area.area_size,
-        dataSourceType: area.data_source_type,
         dataSourceName: area.data_source_name,
         lastUpdateTime: area.last_update_time
       }))
     } else {
       areas.value = []
     }
+    drawCanvas()
   } catch (error) {
     console.error('加载区域失败:', error)
     // 回退到本地存储
@@ -422,18 +527,26 @@ const loadAreas = async (mapId) => {
 
 const updateAreaCounts = () => {
   areas.value.forEach(area => {
-    if (area.jobId && area.jobId !== '') {
-      const job = crowdJobs.value.find(j => j.job_id === area.jobId)
-      if (job && job.last_result) {
-        try {
-          area.currentCount = parseInt(job.last_result.total_person_count) || 0
-        } catch (error) {
-          console.error('解析人数数据失败:', error)
-          area.currentCount = 0
-        }
-      }
-    } else {
+    if (!area.sourceId && !area.jobId) {
       area.currentCount = 0
+      area.enteredCount = 0
+      area.exitedCount = 0
+      area.stayingCount = 0
+      return
+    }
+    const sourceId = area.sourceId || area.jobId
+    if (area.dataSourceType === 'smart_scheme') {
+      return
+    }
+    const job = crowdJobs.value.find(j => j.job_id === sourceId)
+    if (job && job.last_result) {
+      try {
+        area.currentCount = parseInt(job.last_result.total_person_count) || 0
+        area.stayingCount = area.currentCount
+      } catch (error) {
+        area.currentCount = 0
+        area.stayingCount = 0
+      }
     }
   })
 }
@@ -493,9 +606,10 @@ const drawCanvas = () => {
     }
   }
   
-  areas.value.forEach(area => {
-    drawArea(area)
-  })
+  const polygonAreas = areas.value.filter(area => (area.shapeType || 'polygon') !== 'point')
+  const projectAreas = areas.value.filter(area => area.shapeType === 'point')
+  polygonAreas.forEach(area => drawArea(area))
+  projectAreas.forEach(area => drawProject(area))
   
   if (isDrawing && currentPath.length > 0) {
     drawPath(currentPath, 'rgba(74, 144, 226, 0.5)', true) // 传入true表示是地图坐标
@@ -504,35 +618,149 @@ const drawCanvas = () => {
 
 const drawArea = (area) => {
   if (!area.points || area.points.length < 3) return
-  
-  // 转换地图坐标到canvas坐标
+
   const canvasPoints = area.points.map(point => mapToCanvasCoords(point.x, point.y))
-  
+  const highlighted = isFeatureHighlighted(area)
+  const count = getAreaCount(area)
+  const strokeColor = getHeatmapStrokeColor(count, maxAreaCount.value)
+
   ctx.beginPath()
   ctx.moveTo(canvasPoints[0].x, canvasPoints[0].y)
-  canvasPoints.forEach(point => {
-    ctx.lineTo(point.x, point.y)
-  })
+  canvasPoints.forEach(point => ctx.lineTo(point.x, point.y))
   ctx.closePath()
-  
-  const density = calculateDensity(area)
-  const intensity = Math.min(density / 0.1, 1)
-  const alpha = 0.3 + intensity * 0.4
-  
-  ctx.fillStyle = area.color.replace(/[\d\.]+\)$/g, `${alpha})`)
+
+  const fillAlpha = highlighted ? 0.62 : 0.52
+  ctx.fillStyle = getHeatmapColor(count, maxAreaCount.value, fillAlpha)
   ctx.fill()
-  
-  ctx.strokeStyle = area.color.replace(/rgba?/, 'rgb').replace(/,\s*[\d\.]+\)/, ')')
-  ctx.lineWidth = 2
+
+  ctx.strokeStyle = '#ffffff'
+  ctx.lineWidth = highlighted ? 5 : 4
   ctx.stroke()
-  
+
+  ctx.strokeStyle = strokeColor
+  ctx.lineWidth = highlighted ? 3 : 2
+  ctx.setLineDash(highlighted ? [8, 4] : [])
+  ctx.stroke()
+  ctx.setLineDash([])
+
+  canvasPoints.forEach((point) => {
+    ctx.beginPath()
+    ctx.arc(point.x, point.y, highlighted ? 5 : 4, 0, Math.PI * 2)
+    ctx.fillStyle = '#ffffff'
+    ctx.fill()
+    ctx.strokeStyle = strokeColor
+    ctx.lineWidth = 2
+    ctx.stroke()
+  })
+
   const center = calculateAreaCenter(area)
   const canvasCenter = mapToCanvasCoords(center.x, center.y)
-  ctx.fillStyle = '#333'
-  ctx.font = '14px Arial'
+  drawFeatureLabel(
+    canvasCenter.x,
+    canvasCenter.y,
+    area.name,
+    formatFeatureCount(area),
+    highlighted ? 'rgba(255, 138, 101, 0.92)' : 'rgba(15, 23, 42, 0.86)'
+  )
+}
+
+const drawProject = (area) => {
+  if (!area.points?.length) return
+
+  const point = mapToCanvasCoords(area.points[0].x, area.points[0].y)
+  const highlighted = isFeatureHighlighted(area)
+  const strokeColor = getFeatureStrokeColor(area.color || 'rgba(255, 138, 101, 0.95)')
+  const radius = highlighted ? 14 : 12
+
+  ctx.beginPath()
+  ctx.arc(point.x, point.y, radius + 6, 0, Math.PI * 2)
+  ctx.fillStyle = highlighted ? 'rgba(255, 138, 101, 0.28)' : 'rgba(255, 138, 101, 0.18)'
+  ctx.fill()
+
+  ctx.beginPath()
+  ctx.arc(point.x, point.y, radius + 3, 0, Math.PI * 2)
+  ctx.strokeStyle = strokeColor
+  ctx.lineWidth = highlighted ? 3 : 2
+  ctx.stroke()
+
+  ctx.beginPath()
+  ctx.arc(point.x, point.y, radius, 0, Math.PI * 2)
+  ctx.fillStyle = area.color || 'rgba(255, 138, 101, 0.95)'
+  ctx.fill()
+  ctx.strokeStyle = '#ffffff'
+  ctx.lineWidth = 3
+  ctx.stroke()
+
+  ctx.beginPath()
+  ctx.arc(point.x, point.y, radius * 0.38, 0, Math.PI * 2)
+  ctx.fillStyle = '#ffffff'
+  ctx.fill()
+
+  drawFeatureLabel(
+    point.x,
+    point.y + radius + 22,
+    area.name,
+    formatFeatureCount(area),
+    'rgba(180, 83, 9, 0.92)'
+  )
+}
+
+const formatFeatureCount = (area) => {
+  const unit = area.displayUnit || '人'
+  const count = area.stayingCount ?? area.currentCount ?? 0
+  return `${count} ${unit}`
+}
+
+const setColorAlpha = (color, alpha) => {
+  if (!color) return `rgba(64, 158, 255, ${alpha})`
+  if (color.startsWith('rgba')) {
+    return color.replace(/[\d.]+\)$/g, `${alpha})`)
+  }
+  if (color.startsWith('rgb')) {
+    return color.replace('rgb', 'rgba').replace(')', `, ${alpha})`)
+  }
+  return color
+}
+
+const getFeatureStrokeColor = (color) => {
+  if (!color) return '#409eff'
+  return color.replace(/rgba?/, 'rgb').replace(/,\s*[\d.]+\)/, ')')
+}
+
+const isFeatureHighlighted = (area) =>
+  showAreaDialog.value && editingArea.value && editingArea.value.id === area.id
+
+const drawFeatureLabel = (x, y, title, subtitle, bgColor) => {
+  ctx.font = 'bold 13px "Microsoft YaHei", Arial'
+  const titleWidth = ctx.measureText(title).width
+  ctx.font = '12px "Microsoft YaHei", Arial'
+  const subtitleWidth = ctx.measureText(subtitle).width
+  const width = Math.max(titleWidth, subtitleWidth) + 20
+  const height = 40
+  const left = x - width / 2
+  const top = y - height / 2
+
+  ctx.fillStyle = bgColor
+  ctx.beginPath()
+  if (typeof ctx.roundRect === 'function') {
+    ctx.roundRect(left, top, width, height, 8)
+  } else {
+    ctx.rect(left, top, width, height)
+  }
+  ctx.fill()
+
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)'
+  ctx.lineWidth = 1
+  ctx.stroke()
+
+  ctx.fillStyle = '#ffffff'
+  ctx.font = 'bold 13px "Microsoft YaHei", Arial'
   ctx.textAlign = 'center'
-  ctx.fillText(area.name, canvasCenter.x, canvasCenter.y - 10)
-  ctx.fillText(`${area.currentCount || 0}人`, canvasCenter.x, canvasCenter.y + 10)
+  ctx.textBaseline = 'middle'
+  ctx.fillText(title, x, y - 7)
+  ctx.font = '12px "Microsoft YaHei", Arial'
+  ctx.fillStyle = '#ffe4d6'
+  ctx.fillText(subtitle, x, y + 11)
 }
 
 const drawPath = (points, color, isMapCoords = false) => {
@@ -597,6 +825,7 @@ const uploadMap = async () => {
         currentMap.value = newMap
         await loadAreas(selectedMap.value)
         loadMapImage()
+        nextTick(() => initCanvas())
       }
       
       showUploadDialog.value = false
@@ -621,25 +850,33 @@ const resetUploadForm = () => {
   fileList.value = []
 }
 
-const addArea = () => {
-  if (!currentMap.value) {
-    ElMessage.warning('请先选择地图')
+const startEditArea = () => {
+  if (editMode.value === 'area') {
+    finishEdit()
     return
   }
-  
-  editingArea.value = null
-  areaForm.name = ''
-  areaForm.jobId = ''
-  areaForm.color = 'rgba(74, 144, 226, 0.3)'
-  areaForm.points = []
-  showAreaDialog.value = true
+  editMode.value = 'area'
+  isDrawing = false
+  currentPath = []
+  ElMessage.info('请在地图上点击绘制区域边界，双击完成绘制')
 }
 
-const toggleEdit = () => {
-  isEditing.value = !isEditing.value
-  if (isEditing.value) {
-    ElMessage.info('请在地图上点击绘制区域边界，双击完成绘制')
+const startEditProject = () => {
+  if (editMode.value === 'project') {
+    finishEdit()
+    return
   }
+  editMode.value = 'project'
+  isDrawing = false
+  currentPath = []
+  ElMessage.info('请在地图上点击设置项目位置')
+}
+
+const finishEdit = () => {
+  editMode.value = null
+  isDrawing = false
+  currentPath = []
+  drawCanvas()
 }
 
 const refreshData = async () => {
@@ -669,14 +906,28 @@ const handleCanvasClick = (event) => {
     return
   }
   
-  if (!isEditing.value) {
-    // 点击选择区域时，需要使用地图坐标进行判断
-    const clickedArea = areas.value.find(area => isPointInArea(mapCoords.x, mapCoords.y, area))
-    selectedArea.value = clickedArea || null
+  if (!editMode.value) {
+    const clicked = findFeatureAtPoint(mapCoords.x, mapCoords.y)
+    if (clicked) {
+      openEditDialog(clicked)
+    }
+    return
+  }
+
+  if (editMode.value === 'project') {
+    editingArea.value = null
+    areaForm.name = ''
+    areaForm.sourceId = ''
+    areaForm.dataSourceType = 'crowd_analysis'
+    areaForm.displayUnit = '人'
+    areaForm.color = 'rgba(255, 138, 101, 0.92)'
+    areaForm.shapeType = 'point'
+    areaForm.points = [mapCoords]
+    showAreaDialog.value = true
     return
   }
   
-  // 编辑模式下，存储地图坐标
+  // 区域编辑模式下，存储地图坐标
   if (!isDrawing) {
     isDrawing = true
     currentPath = [mapCoords]
@@ -688,8 +939,15 @@ const handleCanvasClick = (event) => {
 }
 
 const handleCanvasDoubleClick = () => {
+  if (editMode.value !== 'area') return
   if (isDrawing && currentPath.length >= 3) {
-    // currentPath已经是地图坐标，直接使用
+    editingArea.value = null
+    areaForm.name = ''
+    areaForm.sourceId = ''
+    areaForm.dataSourceType = 'crowd_analysis'
+    areaForm.displayUnit = '人'
+    areaForm.color = 'rgba(64, 158, 255, 0.55)'
+    areaForm.shapeType = 'polygon'
     areaForm.points = [...currentPath]
     isDrawing = false
     currentPath = []
@@ -699,7 +957,7 @@ const handleCanvasDoubleClick = () => {
 }
 
 const handleCanvasMouseMove = (event) => {
-  if (!canvas || !isDrawing) return
+  if (!canvas || !isDrawing || editMode.value !== 'area') return
   
   const rect = canvas.getBoundingClientRect()
   const canvasX = event.clientX - rect.left
@@ -722,13 +980,30 @@ const handleCanvasMouseMove = (event) => {
 const handleCanvasMouseDown = () => {}
 const handleCanvasMouseUp = () => {}
 
-const editArea = (area) => {
-  editingArea.value = area
-  areaForm.name = area.name
-  areaForm.jobId = area.jobId || ''
-  areaForm.color = area.color
-  areaForm.points = [...area.points]
+const openEditDialog = (feature) => {
+  editingArea.value = feature
+  areaForm.name = feature.name
+  areaForm.sourceId = feature.sourceId || feature.jobId || ''
+  areaForm.dataSourceType = feature.dataSourceType || 'crowd_analysis'
+  areaForm.displayUnit = feature.displayUnit || '人'
+  areaForm.color = feature.color
+  areaForm.shapeType = feature.shapeType || 'polygon'
+  areaForm.points = [...(feature.points || [])]
   showAreaDialog.value = true
+  drawCanvas()
+}
+
+const closeAreaPanel = () => {
+  showAreaDialog.value = false
+  editingArea.value = null
+  drawCanvas()
+}
+
+const deleteAreaFromDialog = async () => {
+  if (!editingArea.value) return
+  const target = editingArea.value
+  closeAreaPanel()
+  await deleteArea(target)
 }
 
 const saveArea = async () => {
@@ -736,19 +1011,25 @@ const saveArea = async () => {
   
   try {
     await areaFormRef.value.validate()
-    
-    if (areaForm.points.length < 3) {
+
+    const isPointType = areaForm.shapeType === 'point'
+    if (!isPointType && areaForm.points.length < 3) {
       ElMessage.warning('请在地图上绘制区域')
+      return
+    }
+    if (isPointType && areaForm.points.length < 1) {
+      ElMessage.warning('请在地图上点击设置项目位置')
       return
     }
     
     const areaData = {
       map_id: parseInt(currentMap.value.id),
       name: areaForm.name,
+      shape_type: areaForm.shapeType,
       points: areaForm.points,
       color: areaForm.color,
       max_capacity: areaForm.maxCapacity,
-      description: areaForm.description,
+      display_unit: areaForm.displayUnit || '人',
       scale_factor: currentMap.value.scale || 1
     }
     
@@ -762,29 +1043,35 @@ const saveArea = async () => {
     }
     
     if (response.data.success) {
-      // 如果有数据绑定，创建绑定关系
-      if (areaForm.jobId && areaForm.jobId !== '') {
+      const savedAreaId = response.data.data.id || editingArea.value?.id
+
+      if (areaForm.sourceId) {
         const bindingData = {
-          area_id: response.data.data.id || editingArea.value.id,
-          data_source_type: 'crowd_analysis',
-          data_source_id: areaForm.jobId,
-          data_source_name: getJobName(areaForm.jobId),
-          refresh_interval: 30
+          area_id: savedAreaId,
+          data_source_type: areaForm.dataSourceType,
+          data_source_id: areaForm.sourceId,
+          data_source_name: getSourceName(areaForm.dataSourceType, areaForm.sourceId),
+          refresh_interval: 30,
+          config: {
+            display_unit: areaForm.displayUnit || '人',
+          },
         }
-        
         await dashboardMapApi.createDashboardMapBinding(bindingData)
+      } else if (editingArea.value) {
+        await dashboardMapApi.deleteDashboardMapAreaBindings(editingArea.value.id)
       }
       
-      // 重新加载区域数据
       await loadAreas(currentMap.value.id)
-      
+      updateAreaCounts()
+      drawCanvas()
+
       showAreaDialog.value = false
-      isEditing.value = false
+      editingArea.value = null
+      finishEdit()
       
-      // 触发区域更新事件
       emit('areas-updated', areas.value)
       
-      ElMessage.success('区域保存成功')
+      ElMessage.success(areaForm.shapeType === 'point' ? '项目保存成功' : '区域保存成功')
     } else {
       throw new Error(response.message || '保存失败')
     }
@@ -796,8 +1083,12 @@ const saveArea = async () => {
     const areaDataLocal = {
       id: editingArea.value?.id || Date.now().toString(),
       name: areaForm.name,
-      jobId: areaForm.jobId || '',
+      sourceId: areaForm.sourceId || '',
+      jobId: areaForm.sourceId || '',
+      dataSourceType: areaForm.dataSourceType,
+      displayUnit: areaForm.displayUnit,
       color: areaForm.color,
+      shapeType: areaForm.shapeType,
       points: [...areaForm.points],
       currentCount: 0
     }
@@ -813,7 +1104,8 @@ const saveArea = async () => {
     
     // localStorage.setItem(`areas_${currentMap.value.id}`, JSON.stringify(areas.value))
     showAreaDialog.value = false
-    isEditing.value = false
+    finishEdit()
+    drawCanvas()
     emit('areas-updated', areas.value)
   }
 }
@@ -826,108 +1118,104 @@ const deleteArea = async (area) => {
     
     try {
       const response = await dashboardMapApi.deleteDashboardMapArea(area.id)
-      
-      if (response.success) {
-        await loadAreas(currentMap.value.id)
-        selectedArea.value = null
-        ElMessage.success('区域删除成功')
-      } else {
-        throw new Error(response.message || '删除失败')
+      const result = getApiResult(response)
+
+      if (!result?.success) {
+        throw new Error(result?.message || '删除失败')
       }
+
+      await loadAreas(currentMap.value.id)
+      drawCanvas()
+      emit('areas-updated', areas.value)
+      ElMessage.success(result.message || (area.shapeType === 'point' ? '项目删除成功' : '区域删除成功'))
     } catch (error) {
       console.error('删除区域失败:', error)
-      // 回退到本地删除
-      // const index = areas.value.findIndex(a => a.id === area.id)
-      // if (index >= 0) {
-      //   areas.value.splice(index, 1)
-      //   localStorage.setItem(`areas_${currentMap.value.id}`, JSON.stringify(areas.value))
-      //   selectedArea.value = null
-      //   ElMessage.success('区域删除成功')
-      // }
+      ElMessage.error(error?.message || '删除区域失败')
     }
   } catch (error) {
     // 用户取消删除
   }
 }
 
-const updateAreaBinding = async () => {
-  if (selectedArea.value) {
-    const area = areas.value.find(a => a.id === selectedArea.value.id)
-    if (area) {
-      area.jobId = selectedArea.value.jobId || ''
-      
-      // 如果有绑定，创建或更新绑定关系
-      if (selectedArea.value.jobId && selectedArea.value.jobId !== '') {
-        try {
-          const bindingData = {
-            area_id: area.id,
-            data_source_type: 'crowd_analysis',
-            data_source_id: selectedArea.value.jobId,
-            data_source_name: getJobName(selectedArea.value.jobId),
-            refresh_interval: 30
-          }
-          
-          await dashboardMapApi.createDashboardMapBinding(bindingData)
-        } catch (error) {
-          console.error('创建绑定失败:', error)
-        }
-      } else {
-        // 如果选择了"未绑定"，删除现有绑定
-        try {
-          await dashboardMapApi.deleteDashboardMapAreaBindings(area.id)
-        } catch (error) {
-          console.error('删除绑定失败:', error)
-        }
-      }
-      
-      updateAreaCounts()
-      // localStorage.setItem(`areas_${currentMap.value.id}`, JSON.stringify(areas.value))
-    }
+const getApiResult = (response) => response?.data ?? response
+
+const resetMapView = () => {
+  selectedMap.value = ''
+  currentMap.value = null
+  areas.value = []
+  editMode.value = null
+  mapImage = null
+  isDrawing = false
+  currentPath = []
+  if (canvas && ctx) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height)
   }
+  emit('map-selected', null)
+  emit('areas-updated', [])
 }
 
 // 删除地图
 const deleteMap = async (map) => {
+  if (!map) return
+
   try {
     await ElMessageBox.confirm('确定要删除这个地图吗？删除后将无法恢复。', '确认删除', {
       type: 'warning'
     })
-    
-    try {
-      const response = await dashboardMapApi.deleteDashboardMap(map.id)
-      
-      if (response.success) {
-        await loadMapList()
-        if (selectedMap.value === map.id) {
-          selectedMap.value = ''
-          currentMap.value = null
-          areas.value = []
-        }
-        ElMessage.success('地图删除成功')
-      } else {
-        throw new Error(response.message || '删除失败')
-      }
-    } catch (error) {
-      // console.error('删除地图失败:', error)
-      // 回退到本地删除
-      // const index = mapList.value.findIndex(m => m.id === map.id)
-      // if (index >= 0) {
-      //   mapList.value.splice(index, 1)
-      //   localStorage.setItem('heatmaps', JSON.stringify(mapList.value))
-      //   if (selectedMap.value === map.id) {
-      //     selectedMap.value = ''
-      //     currentMap.value = null
-      //     areas.value = []
-      //   }
-      //   ElMessage.success('地图删除成功')
-      // }
+
+    const response = await dashboardMapApi.deleteDashboardMap(map.id)
+    const result = getApiResult(response)
+
+    if (!result?.success) {
+      throw new Error(result?.message || '删除失败')
     }
+
+    const deletedId = map.id.toString()
+    const wasSelected = selectedMap.value === deletedId || selectedMap.value === map.id
+
+    await loadMapList()
+    emit('maps-changed', mapList.value)
+
+    if (wasSelected) {
+      resetMapView()
+      if (mapList.value.length > 0) {
+        await loadMap(mapList.value[0].id)
+      }
+    }
+
+    ElMessage.success(result.message || '地图删除成功')
   } catch (error) {
-    // 用户取消删除
+    if (error !== 'cancel' && error !== 'close') {
+      console.error('删除地图失败:', error)
+      ElMessage.error(error?.message || '删除地图失败')
+    }
   }
 }
 
 // 辅助函数
+const PROJECT_HIT_RADIUS = 14
+
+const isPointNearProject = (x, y, area) => {
+  if (area.shapeType !== 'point' || !area.points?.length) return false
+  const p = area.points[0]
+  const transform = getMapTransform()
+  const radius = transform ? PROJECT_HIT_RADIUS / transform.scale : PROJECT_HIT_RADIUS
+  const dx = x - p.x
+  const dy = y - p.y
+  return dx * dx + dy * dy <= radius * radius
+}
+
+const findFeatureAtPoint = (x, y) => {
+  const project = [...areas.value]
+    .reverse()
+    .find(area => area.shapeType === 'point' && isPointNearProject(x, y, area))
+  if (project) return project
+
+  return areas.value.find(
+    area => (area.shapeType || 'polygon') === 'polygon' && isPointInArea(x, y, area)
+  ) || null
+}
+
 const isPointInArea = (x, y, area) => {
   if (!area.points || area.points.length < 3) return false
   
@@ -996,6 +1284,54 @@ const getJobName = (jobId) => {
   return job ? job.job_name : '未知任务'
 }
 
+const getSchemeName = (schemeId) => {
+  const scheme = numberStatSchemes.value.find(s => s.id === schemeId)
+  return scheme ? scheme.label : '未知订阅'
+}
+
+const getSourceName = (sourceType, sourceId) => {
+  if (sourceType === 'smart_scheme') return getSchemeName(sourceId)
+  return getJobName(sourceId)
+}
+
+const handleSourceChange = (sourceId) => {
+  if (!areaForm.name?.trim() && sourceId) {
+    areaForm.name = getSourceName(areaForm.dataSourceType, sourceId)
+  }
+}
+
+const handleDataSourceTypeChange = () => {
+  areaForm.sourceId = ''
+}
+
+const selectMap = async (mapId) => {
+  if (!mapId) return
+  const id = mapId.toString()
+  if (!mapList.value.some(m => m.id === id)) {
+    await loadMapList()
+  }
+  if (mapList.value.some(m => m.id === id)) {
+    await loadMap(id)
+  }
+}
+
+const refreshView = () => {
+  nextTick(() => {
+    if (currentMap.value && canvas && mapContainer.value) {
+      resizeCanvas()
+    } else if (currentMap.value) {
+      initCanvas()
+    }
+  })
+}
+
+defineExpose({ selectMap, refreshView, loadMapList })
+
+// 监听编辑面板开关，重绘高亮
+watch(showAreaDialog, () => {
+  nextTick(() => drawCanvas())
+})
+
 // 监听地图选择变化
 watch(selectedMap, (newMapId) => {
   if (newMapId) {
@@ -1006,13 +1342,15 @@ watch(selectedMap, (newMapId) => {
 // 监听区域数据变化
 watch(areas, (newAreas) => {
   emit('areas-updated', newAreas)
+  nextTick(() => drawCanvas())
 }, { deep: true })
 
-// 监听当前地图变化，确保canvas在有地图时初始化
+// 监听当前地图变化，确保 canvas 在有地图时初始化
 watch(currentMap, (newMap) => {
-  if (newMap && !canvas) {
+  if (newMap) {
     nextTick(() => {
-      initCanvas()
+      if (!canvas) initCanvas()
+      else resizeCanvas()
     })
   }
 })
@@ -1048,10 +1386,10 @@ watch(currentMap, (newMap) => {
 }
 
 .map-container {
-  flex: 1;
+  flex: 1 1 0;
   position: relative;
   overflow: hidden;
-  min-height: v-bind('props.fullPage ? "calc(100vh - 120px)" : "400px"');
+  min-height: v-bind('props.fullPage ? "calc(100vh - 120px)" : "0"');
 }
 
 .empty-map {
@@ -1071,18 +1409,34 @@ watch(currentMap, (newMap) => {
 
 .map-canvas {
   display: block;
-  cursor: crosshair;
+  cursor: v-bind("editMode ? 'crosshair' : 'pointer'");
   background: white;
+}
+
+.edit-mode-hint {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: rgba(64, 158, 255, 0.92);
+  color: #fff;
+  font-size: 13px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  pointer-events: none;
+  z-index: 5;
 }
 
 .heatmap-legend {
   position: absolute;
   top: 16px;
-  right: 16px;
+  left: 16px;
   background: rgba(255, 255, 255, 0.9);
   padding: 12px;
   border-radius: 8px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  z-index: 6;
 }
 
 .legend-title {
@@ -1098,11 +1452,14 @@ watch(currentMap, (newMap) => {
 
 .legend-gradient {
   height: 20px;
-  background: linear-gradient(to right, 
-    rgba(74, 144, 226, 0.3) 0%, 
-    rgba(74, 144, 226, 0.7) 100%);
   border-radius: 4px;
   margin-bottom: 4px;
+}
+
+.color-auto-hint {
+  font-size: 12px;
+  color: #909399;
+  line-height: 1.5;
 }
 
 .legend-labels {
@@ -1112,63 +1469,126 @@ watch(currentMap, (newMap) => {
   color: #666;
 }
 
-.area-info-panel {
+.feature-edit-overlay {
   position: absolute;
-  top: 16px;
-  left: 16px;
-  width: 280px;
-  background: white;
-  border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-  overflow: hidden;
-}
-
-.panel-header {
+  inset: 0;
+  z-index: 12;
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  padding: 12px 16px;
-  background: #409eff;
-  color: white;
-}
-
-.panel-header h3 {
-  margin: 0;
-  font-size: 16px;
-}
-
-.panel-content {
+  justify-content: center;
+  background: rgba(15, 23, 42, 0.28);
   padding: 16px;
 }
 
-.info-item {
+.feature-edit-panel {
+  position: relative;
+  width: min(340px, 100%);
+  max-height: calc(100% - 32px);
+  z-index: 13;
   display: flex;
+  flex-direction: column;
+  background: rgba(255, 255, 255, 0.98);
+  border: 1px solid #dcdfe6;
+  border-radius: 12px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.18);
+  overflow: hidden;
+}
+
+.feature-edit-panel .panel-head {
+  display: flex;
+  align-items: flex-start;
   justify-content: space-between;
-  align-items: center;
-  margin-bottom: 12px;
-}
-
-.info-item label {
-  font-size: 14px;
-  color: #666;
-}
-
-.count-value {
-  font-size: 18px;
-  font-weight: bold;
-  color: #409eff;
-}
-
-.info-actions {
-  display: flex;
   gap: 8px;
-  margin-top: 16px;
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid #ebeef5;
+  background: linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);
+}
+
+.feature-edit-panel .panel-head h3 {
+  margin: 6px 0 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #303133;
+}
+
+.panel-type-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  color: #409eff;
+  background: rgba(64, 158, 255, 0.12);
+}
+
+.panel-form {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 16px 0;
+}
+
+.panel-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px 16px;
+  border-top: 1px solid #ebeef5;
+  background: #fff;
+}
+
+.map-feature-legend {
+  position: absolute;
+  left: 16px;
+  bottom: 16px;
+  z-index: 6;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+  font-size: 12px;
+  color: #606266;
+}
+
+.legend-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.legend-row + .legend-row {
+  margin-top: 6px;
+}
+
+.legend-area-icon {
+  width: 18px;
+  height: 12px;
+  border: 2px solid #409eff;
+  background: rgba(64, 158, 255, 0.35);
+  border-radius: 2px;
+}
+
+.legend-point-icon {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: rgba(255, 138, 101, 0.95);
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px rgba(255, 138, 101, 0.8);
+}
+
+.area-info-panel {
+  display: none;
 }
 
 .dialog-footer {
   display: flex;
   justify-content: flex-end;
+  align-items: center;
   gap: 8px;
+  width: 100%;
+}
+
+.dialog-footer-spacer {
+  flex: 1;
 }
 
 .upload-demo {

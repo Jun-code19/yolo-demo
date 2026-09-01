@@ -5,13 +5,21 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
 import uuid
 import asyncio
+import logging
 import psutil  # 导入psutil库
 
 from src.database import (
-    get_db, Device, DetectionEvent, DetectionConfig, EdgeServer, ExternalEvent, CrowdAnalysisJob, CrowdAnalysisResult,SmartScheme,SmartEvent
+    get_db, Device, DetectionEvent, DetectionConfig, EdgeServer, ExternalEvent,
+    CrowdAnalysisJob, CrowdAnalysisResult, SmartScheme, SmartEvent,
+    DetectionPerformance, VlmInspectionJob, VlmInspectionFinding, CompositeAlert,
+    AlertRule, EventStatus, DetectionModel, DataPushConfig, DataPushLog,
+    ListenerConfig, ListenerStatus, HeatmapArea, HeatmapBinding,
 )
+from api.heatmap_routes import resolve_dashboard_screen_name
 from api.logger import log_action
 import GPUtil # 导入GPUtil库
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/dashboard", tags=["数据大屏"])
 
@@ -29,7 +37,10 @@ event_type_map = {
     "alarm": "订阅报警",
     "smart": "订阅智能",
     "number_stat": "订阅人数统计",
-    "system_log": "设备日志"
+    "system_log": "设备日志",
+    "yolo_analyze": "YOLO 分析",
+    "yolo_then_verify": "YOLO 复核",
+    "yolo_then_analyze": "YOLO 分析链",
 }
 
 #数据大屏API-旧
@@ -694,3 +705,571 @@ def get_system_status():
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取系统资源数据失败: {str(e)}")
+
+
+def _map_event_type(event_type: Optional[str]) -> str:
+    if not event_type:
+        return "未知类型"
+    return event_type_map.get(event_type, event_type)
+
+
+def _event_status_value(status) -> str:
+    if status is None:
+        return "new"
+    return status.value if hasattr(status, "value") else str(status)
+
+
+def _count_detections(bbox) -> int:
+    if isinstance(bbox, list):
+        return len(bbox)
+    if isinstance(bbox, dict):
+        if isinstance(bbox.get("detections"), list):
+            return len(bbox["detections"])
+        return len(bbox)
+    return 0
+
+
+def _serialize_detection_event(event: DetectionEvent, device_name: str) -> Dict[str, Any]:
+    meta = event.meta_data if isinstance(event.meta_data, dict) else {}
+    return {
+        "event_id": event.event_id,
+        "device_name": device_name or "未知设备",
+        "event_type": _map_event_type(event.event_type),
+        "description": meta.get("event_description") or meta.get("pushLabel") or "",
+        "detection_count": _count_detections(event.bounding_box),
+        "confidence": round(float(event.confidence or 0) * 100, 1),
+        "timestamp": (event.created_at or event.timestamp).isoformat() if (event.created_at or event.timestamp) else None,
+        "status": _event_status_value(event.status),
+        "thumbnail_path": event.thumbnail_path,
+    }
+
+
+@router.get("/board-data")
+def get_dashboard_board_data(db: Session = Depends(get_db)):
+    """展板统一数据：聚合多表有效指标供大屏展示"""
+    try:
+        now = datetime.now()
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        trend_since = now - timedelta(days=6)
+
+        device_total = db.query(Device).count()
+        device_online = db.query(Device).filter(Device.status.is_(True)).count()
+        detection_config_total = db.query(DetectionConfig).count()
+        detection_config_enabled = db.query(DetectionConfig).filter(DetectionConfig.enabled.is_(True)).count()
+        detection_event_total = db.query(DetectionEvent).count()
+        detection_event_today = db.query(DetectionEvent).filter(DetectionEvent.created_at >= today_start).count()
+        detection_event_new = db.query(DetectionEvent).filter(DetectionEvent.status == EventStatus.new).count()
+        smart_scheme_total = db.query(SmartScheme).count()
+        smart_event_total = db.query(SmartEvent).count()
+        smart_event_today = db.query(SmartEvent).filter(SmartEvent.timestamp >= today_start).count()
+        crowd_job_total = db.query(CrowdAnalysisJob).count()
+        crowd_job_active = db.query(CrowdAnalysisJob).filter(CrowdAnalysisJob.is_active.is_(True)).count()
+        external_event_total = db.query(ExternalEvent).count()
+        external_event_today = db.query(ExternalEvent).filter(ExternalEvent.timestamp >= today_start).count()
+        vlm_job_total = db.query(VlmInspectionJob).count()
+        vlm_job_active = db.query(VlmInspectionJob).filter(VlmInspectionJob.is_active.is_(True)).count()
+        vlm_alert_today = db.query(VlmInspectionFinding).filter(
+            VlmInspectionFinding.needs_alert.is_(True),
+            VlmInspectionFinding.timestamp >= today_start,
+        ).count()
+        composite_alert_total = db.query(CompositeAlert).count()
+        composite_alert_today = db.query(CompositeAlert).filter(CompositeAlert.fired_at >= today_start).count()
+        alert_rule_enabled = db.query(AlertRule).filter(AlertRule.enabled.is_(True)).count()
+        edge_server_total = db.query(EdgeServer).count()
+        edge_server_online = db.query(EdgeServer).filter(EdgeServer.status == "online").count()
+
+        perf_since = now - timedelta(days=7)
+        avg_detection_time_ms = db.query(
+            func.avg(
+                DetectionPerformance.detection_time
+                + DetectionPerformance.preprocessing_time
+                + DetectionPerformance.postprocessing_time
+            )
+        ).filter(
+            DetectionPerformance.timestamp >= perf_since,
+            DetectionPerformance.detection_time.isnot(None),
+        ).scalar()
+        avg_confidence_raw = db.query(func.avg(DetectionEvent.confidence)).filter(
+            DetectionEvent.created_at >= perf_since,
+            DetectionEvent.confidence.isnot(None),
+        ).scalar()
+
+        # 近 7 天检测性能趋势（按日平均 ms）
+        perf_rows = db.query(
+            func.date(DetectionPerformance.timestamp).label("day"),
+            func.avg(
+                DetectionPerformance.detection_time
+                + DetectionPerformance.preprocessing_time
+                + DetectionPerformance.postprocessing_time
+            ).label("avg_ms"),
+            func.count(DetectionPerformance.performance_id).label("sample_count"),
+        ).filter(
+            DetectionPerformance.timestamp >= trend_since,
+        ).group_by(func.date(DetectionPerformance.timestamp)).all()
+        perf_by_day = {row.day: row for row in perf_rows}
+        performance_trend = []
+        for i in range(6, -1, -1):
+            day = (now - timedelta(days=i)).date()
+            row = perf_by_day.get(day)
+            performance_trend.append({
+                "date": day.isoformat(),
+                "avg_ms": round(float(row.avg_ms or 0), 1) if row else 0,
+                "sample_count": int(row.sample_count or 0) if row else 0,
+            })
+
+        # 近 7 天三类事件趋势
+        external_rows = db.query(
+            func.date(ExternalEvent.timestamp).label("day"),
+            func.count(ExternalEvent.event_id).label("cnt"),
+        ).filter(ExternalEvent.timestamp >= trend_since).group_by(func.date(ExternalEvent.timestamp)).all()
+        detection_rows = db.query(
+            func.date(DetectionEvent.created_at).label("day"),
+            func.count(DetectionEvent.event_id).label("cnt"),
+        ).filter(DetectionEvent.created_at >= trend_since).group_by(func.date(DetectionEvent.created_at)).all()
+        smart_rows = db.query(
+            func.date(SmartEvent.timestamp).label("day"),
+            func.count(SmartEvent.id).label("cnt"),
+        ).filter(SmartEvent.timestamp >= trend_since).group_by(func.date(SmartEvent.timestamp)).all()
+        external_by_day = {row.day: row.cnt for row in external_rows}
+        detection_by_day = {row.day: row.cnt for row in detection_rows}
+        smart_by_day = {row.day: row.cnt for row in smart_rows}
+        historical_trend = []
+        for i in range(6, -1, -1):
+            day = (now - timedelta(days=i)).date()
+            historical_trend.append({
+                "date": day.isoformat(),
+                "detection_event_count": int(detection_by_day.get(day, 0)),
+                "external_event_count": int(external_by_day.get(day, 0)),
+                "smart_event_count": int(smart_by_day.get(day, 0)),
+            })
+
+        # 检测类型 Top：优先今日，无数据则回退累计
+        type_rows = db.query(
+            DetectionEvent.event_type,
+            func.count(DetectionEvent.event_id).label("today_count"),
+        ).filter(
+            DetectionEvent.created_at >= today_start,
+            DetectionEvent.event_type.isnot(None),
+        ).group_by(DetectionEvent.event_type).order_by(func.count(DetectionEvent.event_id).desc()).limit(8).all()
+        stats_scope = "today"
+        if not type_rows:
+            stats_scope = "total"
+            type_rows = db.query(
+                DetectionEvent.event_type,
+                func.count(DetectionEvent.event_id).label("today_count"),
+            ).filter(
+                DetectionEvent.event_type.isnot(None),
+            ).group_by(DetectionEvent.event_type).order_by(func.count(DetectionEvent.event_id).desc()).limit(8).all()
+        total_type_rows = db.query(
+            DetectionEvent.event_type,
+            func.count(DetectionEvent.event_id).label("total_count"),
+        ).filter(DetectionEvent.event_type.isnot(None)).group_by(DetectionEvent.event_type).all()
+        total_type_map = {row.event_type: row.total_count for row in total_type_rows}
+        detection_type_stats = []
+        for row in type_rows:
+            category = _map_event_type(row.event_type)
+            count_value = int(row.today_count or 0)
+            total_count = int(total_type_map.get(row.event_type, 0))
+            if stats_scope == "today":
+                display_count = count_value
+                ratio_base = max(detection_event_today, 1)
+            else:
+                display_count = total_count
+                ratio_base = max(detection_event_total, 1)
+            detection_type_stats.append({
+                "category": category,
+                "today_count": count_value if stats_scope == "today" else 0,
+                "total_count": total_count,
+                "display_count": display_count,
+                "ratio": round(display_count / ratio_base * 100, 1),
+            })
+
+        # 昨日对比增长率（检测事件总量按类型）
+        yesterday_start = today_start - timedelta(days=1)
+        yesterday_type_rows = db.query(
+            DetectionEvent.event_type,
+            func.count(DetectionEvent.event_id).label("cnt"),
+        ).filter(
+            DetectionEvent.created_at >= yesterday_start,
+            DetectionEvent.created_at < today_start,
+        ).group_by(DetectionEvent.event_type).all()
+        day_before_start = today_start - timedelta(days=2)
+        day_before_type_rows = db.query(
+            DetectionEvent.event_type,
+            func.count(DetectionEvent.event_id).label("cnt"),
+        ).filter(
+            DetectionEvent.created_at >= day_before_start,
+            DetectionEvent.created_at < yesterday_start,
+        ).group_by(DetectionEvent.event_type).all()
+        yesterday_map = {row.event_type: row.cnt for row in yesterday_type_rows}
+        day_before_map = {row.event_type: row.cnt for row in day_before_type_rows}
+        behavior_stats = []
+        for row in type_rows[:8]:
+            et = row.event_type
+            yesterday_count = int(yesterday_map.get(et, 0))
+            day_before_count = int(day_before_map.get(et, 0))
+            if day_before_count > 0:
+                growth_rate = round((yesterday_count - day_before_count) / day_before_count * 100, 1)
+            elif yesterday_count > 0:
+                growth_rate = 100.0
+            else:
+                growth_rate = 0.0
+            total_count = int(total_type_map.get(et, 0))
+            today_count = int(row.today_count or 0) if stats_scope == "today" else 0
+            behavior_stats.append({
+                "category": _map_event_type(et),
+                "today_count": today_count,
+                "total_count": total_count,
+                "display_count": today_count if stats_scope == "today" else total_count,
+                "growth_rate": growth_rate,
+            })
+
+        # 设备告警排行：优先今日，无数据则回退累计
+        device_rank_rows = db.query(
+            Device.device_name,
+            func.count(DetectionEvent.event_id).label("today_count"),
+        ).join(DetectionEvent, DetectionEvent.device_id == Device.device_id).filter(
+            DetectionEvent.created_at >= today_start,
+        ).group_by(Device.device_name).order_by(func.count(DetectionEvent.event_id).desc()).limit(6).all()
+        device_rank_scope = "today"
+        if not device_rank_rows:
+            device_rank_scope = "total"
+            device_rank_rows = db.query(
+                Device.device_name,
+                func.count(DetectionEvent.event_id).label("today_count"),
+            ).join(DetectionEvent, DetectionEvent.device_id == Device.device_id).group_by(
+                Device.device_name
+            ).order_by(func.count(DetectionEvent.event_id).desc()).limit(6).all()
+        device_ranking = [
+            {"device_name": name or "未知设备", "today_count": int(cnt or 0)}
+            for name, cnt in device_rank_rows
+        ]
+
+        # 最近检测事件
+        recent_rows = db.query(DetectionEvent, Device.device_name).join(
+            Device, DetectionEvent.device_id == Device.device_id
+        ).order_by(DetectionEvent.created_at.desc()).limit(30).all()
+        recent_events = [_serialize_detection_event(event, device_name) for event, device_name in recent_rows]
+
+        # 最新抓拍
+        snapshot_rows = db.query(DetectionEvent, Device.device_name).join(
+            Device, DetectionEvent.device_id == Device.device_id
+        ).filter(
+            DetectionEvent.thumbnail_path.isnot(None),
+            DetectionEvent.thumbnail_path != "",
+        ).order_by(DetectionEvent.created_at.desc()).limit(12).all()
+        latest_snapshots = [_serialize_detection_event(event, device_name) for event, device_name in snapshot_rows]
+
+        # 人群分析最新人数
+        subquery = db.query(
+            CrowdAnalysisResult.job_id,
+            func.max(CrowdAnalysisResult.timestamp).label("latest_timestamp"),
+        ).group_by(CrowdAnalysisResult.job_id).subquery()
+        crowd_rows = db.query(
+            CrowdAnalysisJob.job_name,
+            CrowdAnalysisResult.total_person_count,
+            CrowdAnalysisResult.timestamp,
+            CrowdAnalysisJob.is_active,
+        ).join(
+            CrowdAnalysisResult, CrowdAnalysisJob.job_id == CrowdAnalysisResult.job_id
+        ).join(
+            subquery,
+            (CrowdAnalysisResult.job_id == subquery.c.job_id)
+            & (CrowdAnalysisResult.timestamp == subquery.c.latest_timestamp),
+        ).order_by(CrowdAnalysisResult.total_person_count.desc()).limit(8).all()
+        crowd_distribution = [
+            {
+                "job_name": job_name or "未命名任务",
+                "people_count": int(people_count or 0),
+                "last_update": ts.isoformat() if ts else None,
+                "is_active": bool(is_active),
+            }
+            for job_name, people_count, ts, is_active in crowd_rows
+        ]
+
+        # 事件状态分布
+        status_labels = {
+            EventStatus.new: "未处理",
+            EventStatus.viewed: "已查看",
+            EventStatus.flagged: "已标记",
+            EventStatus.archived: "已归档",
+        }
+        status_rows = db.query(
+            DetectionEvent.status,
+            func.count(DetectionEvent.event_id).label("cnt"),
+        ).group_by(DetectionEvent.status).all()
+        event_status_distribution = [
+            {
+                "status": _event_status_value(status),
+                "label": status_labels.get(status, str(status)),
+                "count": int(cnt or 0),
+            }
+            for status, cnt in status_rows
+        ]
+
+        # 近 7 天检测事件按小时分布（0-23）
+        hour_rows = db.query(
+            func.extract("hour", DetectionEvent.created_at).label("hour"),
+            func.count(DetectionEvent.event_id).label("cnt"),
+        ).filter(
+            DetectionEvent.created_at >= trend_since,
+        ).group_by(func.extract("hour", DetectionEvent.created_at)).all()
+        hour_map = {int(row.hour): int(row.cnt or 0) for row in hour_rows if row.hour is not None}
+        hourly_distribution = [
+            {"hour": h, "label": f"{h:02d}:00", "count": hour_map.get(h, 0)}
+            for h in range(24)
+        ]
+
+        # 外部事件引擎 Top
+        external_engine_rows = db.query(
+            ExternalEvent.engine_name,
+            func.count(ExternalEvent.event_id).label("cnt"),
+        ).filter(
+            ExternalEvent.engine_name.isnot(None),
+            ExternalEvent.engine_name != "",
+        ).group_by(ExternalEvent.engine_name).order_by(func.count(ExternalEvent.event_id).desc()).limit(6).all()
+        external_engine_stats = [
+            {"name": name or "未知引擎", "value": int(cnt or 0)}
+            for name, cnt in external_engine_rows
+        ]
+
+        # 复合告警最近记录
+        composite_rows = db.query(
+            CompositeAlert, Device.device_name
+        ).outerjoin(
+            Device, CompositeAlert.device_id == Device.device_id
+        ).order_by(CompositeAlert.fired_at.desc()).limit(10).all()
+        recent_composite_alerts = [
+            {
+                "id": alert.alert_id,
+                "source": "composite",
+                "title": alert.title,
+                "summary": (alert.summary or "")[:120],
+                "device_name": device_name or "多设备",
+                "status": alert.status or "new",
+                "timestamp": alert.fired_at.isoformat() if alert.fired_at else None,
+            }
+            for alert, device_name in composite_rows
+        ]
+
+        # VLM 告警最近记录
+        vlm_alert_rows = db.query(
+            VlmInspectionFinding, Device.device_name, VlmInspectionJob.job_name
+        ).join(Device, VlmInspectionFinding.device_id == Device.device_id).join(
+            VlmInspectionJob, VlmInspectionFinding.job_id == VlmInspectionJob.job_id
+        ).filter(
+            VlmInspectionFinding.needs_alert.is_(True),
+        ).order_by(VlmInspectionFinding.timestamp.desc()).limit(10).all()
+        recent_vlm_alerts = [
+            {
+                "id": finding.finding_id,
+                "source": "vlm",
+                "title": finding.summary or (finding.alert_labels[0] if finding.alert_labels else "VLM 告警"),
+                "summary": (finding.summary or "")[:120],
+                "device_name": device_name or "未知设备",
+                "job_name": job_name or "",
+                "status": "new",
+                "timestamp": finding.timestamp.isoformat() if finding.timestamp else None,
+            }
+            for finding, device_name, job_name in vlm_alert_rows
+        ]
+
+        # 离线设备
+        offline_device_rows = db.query(
+            Device.device_name, Device.ip_address, Device.last_online_time
+        ).filter(Device.status.is_(False)).order_by(Device.last_online_time.desc()).limit(8).all()
+        offline_devices = [
+            {
+                "name": name or "未命名",
+                "ip": ip or "",
+                "last_online": last.isoformat() if last else None,
+            }
+            for name, ip, last in offline_device_rows
+        ]
+
+        # 推送与模型
+        push_config_enabled = db.query(DataPushConfig).filter(DataPushConfig.enabled.is_(True)).count()
+        push_success_today = db.query(DataPushLog).filter(
+            DataPushLog.status == "success",
+            DataPushLog.created_at >= today_start,
+        ).count()
+        push_failure_today = db.query(DataPushLog).filter(
+            DataPushLog.status == "failure",
+            DataPushLog.created_at >= today_start,
+        ).count()
+        listener_running = db.query(ListenerConfig).filter(ListenerConfig.enabled.is_(True)).count()
+        active_models = db.query(DetectionModel).filter(DetectionModel.is_active.is_(True)).count()
+        total_models = db.query(DetectionModel).count()
+        vlm_alert_total = db.query(VlmInspectionFinding).filter(
+            VlmInspectionFinding.needs_alert.is_(True)
+        ).count()
+
+        smart_scheme_running = db.query(SmartScheme).filter(SmartScheme.status == "running").count()
+        listener_error = db.query(ListenerStatus).filter(ListenerStatus.status == "error").count()
+        listener_running_count = db.query(ListenerStatus).filter(ListenerStatus.status == "running").count()
+
+        # 订阅事件最近记录
+        smart_event_rows = db.query(SmartEvent).order_by(SmartEvent.timestamp.desc()).limit(10).all()
+        recent_smart_events = [
+            {
+                "id": ev.id,
+                "source": "smart",
+                "title": ev.title or ev.event_type or "订阅事件",
+                "summary": (ev.description or "")[:120],
+                "event_type": ev.event_type,
+                "priority": ev.priority or "normal",
+                "status": ev.status or "pending",
+                "timestamp": ev.timestamp.isoformat() if ev.timestamp else None,
+            }
+            for ev in smart_event_rows
+        ]
+
+        # 最近推送记录（优先失败）
+        push_log_rows = db.query(DataPushLog).order_by(
+            DataPushLog.created_at.desc()
+        ).limit(20).all()
+        push_failures = [
+            {
+                "push_name": log.push_name or "未命名",
+                "status": log.status,
+                "message": (log.message or "")[:80],
+                "target": log.target_summary or "",
+                "timestamp": log.created_at.isoformat() if log.created_at else None,
+            }
+            for log in push_log_rows if log.status == "failure"
+        ][:8]
+        recent_push_logs = [
+            {
+                "push_name": log.push_name or "未命名",
+                "status": log.status,
+                "method": log.push_method or "",
+                "duration_ms": log.duration_ms,
+                "timestamp": log.created_at.isoformat() if log.created_at else None,
+            }
+            for log in push_log_rows[:8]
+        ]
+
+        # 热力图区域当前人数
+        heatmap_rows = db.query(
+            HeatmapArea.name,
+            HeatmapBinding.current_count,
+            HeatmapBinding.last_update_time,
+            HeatmapBinding.data_source_name,
+        ).join(
+            HeatmapBinding, HeatmapBinding.area_id == HeatmapArea.id
+        ).filter(
+            HeatmapArea.is_active.is_(True),
+            HeatmapBinding.is_active.is_(True),
+        ).order_by(HeatmapBinding.current_count.desc()).limit(8).all()
+        heatmap_area_stats = [
+            {
+                "area_name": name or "未命名区域",
+                "people_count": int(cnt or 0),
+                "source": source or "",
+                "last_update": ts.isoformat() if ts else None,
+            }
+            for name, cnt, ts, source in heatmap_rows
+        ]
+
+        # 外部事件最近记录
+        external_recent_rows = db.query(ExternalEvent).order_by(
+            ExternalEvent.timestamp.desc()
+        ).limit(8).all()
+        recent_external_events = [
+            {
+                "id": ev.event_id,
+                "source": "external",
+                "title": ev.engine_name or str(ev.event_type or "外部事件"),
+                "device_name": ev.device_name or "",
+                "engine_name": ev.engine_name or "",
+                "timestamp": ev.timestamp.isoformat() if ev.timestamp else None,
+            }
+            for ev in external_recent_rows
+        ]
+
+        # 监听服务状态摘要
+        listener_status_rows = db.query(
+            ListenerConfig.name,
+            ListenerStatus.status,
+            ListenerStatus.events_count,
+            ListenerStatus.last_event_time,
+        ).outerjoin(
+            ListenerStatus, ListenerStatus.config_id == ListenerConfig.config_id
+        ).filter(ListenerConfig.enabled.is_(True)).limit(8).all()
+        listener_status_summary = [
+            {
+                "name": name or "未命名",
+                "status": status or "stopped",
+                "events_count": int(cnt or 0),
+                "last_event": ts.isoformat() if ts else None,
+            }
+            for name, status, cnt, ts in listener_status_rows
+        ]
+
+        return {
+            "data": {
+                "overview": {
+                    "device_total": device_total,
+                    "device_online": device_online,
+                    "device_offline": max(device_total - device_online, 0),
+                    "detection_config_total": detection_config_total,
+                    "detection_config_enabled": detection_config_enabled,
+                    "detection_event_total": detection_event_total,
+                    "detection_event_today": detection_event_today,
+                    "detection_event_new": detection_event_new,
+                    "smart_scheme_total": smart_scheme_total,
+                    "smart_event_total": smart_event_total,
+                    "smart_event_today": smart_event_today,
+                    "crowd_job_total": crowd_job_total,
+                    "crowd_job_active": crowd_job_active,
+                    "external_event_total": external_event_total,
+                    "external_event_today": external_event_today,
+                    "vlm_job_total": vlm_job_total,
+                    "vlm_job_active": vlm_job_active,
+                    "vlm_alert_today": vlm_alert_today,
+                    "composite_alert_total": composite_alert_total,
+                    "composite_alert_today": composite_alert_today,
+                    "alert_rule_enabled": alert_rule_enabled,
+                    "edge_server_total": edge_server_total,
+                    "edge_server_online": edge_server_online,
+                    "avg_detection_time_ms": round(float(avg_detection_time_ms or 0), 1),
+                    "avg_confidence": round(float(avg_confidence_raw or 0) * 100, 1),
+                    "push_config_enabled": int(push_config_enabled),
+                    "push_success_today": int(push_success_today),
+                    "push_failure_today": int(push_failure_today),
+                    "listener_running": int(listener_running),
+                    "active_models": int(active_models),
+                    "total_models": int(total_models),
+                    "vlm_alert_total": int(vlm_alert_total),
+                    "smart_scheme_running": int(smart_scheme_running),
+                    "listener_error": int(listener_error),
+                    "listener_running_count": int(listener_running_count),
+                },
+                "detection_type_stats": detection_type_stats,
+                "behavior_stats": behavior_stats,
+                "stats_scope": stats_scope,
+                "device_ranking": device_ranking,
+                "device_rank_scope": device_rank_scope,
+                "performance_trend": performance_trend,
+                "historical_trend": historical_trend,
+                "recent_events": recent_events,
+                "latest_snapshots": latest_snapshots,
+                "crowd_distribution": crowd_distribution,
+                "event_status_distribution": event_status_distribution,
+                "hourly_distribution": hourly_distribution,
+                "external_engine_stats": external_engine_stats,
+                "recent_composite_alerts": recent_composite_alerts,
+                "recent_vlm_alerts": recent_vlm_alerts,
+                "offline_devices": offline_devices,
+                "recent_smart_events": recent_smart_events,
+                "recent_external_events": recent_external_events,
+                "recent_push_logs": recent_push_logs,
+                "push_failures": push_failures,
+                "heatmap_area_stats": heatmap_area_stats,
+                "listener_status_summary": listener_status_summary,
+                "screen_name": resolve_dashboard_screen_name(db),
+                "query_time": now.isoformat(),
+            }
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取展板数据失败: {str(e)}")

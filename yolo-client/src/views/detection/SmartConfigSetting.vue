@@ -82,6 +82,7 @@
           <template #header>
             <div class="card-title-row card-title-row--start">
               <span class="section-title">画线设置</span>
+              <el-tag v-if="isStreaming" size="small" type="success" effect="dark" class="live-tag">实时</el-tag>
               <el-tag v-if="activeScenario" size="small" type="success" class="section-subtitle-tag">
                 {{ activeScenario.name }}
               </el-tag>
@@ -90,19 +91,8 @@
 
           <div class="preview-body">
             <div class="image-preview-container">
-              <div v-if="imageLoading" class="state-box">
-                <el-skeleton animated :rows="5" />
-              </div>
-              <div v-else-if="imageError" class="state-box error">
-                <p>{{ imageError }}</p>
-                <el-button type="primary" @click="loadDeviceImage">重试</el-button>
-              </div>
-              <div v-else-if="!deviceImage" class="state-box">
-                <el-icon :size="40"><VideoCamera /></el-icon>
-                <p>暂无画面</p>
-              </div>
-              <div v-else class="image-wrapper">
-                <img ref="deviceImageRef" :src="deviceImage" class="device-image" @load="onImageLoaded" />
+              <div v-if="displayImage" class="image-wrapper">
+                <img ref="deviceImageRef" :src="displayImage" class="device-image" @load="onImageLoaded" />
                 <canvas
                   ref="drawingCanvas"
                   class="drawing-canvas"
@@ -110,6 +100,26 @@
                   @mousemove="handleMouseMove"
                   @contextmenu.prevent="handleRightClick"
                 />
+                <div v-if="previewLoading" class="preview-loading-overlay">
+                  <div class="preview-loading-panel">
+                    <span>正在刷新画面...</span>
+                  </div>
+                </div>
+              </div>
+              <div v-else-if="previewLoading" class="state-box state-box--loading">
+                <el-icon class="preview-camera-icon" :size="48"><VideoCamera /></el-icon>
+                <p class="loading-title">正在连接设备画面</p>
+                <p class="loading-hint">RTSP 实时流连接中，必要时将自动尝试抓图</p>
+              </div>
+              <div v-else-if="previewError" class="state-box error">
+                <el-icon :size="40"><VideoCamera /></el-icon>
+                <p>{{ previewError }}</p>
+                <el-button type="primary" size="small" @click="refreshPreview">重试</el-button>
+              </div>
+              <div v-else class="state-box">
+                <el-icon :size="40"><VideoCamera /></el-icon>
+                <p>{{ isStreaming ? '等待视频帧...' : '暂无画面' }}</p>
+                <el-button size="small" @click="refreshPreview">刷新画面</el-button>
               </div>
             </div>
             <div class="draw-actions">
@@ -120,7 +130,7 @@
                 完成全部
               </el-button>
               <el-button @click="clearDrawing" :disabled="!activeScenario">清除</el-button>
-              <el-button @click="loadDeviceImage" :loading="isSnapshotLoading">刷新画面</el-button>
+              <el-button @click="refreshPreview" :loading="previewLoading">刷新画面</el-button>
             </div>
           </div>
         </el-card>
@@ -306,27 +316,6 @@
             </template>
                 </el-form>
               </div>
-
-              <div class="config-block config-block-muted">
-                <div class="block-title">推送设置</div>
-                <el-form label-position="top" class="param-form">
-                  <el-row :gutter="12">
-                    <el-col :span="14">
-                      <el-form-item label="推送标签">
-                        <el-input v-model="multiConfig.pushLabel" placeholder="可选" maxlength="50" show-word-limit />
-                      </el-form-item>
-                    </el-col>
-                    <el-col :span="10">
-                      <el-form-item label="推送间隔">
-                        <div class="input-with-unit">
-                          <el-input-number v-model="multiConfig.alarm_interval" :min="0" :max="3600" controls-position="right" class="ctrl-full" />
-                          <span class="unit-label">秒</span>
-                        </div>
-                      </el-form-item>
-                    </el-col>
-                  </el-row>
-                </el-form>
-              </div>
             </div>
           </div>
         </el-card>
@@ -336,12 +325,14 @@
 </template>
 
 <script>
-import { defineComponent, ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue';
+import { defineComponent, ref, reactive, computed, onMounted, onUnmounted, watch, nextTick } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { ArrowLeft, VideoCamera } from '@element-plus/icons-vue';
 import deviceApi from '@/api/device';
 import { detectionConfigApi } from '@/api/detection';
+import { useDeviceFramePreview } from '@/composables/useDeviceFramePreview';
+import { DEFAULT_SMART_SCHEME_PUSH_TAG } from '@/constants/pushTags';
 import {
   SCENARIO_GROUPS,
   createScenario,
@@ -373,7 +364,7 @@ export default defineComponent({
     const multiConfig = reactive({
       version: 2,
       alarm_interval: 15,
-      pushLabel: '',
+      pushLabel: DEFAULT_SMART_SCHEME_PUSH_TAG,
       scenarios: [],
     });
 
@@ -381,15 +372,29 @@ export default defineComponent({
       multiConfig.scenarios.find((item) => item.id === activeScenarioId.value) || null
     );
 
-    const imageLoading = ref(false);
-    const imageError = ref(null);
-    const deviceImage = ref(null);
     const deviceImageRef = ref(null);
     const drawingCanvas = ref(null);
     let canvasResizeObserver = null;
     const isDrawing = ref(false);
     const points = ref([]);
-    const isSnapshotLoading = ref(false);
+
+    const {
+      previewLoading,
+      previewError,
+      displayImage,
+      isStreaming,
+      startPreview,
+      refreshPreview,
+      stopPreview: stopDevicePreview,
+    } = useDeviceFramePreview({
+      onFrame: () => {
+        requestAnimationFrame(() => {
+          if (deviceImageRef.value?.complete) {
+            refreshCanvasDrawing();
+          }
+        });
+      },
+    });
 
     const AREA_COLORS = [
       { stroke: '#00ff00', fill: 'rgba(0, 255, 0, 0.15)' },
@@ -474,8 +479,6 @@ export default defineComponent({
     const goBack = () => router.go(-1);
 
     const resetConfig = () => {
-      multiConfig.alarm_interval = 15;
-      multiConfig.pushLabel = '';
       multiConfig.scenarios = [];
       activeScenarioId.value = null;
       clearDrawing();
@@ -586,15 +589,21 @@ export default defineComponent({
       requestAnimationFrame(() => { refreshCanvasDrawing(); setupCanvasResizeObserver(); });
     };
 
-    const getDeviceImageUrl = (ipAddress, channel) =>
-      `/api/v2/data-listeners/images/${encodeURIComponent(`storage/devices/${ipAddress}_ch${channel}.jpg`)}`;
+    const loadDeviceImage = async () => refreshPreview();
 
-    const loadDeviceImage = async () => {
-      if (!deviceInfo.value) return;
-      const ipAddress = deviceInfo.value.ip_address || deviceInfo.value.device_ip;
-      const channel = deviceInfo.value.channel || 1;
-      if (!ipAddress) { imageError.value = '设备 IP 不可用'; return; }
-      await loadDeviceSnapshot(ipAddress, channel);
+    const resolveDeviceInfo = (config) => {
+      const matched = deviceList.value.find((d) => d.device_id === config.device_id);
+      if (matched) {
+        return {
+          ...matched,
+          stream_type: config.stream_type || matched.stream_type || 'main',
+        };
+      }
+      return {
+        device_id: config.device_id,
+        device_name: config.device_name || '未知设备',
+        stream_type: config.stream_type || 'main',
+      };
     };
 
     const loadDeviceList = async () => {
@@ -606,41 +615,9 @@ export default defineComponent({
       }
     };
 
-    const loadDeviceSnapshot = async (ipAddress, channel) => {
-      try {
-        isSnapshotLoading.value = true;
-        imageLoading.value = true;
-        imageError.value = null;
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 5000);
-        const response = await fetch('/api/v1/devices/snapshot', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            device_id: deviceInfo.value.device_id,
-            ip_address: ipAddress,
-            device_type: deviceInfo.value.device_type,
-            channel: channel || 1,
-            username: deviceInfo.value.username,
-            password: deviceInfo.value.password,
-          }),
-          signal: controller.signal,
-        });
-        clearTimeout(timeoutId);
-        if (response.ok) {
-          deviceImage.value = window.URL.createObjectURL(await response.blob());
-          imageLoading.value = false;
-        } else {
-          throw new Error(`HTTP ${response.status}`);
-        }
-      } catch {
-        const fallbackImageUrl = getDeviceImageUrl(ipAddress, channel);
-        const img = new Image();
-        img.onload = () => { deviceImage.value = fallbackImageUrl; imageLoading.value = false; imageError.value = null; };
-        img.onerror = () => { imageLoading.value = false; imageError.value = '无法获取设备画面'; };
-        img.src = `${fallbackImageUrl}?t=${Date.now()}`;
-      } finally {
-        isSnapshotLoading.value = false;
+    const startLivePreview = async () => {
+      if (deviceInfo.value) {
+        await startPreview(deviceInfo.value);
       }
     };
 
@@ -794,12 +771,11 @@ export default defineComponent({
         const response = await detectionConfigApi.getConfig(configId);
         const config = response.data?.data ?? response.data;
         if (!config) return;
-        deviceInfo.value = deviceList.value.find((d) => d.device_id === config.device_id)
-          || { device_id: config.device_id, device_name: config.device_name || '未知设备' };
+        deviceInfo.value = resolveDeviceInfo(config);
         if (config.area_coordinates && Object.keys(config.area_coordinates).length > 0) {
           const migrated = migrateAreaCoordinates(config.area_coordinates);
           multiConfig.alarm_interval = migrated.alarm_interval;
-          multiConfig.pushLabel = migrated.pushLabel;
+          multiConfig.pushLabel = migrated.pushLabel || DEFAULT_SMART_SCHEME_PUSH_TAG;
           multiConfig.scenarios.splice(0, multiConfig.scenarios.length, ...migrated.scenarios);
           multiConfig.scenarios.forEach((s) => {
             if (isOccupancyScenario(s)) normalizeOccupancyAreas(s);
@@ -808,7 +784,7 @@ export default defineComponent({
           });
           activeScenarioId.value = multiConfig.scenarios[0]?.id || null;
         }
-        setTimeout(loadDeviceImage, 100);
+        setTimeout(startLivePreview, 100);
       } catch (error) {
         ElMessage.error('加载配置失败');
       }
@@ -826,21 +802,34 @@ export default defineComponent({
       redrawCanvas();
     });
 
+    watch(displayImage, (image) => {
+      if (image) {
+        nextTick(() => {
+          if (deviceImageRef.value?.complete) {
+            refreshCanvasDrawing();
+          }
+        });
+      }
+    });
+
     onUnmounted(() => {
       window.removeEventListener('resize', refreshCanvasDrawing);
       canvasResizeObserver?.disconnect();
+      stopDevicePreview();
     });
 
     return {
       multiConfig, activeScenario, activeScenarioId, scenarioGroups,
       getRuleDisplayType, isDurationScenario, isLineScenario, isOccupancyScenario,
       addScenario, removeScenario, selectScenario, getRowClassName,
-      deviceInfo, saveLoading, imageLoading, imageError, deviceImage, deviceImageRef, drawingCanvas,
-      isDrawing, isSnapshotLoading, isMultiAreaOccupancy, getAreaColor,
+      deviceInfo, saveLoading,
+      previewLoading, previewError, displayImage, isStreaming,
+      deviceImageRef, drawingCanvas,
+      isDrawing, isMultiAreaOccupancy, getAreaColor,
       finishDrawingAll, removeOccupancyArea, goBack, resetConfig, saveConfig,
       getShouldCloseArea, handleDetectionTypeChange, handleCountingTypeChange,
       startDrawing, clearDrawing, handleMouseDown, handleMouseMove, handleRightClick,
-      onImageLoaded, loadDeviceImage,
+      onImageLoaded, refreshPreview, loadDeviceImage,
     };
   },
 });
@@ -940,6 +929,10 @@ export default defineComponent({
   font-weight: 600;
   color: #303133;
   line-height: 1.3;
+}
+
+.live-tag {
+  font-size: 12px;
 }
 
 .section-subtitle-tag {
@@ -1066,9 +1059,10 @@ export default defineComponent({
   position: relative;
   width: 100%;
   aspect-ratio: 4 / 3;
-  background: #111;
+  background: linear-gradient(145deg, #1a1a1a 0%, #0d0d0d 100%);
   border-radius: 6px;
   overflow: hidden;
+  border: 1px solid #2a2a2a;
 }
 
 .state-box {
@@ -1078,13 +1072,62 @@ export default defineComponent({
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  color: #909399;
-  padding: 16px;
+  gap: 10px;
+  color: #a8abb2;
+  padding: 20px;
   font-size: var(--body-size);
+  text-align: center;
+}
+
+.state-box--loading {
+  background:
+    radial-gradient(circle at 50% 40%, rgba(64, 158, 255, 0.08) 0%, transparent 55%),
+    linear-gradient(145deg, #1a1a1a 0%, #0d0d0d 100%);
 }
 
 .state-box.error { color: #f56c6c; }
+
+.preview-camera-icon {
+  color: rgba(255, 255, 255, 0.45);
+  margin-bottom: 4px;
+}
+
+.loading-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+  color: #e5eaf3;
+}
+
+.loading-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #909399;
+  max-width: 240px;
+}
+
+.preview-loading-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(2px);
+}
+
+.preview-loading-panel {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  font-size: 13px;
+}
 
 .image-wrapper {
   position: absolute;

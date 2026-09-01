@@ -13,13 +13,18 @@ _JSON_FILE_CACHE: Dict[str, Any] = {"path": None, "mtime": None, "data": {}}
 # 与数据推送器页面一致的常用标签预设
 COMMON_PUSH_TAGS = [
     "device_online_status",
+    "vlm_inspection",
+    "vlm_alert",
+    "crowd_analysis",
+    "crowd_warning",
+    "subscribe_event",
+    "smart_scheme",
+    "external_event",
     "detection",
+    "composite_alert",
     "alarm",
     "system",
     "statistics",
-    "crowd_analysis",
-    "vlm_inspection",
-    "external_event",
 ]
 
 DEFAULT_DEVICE_MONITOR_CONFIG: Dict[str, Any] = {

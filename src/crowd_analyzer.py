@@ -435,6 +435,20 @@ class CrowdAnalyzer:
 
             analysis_results["total_person_count"] = total_person_count
 
+            push_mode = self._get_push_mode(group_settings)
+            if push_mode == "bundled" and analysis_results["camera_counts"]:
+                try:
+                    bundled_payload = self._build_bundled_push_payload(
+                        job_id=job_id,
+                        job_name=job.job_name,
+                        location_info=location_info,
+                        camera_counts=analysis_results["camera_counts"],
+                        total_person_count=total_person_count,
+                    )
+                    self._push_crowd_data(tags, bundled_payload)
+                except Exception as e:
+                    logger.error(f"打包推送人群分析结果时出错: {e}")
+
             def remove_preview_image(camera_counts):
                 processed_camera_counts = []
                 for camera in camera_counts:
@@ -611,6 +625,64 @@ class CrowdAnalyzer:
             logger.error(f"人员检测失败: {e}")
             return (0, [])
             
+    def _get_push_mode(self, group_settings: Optional[Dict] = None) -> str:
+        mode = (group_settings or DEFAULT_GROUP_SETTINGS).get("push_mode", "per_device")
+        return mode if mode in ("per_device", "bundled") else "per_device"
+
+    def _push_crowd_data(self, tags: Optional[List[str]], data: dict):
+        if not data_pusher.push_configs or not tags:
+            return
+        serializable_tags = [str(tag) for tag in tags]
+        data_pusher.push_data(data=data, tags=serializable_tags)
+
+    def _build_device_push_payload(self, device, device_id: str, person_count: int) -> dict:
+        return {
+            "cameraInfo": f"{device.device_name}:{device.ip_address}",
+            "deviceId": device_id,
+            "enteredCount": 0,
+            "exitedCount": 0,
+            "stayingCount": person_count,
+            "passedCount": 0,
+            "recordTime": datetime.now().isoformat() + "+08:00",
+            "event_description": f"区域内人数={person_count}",
+        }
+
+    def _build_bundled_push_payload(
+        self,
+        job_id: str,
+        job_name: str,
+        location_info: dict,
+        camera_counts: list,
+        total_person_count: int,
+    ) -> dict:
+        devices = []
+        for cam in camera_counts:
+            person_count = cam.get("person_count", 0)
+            device_name = cam.get("device_name", "")
+            ip_address = cam.get("ip_address", "")
+            device_id = cam.get("device_id", "")
+            timestamp = cam.get("timestamp") or datetime.now().isoformat()
+            record_time = timestamp if "+08:00" in timestamp else f"{timestamp}+08:00"
+            devices.append({
+                "cameraInfo": f"{device_name}:{ip_address}",
+                "deviceId": device_id,
+                "enteredCount": 0,
+                "exitedCount": 0,
+                "stayingCount": person_count,
+                "passedCount": 0,
+                "recordTime": record_time,
+                "event_description": f"区域内人数={person_count}",
+            })
+        return {
+            "jobId": job_id,
+            "jobName": job_name,
+            "recordTime": datetime.now().isoformat() + "+08:00",
+            "totalStayingCount": total_person_count,
+            "deviceCount": len(devices),
+            "locationInfo": self._ensure_json_serializable(location_info),
+            "devices": devices,
+        }
+
     def _analyze_single_camera(
         self,
         device_id: str,
@@ -664,6 +736,7 @@ class CrowdAnalyzer:
             camera_result = {
                 "device_id": device_id,
                 "device_name": device.device_name,
+                "ip_address": device.ip_address or "",
                 "timestamp": datetime.now().isoformat(),
                 "person_count": person_count,
                 "location": device.location or "",
@@ -671,28 +744,13 @@ class CrowdAnalyzer:
                 "person_detections": person_boxes
             }
 
-            # 推送分析结果
+            # 逐设备推送
             try:
-                if data_pusher.push_configs and tags:
-                    # 确保标签列表可序列化
-                    serializable_tags = [str(tag) for tag in tags]
-
-                    event_data={
-                        'cameraInfo': device.device_name + ":" + device.ip_address,
-                        'deviceId': device_id,
-                        'enteredCount': 0,
-                        'exitedCount': 0,
-                        'stayingCount': person_count,
-                        'passedCount': 0,
-                        'recordTime': datetime.now().isoformat() + '+08:00', 
-                        'event_description': f'区域内人数={person_count}'
-                    }
-
-                    data_pusher.push_data(
-                        data=event_data,
-                        tags=serializable_tags  # 添加固定标签
+                if self._get_push_mode(group_settings) == "per_device":
+                    self._push_crowd_data(
+                        tags,
+                        self._build_device_push_payload(device, device_id, person_count),
                     )
-                
             except Exception as e:
                 logger.error(f"推送分析结果时出错: {e}")
             

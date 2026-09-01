@@ -4,6 +4,7 @@ RTSP流处理模块 - 用于处理RTSP流，包括启动、停止、捕获帧等
 from fastapi import APIRouter, WebSocket,WebSocketDisconnect # 导入FastAPI相关模块
 from typing import Dict, Tuple # 导入字典类型和元组类型
 import cv2 # 导入OpenCV模块
+from src.frame_acquisition import open_rtsp_capture, probe_rtsp_host
 import base64 # 导入base64编码
 import time # 导入时间模块
 import threading # 导入线程模块
@@ -40,76 +41,6 @@ max_size = 320  # 减小处理尺寸以提高性能
 # 添加 WebSocket 连接管理
 active_connections: Dict[str, WebSocket] = {}
 rtsp_sessions: Dict[str, dict] = {}
-
-def extract_ip_and_channel_from_rtsp_url(rtsp_url: str) -> Tuple[str, str]:
-    """从RTSP URL中提取IP地址和通道号"""
-    try:
-        ip_address = "unknown_device"
-        channel = "1"  # 默认通道号
-        
-        # 使用正则表达式匹配IP地址
-        # rtsp://username:password@ip:port/path 格式
-        ip_pattern = r'@(\d+\.\d+\.\d+\.\d+):'
-        match = re.search(ip_pattern, rtsp_url)
-        if match:
-            ip_address = match.group(1)
-        else:
-            # 备用方法：使用urlparse
-            parsed_url = urlparse(rtsp_url)
-            if parsed_url.hostname:
-                # 检查是否是IP地址格式
-                ip_regex = r'^\d+\.\d+\.\d+\.\d+$'
-                if re.match(ip_regex, parsed_url.hostname):
-                    ip_address = parsed_url.hostname
-        
-        # 提取通道号
-        # 匹配 channel=数字 格式
-        channel_pattern = r'channel=(\d+)'
-        channel_match = re.search(channel_pattern, rtsp_url)
-        if channel_match:
-            channel = channel_match.group(1)
-        
-        if ip_address == "unknown_device":
-            logger.warning(f"无法从RTSP URL中提取IP地址: {rtsp_url}")
-        
-        return ip_address, channel
-    except Exception as e:
-        logger.error(f"提取IP地址和通道号时出错: {e}")
-        return "unknown_device", "1"
-
-def ensure_storage_directory():
-    """确保storage/devices目录存在"""
-    storage_dir = Path("storage/devices")
-    try:
-        storage_dir.mkdir(parents=True, exist_ok=True)
-        return storage_dir
-    except Exception as e:
-        logger.error(f"创建storage/devices目录失败: {e}")
-        return None
-
-def save_device_snapshot(frame, ip_address: str, channel: str = "1"):
-    """保存设备快照图片"""
-    try:
-        storage_dir = ensure_storage_directory()
-        if storage_dir is None:
-            return False
-        
-        # 使用IP地址和通道号组成文件名
-        filename = f"{ip_address}_ch{channel}.jpg"
-        filepath = storage_dir / filename
-        
-        # 保存图片，使用高质量JPEG压缩
-        success = cv2.imwrite(str(filepath), frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
-        
-        if success:
-            logger.info(f"设备快照已保存: {filepath}")
-            return True
-        else:
-            logger.error(f"保存设备快照失败: {filepath}")
-            return False
-    except Exception as e:
-        logger.error(f"保存设备快照时出错: {e}")
-        return False
 
 class RTSPManager:
     """管理RTSP流的类"""
@@ -192,10 +123,26 @@ class RTSPManager:
         try:
             # 尝试从RTSP连接视频源
             try:
-                cap = cv2.VideoCapture(stream_url)
+                reachable, host_port = probe_rtsp_host(stream_url)
+                if not reachable:
+                    logger.error("RTSP 预览端口不可达: %s", host_port)
+                    if connection_id in self.stream_status:
+                        self.stream_status[connection_id] = {
+                            "status": "error",
+                            "error": f"无法连接摄像机 ({host_port})，请检查 IP 是否与本机同网段或路由是否可达",
+                        }
+                    return False
+
+                cap = open_rtsp_capture(stream_url)
                 cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # 设置缓冲区大小为1，减少延迟
 
-                if not cap.isOpened():                   
+                if not cap.isOpened():
+                    logger.error("RTSP 预览打开失败: %s", host_port or stream_url[:64])
+                    if connection_id in self.stream_status:
+                        self.stream_status[connection_id] = {
+                            "status": "error",
+                            "error": f"无法打开 RTSP 流 ({host_port or 'unknown'})，请检查账号密码与通道号",
+                        }
                     return False
                 
                 fps = cap.get(cv2.CAP_PROP_FPS)
@@ -300,9 +247,6 @@ class RTSPManager:
         stream_notified = False
         retry_count = 0
         max_retry = 50  # 最多等待5秒
-                
-        # 快照保存参数
-        snapshot_saved = False  # 标记是否已保存快照
         
         try:
             # 等待RTSP连接成功或失败
@@ -384,21 +328,6 @@ class RTSPManager:
                             # 获取当前帧的宽高
                             current_width = processed_img.shape[1]
                             current_height = processed_img.shape[0]
-                            
-                            # 保存设备快照（仅在首次获取帧时保存）
-                            if not snapshot_saved and connection_id in self.stream_urls:
-                                try:
-                                    stream_url = self.stream_urls[connection_id]
-                                    ip_address, channel = extract_ip_and_channel_from_rtsp_url(stream_url)
-                                    
-                                    # 保存原始大小的图片作为快照
-                                    save_success = save_device_snapshot(img, ip_address, channel)
-                                    if save_success:
-                                        snapshot_saved = True
-                                    else:
-                                        logger.warning(f"保存设备 {ip_address} 通道 {channel} 的快照失败")
-                                except Exception as e:
-                                    logger.error(f"保存设备快照时出错: {e}")
                                                        
                             # 发送数据到WebSocket
                             websocket = active_connections.get(connection_id)

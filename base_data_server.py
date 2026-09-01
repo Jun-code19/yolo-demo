@@ -1,10 +1,23 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from contextlib import asynccontextmanager
 from api.routes import router
 from api.heatmap_routes import heatmap_router
 from src.database import Base, engine
-from src.db_migrations import ensure_device_rtsp_columns, ensure_detection_config_stream_type, ensure_device_group_support, ensure_detection_config_group_mode, ensure_detection_log_device_id_nullable, ensure_crowd_analysis_job_extensions, ensure_vlm_inspection_tables, ensure_data_push_log_table, ensure_edge_server_platform_columns, ensure_device_monitor_method
+from src.db_migrations import (
+    ensure_device_rtsp_columns,
+    ensure_detection_config_stream_type,
+    ensure_device_group_support,
+    ensure_detection_config_group_mode,
+    ensure_detection_log_device_id_nullable,
+    ensure_crowd_analysis_job_extensions,
+    ensure_vlm_inspection_tables,
+    ensure_data_push_log_table,
+    ensure_edge_server_platform_columns,
+    ensure_device_monitor_method,
+    ensure_alert_rule_tables,
+    ensure_heatmap_dashboard_screen_name,
+    ensure_heatmap_area_shape_type,
+)
 from src.env_loader import load_env_file
 import uvicorn
 import logging
@@ -27,6 +40,9 @@ ensure_vlm_inspection_tables(engine)
 ensure_data_push_log_table(engine)
 ensure_edge_server_platform_columns(engine)
 ensure_device_monitor_method(engine)
+ensure_alert_rule_tables(engine)
+ensure_heatmap_dashboard_screen_name(engine)
+ensure_heatmap_area_shape_type(engine)
 
 # 创建FastAPI应用
 app = FastAPI(
@@ -63,6 +79,9 @@ app.include_router(device_monitor_settings_router, prefix="/api/v1")
 
 from api.device_group_routes import router as device_group_router
 app.include_router(device_group_router, prefix="/api/v1")
+
+from api.alert_rule_routes import router as alert_rule_router
+app.include_router(alert_rule_router, prefix="/api/v1")
 
 # 主函数
 if __name__ == "__main__":

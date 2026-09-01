@@ -12,6 +12,18 @@
           clearable
         />
       </el-form-item>
+      <el-form-item label="Token 传递">
+        <el-select v-model="integrationConfig.wait_time_token_style" style="width: 100%">
+          <el-option label="自动尝试（Bearer / 原始 Authorization / ?key= / ?apiKey= / ?token= / X-Api-Key）" value="auto" />
+          <el-option label="Bearer 请求头（推荐，你的接口已验证可用）" value="bearer" />
+          <el-option label="Authorization 原始值（不加 Bearer 前缀）" value="token_raw" />
+          <el-option label="请求头 X-Api-Key" value="header_api_key" />
+          <el-option label="URL 参数 ?key=" value="query_key" />
+          <el-option label="URL 参数 ?apiKey=" value="query_apiKey" />
+          <el-option label="URL 参数 ?token=" value="query_token" />
+          <el-option label="不带 Token" value="none" />
+        </el-select>
+      </el-form-item>
       <el-form-item label="Bearer Token">
         <el-input
           v-model="integrationConfig.wait_time_token"
@@ -25,11 +37,17 @@
           <span>当前已保存：<code>{{ integrationConfig.wait_time_token_masked }}</code></span>
         </div>
       </el-form-item>
+      <el-form-item label="缓存时间">
+        <el-input-number v-model="integrationConfig.wait_time_cache_sec" :min="30" :max="600" :step="30" />
+        <span style="margin-left: 8px; color: #909399;">秒内复用结果，避免频繁请求打崩 WaitTime 服务</span>
+      </el-form-item>
+      <el-form-item label="请求超时">
+        <el-input-number v-model="integrationConfig.wait_time_timeout_sec" :min="10" :max="300" :step="5" />
+        <span style="margin-left: 8px; color: #909399;">秒（慢接口建议 60~120）</span>
+      </el-form-item>
       <el-form-item>
         <el-button :loading="testingWaitTime" @click="testWaitTimeConnection">测试排队接口</el-button>
       </el-form-item>
-
-      <el-divider content-position="left">天气</el-divider>
       <el-form-item label="启用">
         <el-switch v-model="integrationConfig.weather_enabled" />
       </el-form-item>
@@ -91,7 +109,8 @@
       </el-form-item>
 
       <div class="integration-hint">
-        密钥保存在服务端，大屏通过本平台 API 代理请求，不会暴露在前端代码中。已保存的密钥仅显示脱敏后内容（末尾 4 位）。
+        密钥保存在服务端，大屏通过本平台 API 代理请求。Token 传递方式请选 <strong>Bearer 请求头</strong>。
+        若测试返回「Token 认证已通过，但外部接口内部错误(500)」，说明本平台配置正确，需排查 WaitTime 服务端日志。
       </div>
     </el-form>
 
@@ -106,7 +125,7 @@
 import { reactive, ref, onMounted } from 'vue'
 import { InfoFilled } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
-import { dashboardIntegrationApi, getWeatherData, getWaitTimeData } from '@/api/dashboard'
+import { dashboardIntegrationApi, getWeatherData } from '@/api/dashboard'
 
 const props = defineProps({
   compact: {
@@ -127,6 +146,9 @@ const integrationConfig = reactive({
   wait_time_enabled: true,
   wait_time_url: '',
   wait_time_token: '',
+  wait_time_token_style: 'bearer',
+  wait_time_timeout_sec: 60,
+  wait_time_cache_sec: 90,
   wait_time_token_configured: false,
   wait_time_token_masked: '',
   weather_enabled: true,
@@ -152,6 +174,9 @@ const applyPayload = (payload) => {
     wait_time_enabled: payload.wait_time_enabled ?? true,
     wait_time_url: payload.wait_time_url || '',
     wait_time_token: '',
+    wait_time_token_style: payload.wait_time_token_style || 'bearer',
+    wait_time_timeout_sec: payload.wait_time_timeout_sec ?? 60,
+    wait_time_cache_sec: payload.wait_time_cache_sec ?? 90,
     wait_time_token_configured: tokenConfigured,
     wait_time_token_masked: tokenConfigured ? (payload.wait_time_token || '****') : '',
     weather_enabled: payload.weather_enabled ?? true,
@@ -184,6 +209,9 @@ const saveConfig = async () => {
     const body = {
       wait_time_enabled: integrationConfig.wait_time_enabled,
       wait_time_url: integrationConfig.wait_time_url?.trim() || '',
+      wait_time_token_style: integrationConfig.wait_time_token_style || 'bearer',
+      wait_time_timeout_sec: integrationConfig.wait_time_timeout_sec || 60,
+      wait_time_cache_sec: integrationConfig.wait_time_cache_sec || 90,
       weather_enabled: integrationConfig.weather_enabled,
       weather_api_url: integrationConfig.weather_api_url?.trim() || 'https://api.seniverse.com/v3/weather/now.json',
       weather_default_lat: integrationConfig.weather_default_lat,
@@ -275,15 +303,26 @@ const testWeatherConnection = async () => {
 const testWaitTimeConnection = async () => {
   testingWaitTime.value = true
   try {
-    const data = await getWaitTimeData()
+    const response = await dashboardIntegrationApi.testWaitTime({
+      wait_time_url: integrationConfig.wait_time_url?.trim() || '',
+      wait_time_token: integrationConfig.wait_time_token?.trim() || undefined,
+      wait_time_token_style: integrationConfig.wait_time_token_style || 'bearer',
+      wait_time_timeout_sec: integrationConfig.wait_time_timeout_sec || 60,
+      use_saved_token: !integrationConfig.wait_time_token?.trim() && integrationConfig.wait_time_token_configured,
+    })
+    const data = response.data?.data
     if (data === null || data === undefined) {
       ElMessage.warning('排队接口未启用或未返回数据')
     } else {
-      ElMessage.success('排队接口连接正常')
+      ElMessage.success('排队接口连接正常（使用当前表单配置测试）')
     }
   } catch (error) {
     console.error('测试排队接口失败:', error)
-    ElMessage.error(error.response?.data?.detail || '排队接口测试失败，请先保存接口配置')
+    const detail = error.response?.data?.detail
+    const message = Array.isArray(detail)
+      ? detail.map((item) => item.msg || JSON.stringify(item)).join('；')
+      : (detail || error.message || '排队接口测试失败')
+    ElMessage.error(message)
   } finally {
     testingWaitTime.value = false
   }

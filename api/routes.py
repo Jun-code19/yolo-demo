@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File,
 from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
-from src.database import get_db, Device, DeviceGroup, User, SysLog, DetectionModel, DetectionConfig, DetectionEvent, DetectionPerformance, SaveMode, EventStatus, DetectionFrequency, DetectionLog, CrowdAnalysisJob,CrowdAnalysisResult, DataPushConfig, DataPushLog, EdgeServer,ExternalEvent,ListenerConfig,SmartEvent, SmartScheme, VlmInspectionJob, VlmInspectionFinding
+from src.database import get_db, Device, DeviceGroup, User, SysLog, DetectionModel, DetectionConfig, DetectionEvent, DetectionPerformance, SaveMode, EventStatus, DetectionFrequency, DetectionLog, CrowdAnalysisJob,CrowdAnalysisResult, DataPushConfig, DataPushLog, EdgeServer,ExternalEvent,ListenerConfig,SmartEvent, SmartScheme, VlmInspectionJob, VlmInspectionFinding, AlertRule, CompositeAlert
 from src.rtsp_url import build_rtsp_url, RTSP_URL_PRESETS
 from pydantic import BaseModel, Field, validator
 from fastapi.security import OAuth2PasswordRequestForm
@@ -1887,145 +1887,7 @@ async def create_detection_event(
         db.rollback()
         raise HTTPException(status_code=500, detail=f"创建检测事件失败: {str(e)}")
 
-# 更新检测事件状态
-@router.put("/detection/events/{event_id}", response_model=DetectionEventResponse, tags=["检测事件"])
-async def update_detection_event(
-    event_id: str,
-    event_update: DetectionEventUpdate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)):
-    """
-    更新检测事件状态、备注等信息
-    """
-    db_event = db.query(DetectionEvent).filter(DetectionEvent.event_id == event_id).first()
-    if not db_event:
-        raise HTTPException(status_code=404, detail="检测事件不存在")
-    
-    # 更新字段
-    if event_update.status is not None:
-        try:
-            db_event.status = getattr(EventStatus, event_update.status)
-        except AttributeError:
-            raise HTTPException(status_code=400, detail="无效的状态值")
-    
-    if event_update.notes is not None:
-        db_event.notes = event_update.notes
-    
-    # if event_update.viewed_by is not None:
-    #     # 检查用户是否存在
-    #     user = db.query(User).filter(User.user_id == event_update.viewed_by).first()
-    #     if not user:
-    #         raise HTTPException(status_code=404, detail="用户不存在")
-    db_event.viewed_by = current_user.username
-    db_event.viewed_at = datetime.now()
-    
-    try:
-        db.commit()
-        db.refresh(db_event)
-        
-        log_action(db, current_user.user_id, 'update_detection_event', db_event.event_id, f"更新检测事件状态，状态为{db_event.status.value}")
-        # 确保bounding_box是字典
-        bounding_box = db_event.bounding_box
-        if isinstance(bounding_box, str):
-            try:
-                bounding_box = json.loads(bounding_box)
-            except (json.JSONDecodeError, TypeError):
-                bounding_box = []
-        
-        # 确保meta_data是字典
-        meta_data = db_event.meta_data
-        if isinstance(meta_data, str):
-            try:
-                meta_data = json.loads(meta_data)
-            except (json.JSONDecodeError, TypeError):
-                meta_data = {}
-        elif meta_data is None:
-            meta_data = {}
-        
-        # 转换返回数据
-        event_dict = {
-            "event_id": db_event.event_id,
-            "device_id": db_event.device_id,
-            "config_id": db_event.config_id,
-            "timestamp": db_event.timestamp,
-            "event_type": db_event.event_type,
-            "confidence": db_event.confidence,
-            "bounding_box": bounding_box,
-            "meta_data": meta_data,
-            "location": db_event.location,
-            "snippet_path": db_event.snippet_path,
-            "thumbnail_path": db_event.thumbnail_path,
-            "status": db_event.status.value if hasattr(db_event.status, "value") else db_event.status,
-            "viewed_at": db_event.viewed_at,
-            "viewed_by": db_event.viewed_by,
-            "notes": db_event.notes,
-            "created_at": db_event.created_at
-        }
-        
-        return event_dict
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"更新检测事件失败: {str(e)}")
-
-# 删除检测事件
-@router.delete("/detection/events/{event_id}", tags=["检测事件"])
-async def delete_detection_event(
-    event_id: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)):
-    """
-    删除检测事件及其关联的图片文件
-    """
-    db_event = db.query(DetectionEvent).filter(DetectionEvent.event_id == event_id).first()
-    if not db_event:
-        raise HTTPException(status_code=404, detail="检测事件不存在")
-    
-    try:
-        # 删除关联的图片文件
-        files_deleted = []
-        files_failed = []
-        
-        # 删除缩略图
-        if db_event.thumbnail_path:
-            try:
-                if os.path.exists(db_event.thumbnail_path):
-                    os.remove(db_event.thumbnail_path)
-                    files_deleted.append(db_event.thumbnail_path)
-            except OSError as e:
-                files_failed.append(f"缩略图: {str(e)}")
-        
-        # 删除视频片段
-        if db_event.snippet_path:
-            try:
-                if os.path.exists(db_event.snippet_path):
-                    os.remove(db_event.snippet_path)
-                    files_deleted.append(db_event.snippet_path)
-            except OSError as e:
-                files_failed.append(f"视频片段: {str(e)}")
-        
-        # 删除数据库记录
-        db.delete(db_event)
-        db.commit()
-        
-        # 构建日志消息
-        log_message = f"删除检测事件 {event_id}"
-        if files_deleted:
-            log_message += f", 已删除文件: {', '.join(files_deleted)}"
-        if files_failed:
-            log_message += f", 文件删除失败: {', '.join(files_failed)}"
-        
-        log_action(db, current_user.user_id, 'delete_detection_event', event_id, log_message)
-        
-        return {
-            "message": "检测事件已成功删除",
-            "files_deleted": files_deleted,
-            "files_failed": files_failed
-        }
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"删除检测事件失败: {str(e)}")
-
-# 批量更新检测事件状态
+# 批量更新检测事件状态（须在 /{event_id} 之前注册，避免 batch-update 被当作 event_id）
 @router.put("/detection/events/batch-update", tags=["检测事件"])
 async def batch_update_detection_events(
     request_data: Dict[str, Any],
@@ -2166,6 +2028,144 @@ async def batch_delete_detection_events(
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"批量删除检测事件失败: {str(e)}")
+
+# 更新检测事件状态
+@router.put("/detection/events/{event_id}", response_model=DetectionEventResponse, tags=["检测事件"])
+async def update_detection_event(
+    event_id: str,
+    event_update: DetectionEventUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)):
+    """
+    更新检测事件状态、备注等信息
+    """
+    db_event = db.query(DetectionEvent).filter(DetectionEvent.event_id == event_id).first()
+    if not db_event:
+        raise HTTPException(status_code=404, detail="检测事件不存在")
+    
+    # 更新字段
+    if event_update.status is not None:
+        try:
+            db_event.status = getattr(EventStatus, event_update.status)
+        except AttributeError:
+            raise HTTPException(status_code=400, detail="无效的状态值")
+    
+    if event_update.notes is not None:
+        db_event.notes = event_update.notes
+    
+    # if event_update.viewed_by is not None:
+    #     # 检查用户是否存在
+    #     user = db.query(User).filter(User.user_id == event_update.viewed_by).first()
+    #     if not user:
+    #         raise HTTPException(status_code=404, detail="用户不存在")
+    db_event.viewed_by = current_user.username
+    db_event.viewed_at = datetime.now()
+    
+    try:
+        db.commit()
+        db.refresh(db_event)
+        
+        log_action(db, current_user.user_id, 'update_detection_event', db_event.event_id, f"更新检测事件状态，状态为{db_event.status.value}")
+        # 确保bounding_box是字典
+        bounding_box = db_event.bounding_box
+        if isinstance(bounding_box, str):
+            try:
+                bounding_box = json.loads(bounding_box)
+            except (json.JSONDecodeError, TypeError):
+                bounding_box = []
+        
+        # 确保meta_data是字典
+        meta_data = db_event.meta_data
+        if isinstance(meta_data, str):
+            try:
+                meta_data = json.loads(meta_data)
+            except (json.JSONDecodeError, TypeError):
+                meta_data = {}
+        elif meta_data is None:
+            meta_data = {}
+        
+        # 转换返回数据
+        event_dict = {
+            "event_id": db_event.event_id,
+            "device_id": db_event.device_id,
+            "config_id": db_event.config_id,
+            "timestamp": db_event.timestamp,
+            "event_type": db_event.event_type,
+            "confidence": db_event.confidence,
+            "bounding_box": bounding_box,
+            "meta_data": meta_data,
+            "location": db_event.location,
+            "snippet_path": db_event.snippet_path,
+            "thumbnail_path": db_event.thumbnail_path,
+            "status": db_event.status.value if hasattr(db_event.status, "value") else db_event.status,
+            "viewed_at": db_event.viewed_at,
+            "viewed_by": db_event.viewed_by,
+            "notes": db_event.notes,
+            "created_at": db_event.created_at
+        }
+        
+        return event_dict
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"更新检测事件失败: {str(e)}")
+
+# 删除检测事件
+@router.delete("/detection/events/{event_id}", tags=["检测事件"])
+async def delete_detection_event(
+    event_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)):
+    """
+    删除检测事件及其关联的图片文件
+    """
+    db_event = db.query(DetectionEvent).filter(DetectionEvent.event_id == event_id).first()
+    if not db_event:
+        raise HTTPException(status_code=404, detail="检测事件不存在")
+    
+    try:
+        # 删除关联的图片文件
+        files_deleted = []
+        files_failed = []
+        
+        # 删除缩略图
+        if db_event.thumbnail_path:
+            try:
+                if os.path.exists(db_event.thumbnail_path):
+                    os.remove(db_event.thumbnail_path)
+                    files_deleted.append(db_event.thumbnail_path)
+            except OSError as e:
+                files_failed.append(f"缩略图: {str(e)}")
+        
+        # 删除视频片段
+        if db_event.snippet_path:
+            try:
+                if os.path.exists(db_event.snippet_path):
+                    os.remove(db_event.snippet_path)
+                    files_deleted.append(db_event.snippet_path)
+            except OSError as e:
+                files_failed.append(f"视频片段: {str(e)}")
+        
+        # 删除数据库记录
+        db.delete(db_event)
+        db.commit()
+        
+        # 构建日志消息
+        log_message = f"删除检测事件 {event_id}"
+        if files_deleted:
+            log_message += f", 已删除文件: {', '.join(files_deleted)}"
+        if files_failed:
+            log_message += f", 文件删除失败: {', '.join(files_failed)}"
+        
+        log_action(db, current_user.user_id, 'delete_detection_event', event_id, log_message)
+        
+        return {
+            "message": "检测事件已成功删除",
+            "files_deleted": files_deleted,
+            "files_failed": files_failed
+        }
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"删除检测事件失败: {str(e)}")
 
 # 获取检测事件统计概览
 @router.get("/detection/stats", tags=["检测事件"])
@@ -3239,22 +3239,25 @@ def get_comprehensive_dashboard_overview(db: Session = Depends(get_db)):
         ).group_by(DetectionEvent.event_type).all()
         event_type_distribution = {event_type: count for event_type, count in event_type_stats}
         
-        # 9. 外部事件统计（总数而非今日）
-        total_external_events = db.query(ExternalEvent).count()
-        
-        # 按引擎统计外部事件
-        external_engine_stats = db.query(
-            ExternalEvent.engine_name, 
-            func.count(ExternalEvent.event_id).label('count')
-        ).filter(ExternalEvent.engine_name.isnot(None)).group_by(ExternalEvent.engine_name).all()
-        external_engine_distribution = {engine_name: count for engine_name, count in external_engine_stats}
-        
-        # 按状态统计外部事件
-        external_status_stats = db.query(
-            ExternalEvent.status, 
-            func.count(ExternalEvent.event_id).label('count')
-        ).group_by(ExternalEvent.status).all()
-        external_status_distribution = {status.value: count for status, count in external_status_stats}
+        # 9. 规则引擎统计（复合告警）
+        total_alert_rules = db.query(AlertRule).count()
+        enabled_alert_rules = db.query(AlertRule).filter(AlertRule.enabled.is_(True)).count()
+        total_composite_alerts = db.query(CompositeAlert).count()
+        today_composite_alerts = db.query(CompositeAlert).filter(CompositeAlert.fired_at >= today).count()
+
+        alert_status_stats = db.query(
+            CompositeAlert.status,
+            func.count(CompositeAlert.alert_id).label('count')
+        ).group_by(CompositeAlert.status).all()
+        alert_status_distribution = {status: count for status, count in alert_status_stats}
+
+        rule_alert_stats = db.query(
+            AlertRule.name,
+            func.count(CompositeAlert.alert_id).label('count')
+        ).join(
+            CompositeAlert, CompositeAlert.rule_id == AlertRule.rule_id
+        ).group_by(AlertRule.name).order_by(func.count(CompositeAlert.alert_id).desc()).limit(20).all()
+        alert_rule_distribution = {name: count for name, count in rule_alert_stats}
         
         # 订阅事件统计
         total_scheme_events = db.query(SmartEvent).count()
@@ -3299,13 +3302,13 @@ def get_comprehensive_dashboard_overview(db: Session = Depends(get_db)):
         
         # 13. 近7天的数据趋势
         # 获取最近5天的每天的数据条数
-        external_event_history = db.query(
-            func.date(ExternalEvent.timestamp).label('date'), 
-            func.count(ExternalEvent.event_id).label('count')
+        composite_alert_history = db.query(
+            func.date(CompositeAlert.fired_at).label('date'),
+            func.count(CompositeAlert.alert_id).label('count')
         ).filter(
-            ExternalEvent.timestamp >= datetime.now() - timedelta(days=5)
+            CompositeAlert.fired_at >= datetime.now() - timedelta(days=5)
         ).group_by(
-            func.date(ExternalEvent.timestamp)
+            func.date(CompositeAlert.fired_at)
         ).all()
 
         detection_event_history = db.query(
@@ -3334,15 +3337,15 @@ def get_comprehensive_dashboard_overview(db: Session = Depends(get_db)):
             date = today - timedelta(days=i)
             result_dict[date] = {
                 "date": date.strftime("%Y-%m-%d"),
-                "external_events": 0,
+                "alert_rules": 0,
                 "detection_events": 0,
                 "scheme_events": 0
             }
 
-        # 处理外部事件数据
-        for date, count in external_event_history:
-            if date in result_dict: # 确保日期存在于初始化后的字典中
-                result_dict[date]["external_events"] = count
+        # 处理规则引擎告警趋势
+        for date, count in composite_alert_history:
+            if date in result_dict:
+                result_dict[date]["alert_rules"] = count
 
         # 处理检测事件数据
         for date, count in detection_event_history:
@@ -3467,21 +3470,35 @@ def get_comprehensive_dashboard_overview(db: Session = Depends(get_db)):
         # recent_activities.sort(key=lambda x: x["timestamp"], reverse=True)
         # recent_activities = recent_activities[:20]  # 只取前20个
         
-        # 15. 系统性能统计
-        latest_performance = db.query(DetectionPerformance).order_by(
-            DetectionPerformance.timestamp.desc()
-        ).first()
-        
-        avg_detection_time = 0
-        if latest_performance:
-            avg_detection_time = (
-                latest_performance.detection_time + 
-                latest_performance.preprocessing_time + 
-                latest_performance.postprocessing_time
+        # 15. 系统性能统计（近 7 天）
+        perf_since = datetime.now() - timedelta(days=7)
+        avg_detection_time = db.query(
+            func.avg(
+                DetectionPerformance.detection_time
+                + DetectionPerformance.preprocessing_time
+                + DetectionPerformance.postprocessing_time
             )
-        
-        # 计算准确率（模拟数据）
-        accuracy = 98.5
+        ).filter(
+            DetectionPerformance.timestamp >= perf_since,
+            DetectionPerformance.detection_time.isnot(None),
+        ).scalar()
+        # 库内与 API 均为 ms
+        avg_detection_time = round(float(avg_detection_time or 0), 2)
+
+        perf_sample_count = db.query(func.count(DetectionPerformance.performance_id)).filter(
+            DetectionPerformance.timestamp >= perf_since
+        ).scalar() or 0
+
+        avg_confidence_raw = db.query(func.avg(DetectionEvent.confidence)).filter(
+            DetectionEvent.created_at >= perf_since,
+            DetectionEvent.confidence.isnot(None),
+        ).scalar()
+        avg_confidence = round(float(avg_confidence_raw or 0) * 100, 1)
+
+        confidence_sample_count = db.query(func.count(DetectionEvent.event_id)).filter(
+            DetectionEvent.created_at >= perf_since,
+            DetectionEvent.confidence.isnot(None),
+        ).scalar() or 0
         
         # 整合返回数据
         response = {
@@ -3520,10 +3537,13 @@ def get_comprehensive_dashboard_overview(db: Session = Depends(get_db)):
                     "status_distribution": event_status_distribution,
                     "type_distribution": event_type_distribution
                 },
-                "external_events": {
-                    "total": total_external_events,
-                    "status_distribution": external_status_distribution,
-                    "engine_distribution": external_engine_distribution
+                "alert_rules": {
+                    "total": total_composite_alerts,
+                    "today": today_composite_alerts,
+                    "rule_total": total_alert_rules,
+                    "rule_enabled": enabled_alert_rules,
+                    "status_distribution": alert_status_distribution,
+                    "rule_distribution": alert_rule_distribution,
                 },
                 "scheme_events":{
                     "total":total_scheme_events,
@@ -3557,8 +3577,10 @@ def get_comprehensive_dashboard_overview(db: Session = Depends(get_db)):
                 "job_alert_distribution": vlm_job_alert_distribution,
             },
             "performance": {
-                "accuracy": accuracy,
-                "avg_detection_time": avg_detection_time
+                "avg_confidence": avg_confidence,
+                "avg_confidence_sample_count": int(confidence_sample_count),
+                "avg_detection_time": avg_detection_time,
+                "avg_detection_time_sample_count": int(perf_sample_count),
             },
             "trends": {
                 "daily": daily_trends

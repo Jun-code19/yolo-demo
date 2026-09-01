@@ -1,8 +1,19 @@
 """轻量级数据库字段补丁（create_all 不会自动 ALTER 已有表）"""
 import logging
+from typing import Optional
+
 from sqlalchemy import inspect, text
 
 logger = logging.getLogger(__name__)
+
+
+def _column_nullable(inspector, table: str, column: str) -> Optional[bool]:
+    if table not in inspector.get_table_names():
+        return None
+    for col in inspector.get_columns(table):
+        if col["name"] == column:
+            return bool(col.get("nullable", True))
+    return None
 
 
 def ensure_device_rtsp_columns(engine) -> None:
@@ -98,21 +109,22 @@ def ensure_detection_config_group_mode(engine) -> None:
     if "group_settings" not in columns:
         statements.append("ALTER TABLE detection_config ADD COLUMN group_settings JSONB")
 
+    device_id_nullable = _column_nullable(inspector, "detection_config", "device_id")
+    need_drop_not_null = "device_id" in columns and device_id_nullable is False
+
+    if not statements and not need_drop_not_null:
+        return
+
     with engine.begin() as conn:
         for sql in statements:
             conn.execute(text(sql))
             logger.info("已执行数据库补丁: %s", sql)
 
-        if "device_id" in columns:
-            try:
-                conn.execute(
-                    text(
-                        "ALTER TABLE detection_config ALTER COLUMN device_id DROP NOT NULL"
-                    )
-                )
-                logger.info("已执行数据库补丁: detection_config.device_id 允许为空")
-            except Exception as exc:
-                logger.debug("detection_config.device_id 已为可空或无需修改: %s", exc)
+        if need_drop_not_null:
+            conn.execute(
+                text("ALTER TABLE detection_config ALTER COLUMN device_id DROP NOT NULL")
+            )
+            logger.info("已执行数据库补丁: detection_config.device_id 允许为空")
 
 
 def ensure_crowd_analysis_job_extensions(engine) -> None:
@@ -320,6 +332,79 @@ def ensure_edge_server_platform_columns(engine) -> None:
             logger.info("已执行数据库补丁: %s", sql)
 
 
+def ensure_alert_rule_tables(engine) -> None:
+    """复合告警规则引擎相关表"""
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+
+    with engine.begin() as conn:
+        if "alert_rule" not in tables:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS alert_rule (
+                        rule_id VARCHAR(64) PRIMARY KEY,
+                        name VARCHAR(255) NOT NULL,
+                        description TEXT,
+                        enabled BOOLEAN DEFAULT TRUE,
+                        device_id VARCHAR(64) REFERENCES device(device_id),
+                        definition JSONB NOT NULL DEFAULT '{}',
+                        priority INTEGER DEFAULT 100,
+                        push_tags VARCHAR(500),
+                        created_at TIMESTAMP DEFAULT NOW(),
+                        updated_at TIMESTAMP DEFAULT NOW()
+                    )
+                    """
+                )
+            )
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_alert_rule_enabled ON alert_rule(enabled)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_alert_rule_device_id ON alert_rule(device_id)"))
+            logger.info("已创建 alert_rule 表")
+
+        if "alert_rule_state" not in tables:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS alert_rule_state (
+                        rule_id VARCHAR(64) PRIMARY KEY REFERENCES alert_rule(rule_id) ON DELETE CASCADE,
+                        watermark TIMESTAMP,
+                        condition_state JSONB DEFAULT '{}',
+                        last_fired_at TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT NOW()
+                    )
+                    """
+                )
+            )
+            logger.info("已创建 alert_rule_state 表")
+
+        if "composite_alert" not in tables:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS composite_alert (
+                        alert_id VARCHAR(64) PRIMARY KEY,
+                        rule_id VARCHAR(64) NOT NULL REFERENCES alert_rule(rule_id) ON DELETE CASCADE,
+                        device_id VARCHAR(64) REFERENCES device(device_id),
+                        title VARCHAR(255) NOT NULL,
+                        summary TEXT,
+                        matched_events JSONB NOT NULL DEFAULT '[]',
+                        definition_snapshot JSONB,
+                        status VARCHAR(20) DEFAULT 'new',
+                        fired_at TIMESTAMP DEFAULT NOW(),
+                        created_at TIMESTAMP DEFAULT NOW()
+                    )
+                    """
+                )
+            )
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_composite_alert_rule_id ON composite_alert(rule_id)"))
+            conn.execute(
+                text("CREATE INDEX IF NOT EXISTS idx_composite_alert_fired_at ON composite_alert(fired_at DESC)")
+            )
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_composite_alert_device_id ON composite_alert(device_id)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_composite_alert_status ON composite_alert(status)"))
+            logger.info("已创建 composite_alert 表")
+
+
 def ensure_device_monitor_method(engine) -> None:
     inspector = inspect(engine)
     if "device" not in inspector.get_table_names():
@@ -334,4 +419,36 @@ def ensure_device_monitor_method(engine) -> None:
             text("ALTER TABLE device ADD COLUMN monitor_method VARCHAR(32) DEFAULT 'auto'")
         )
         logger.info("已执行数据库补丁: device.monitor_method")
+
+
+def ensure_heatmap_dashboard_screen_name(engine) -> None:
+    inspector = inspect(engine)
+    if "heatmap_dashboard_config" not in inspector.get_table_names():
+        return
+
+    columns = {col["name"] for col in inspector.get_columns("heatmap_dashboard_config")}
+    if "screen_name" in columns:
+        return
+
+    with engine.begin() as conn:
+        conn.execute(
+            text("ALTER TABLE heatmap_dashboard_config ADD COLUMN screen_name VARCHAR(128)")
+        )
+        logger.info("已执行数据库补丁: heatmap_dashboard_config.screen_name")
+
+
+def ensure_heatmap_area_shape_type(engine) -> None:
+    inspector = inspect(engine)
+    if "heatmap_areas" not in inspector.get_table_names():
+        return
+
+    columns = {col["name"] for col in inspector.get_columns("heatmap_areas")}
+    if "shape_type" in columns:
+        return
+
+    with engine.begin() as conn:
+        conn.execute(
+            text("ALTER TABLE heatmap_areas ADD COLUMN shape_type VARCHAR(20) DEFAULT 'polygon'")
+        )
+        logger.info("已执行数据库补丁: heatmap_areas.shape_type")
 

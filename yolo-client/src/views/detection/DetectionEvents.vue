@@ -1102,7 +1102,8 @@ export default defineComponent({
         // 重新加载统计数据
         await loadRealtimeStats();
       } catch (error) {
-        ElMessage.error('批量更新状态失败: ' + error.message);
+        const detail = error.response?.data?.detail
+        ElMessage.error('批量更新状态失败: ' + (detail || error.message))
       }
     };
 

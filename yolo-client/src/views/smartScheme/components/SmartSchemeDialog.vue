@@ -68,8 +68,28 @@
       <el-divider content-position="left">推送配置</el-divider>
       
       <el-form-item label="推送标签" prop="push_tags">
-        <el-input v-model="form.push_tags" placeholder="请输入推送标签，多个标签用逗号分隔" />
-        <div class="form-tip">用于标识和分类推送的事件，如：重要,紧急,日常</div>
+        <el-select
+          v-model="pushTagsArray"
+          multiple
+          filterable
+          allow-create
+          default-first-option
+          collapse-tags
+          collapse-tags-tooltip
+          placeholder="选择或输入推送标签"
+          style="width: 100%"
+          popper-append-to-body
+        >
+          <el-option
+            v-for="tag in pushTagOptions"
+            :key="tag"
+            :label="tag"
+            :value="tag"
+          />
+        </el-select>
+        <div class="form-tip">
+          默认 <code>subscribe_event</code>，需与「数据推送配置」中的标签一致才会投递
+        </div>
       </el-form-item>
 
       <!-- 备注信息 -->
@@ -100,7 +120,8 @@
 import { ref, reactive, computed, watch, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
 import smartSchemeApi from '@/api/smart_scheme'
-
+import { usePushConfigTags } from '@/composables/usePushConfigTags'
+import { DEFAULT_SUBSCRIBE_PUSH_TAG } from '@/constants/pushTags'
 // Props
 const props = defineProps({
   modelValue: Boolean,
@@ -118,7 +139,21 @@ const emit = defineEmits(['update:modelValue', 'success'])
 const formRef = ref(null)
 const loading = ref(false)
 const submitting = ref(false)
+const { pushTagOptions, loadPushConfigTags } = usePushConfigTags()
 
+const pushTagsArray = computed({
+  get() {
+    return form.push_tags
+      ? form.push_tags.split(',').map((t) => t.trim()).filter(Boolean)
+      : []
+  },
+  set(values) {
+    form.push_tags = (values || [])
+      .map((t) => String(t).trim())
+      .filter(Boolean)
+      .join(',')
+  },
+})
 const form = reactive({
   camera_id: null,
   camera_port: 37777,
@@ -154,10 +189,10 @@ watch(() => props.modelValue, (newVal) => {
   if (newVal) {
     nextTick(() => {
       initForm()
+      loadPushConfigTags()
     })
   }
 })
-
 // 方法
 const initForm = () => {
   if (props.scheme) {
@@ -177,10 +212,11 @@ const initForm = () => {
         form[key] = 37777
       } else if (key === 'alarm_interval') {
         form[key] = 60
+      } else if (key === 'push_tags') {
+        form[key] = DEFAULT_SUBSCRIBE_PUSH_TAG
       } else {
         form[key] = ''
-      }
-    })
+      }    })
   }
 }
 
@@ -225,8 +261,15 @@ const submitForm = async () => {
 </script>
 
 <style scoped>
-.form-tip {
-  font-size: 12px;
+.form-tip code {
+  font-size: 11px;
+  color: #606266;
+  background: #f4f4f5;
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.form-tip {  font-size: 12px;
   color: #909399;
   margin-top: 4px;
 }

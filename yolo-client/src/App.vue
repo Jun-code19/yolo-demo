@@ -160,6 +160,13 @@ const openDashboard = () => {
           <template #title>VLM 巡检</template>
         </el-menu-item>
 
+        <el-menu-item index="/alert-rules">
+          <el-icon>
+            <SetUp />
+          </el-icon>
+          <template #title>规则引擎</template>
+        </el-menu-item>
+
         <el-menu-item index="/devices">
           <el-icon>
             <VideoCamera />

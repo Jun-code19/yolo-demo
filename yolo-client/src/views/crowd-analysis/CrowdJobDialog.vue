@@ -215,6 +215,13 @@
         </el-tab-pane>
 
         <el-tab-pane label="高级设置" name="advanced">
+          <el-form-item label="推送模式">
+            <el-radio-group v-model="form.group_settings.push_mode">
+              <el-radio value="per_device">逐设备推送</el-radio>
+              <el-radio value="bundled">打包 JSON 推送</el-radio>
+            </el-radio-group>
+          </el-form-item>
+
           <el-form-item label="标签">
             <el-tag
               v-for="tag in form.tags"
@@ -320,7 +327,8 @@ const weeklySchedule = ref(createFullWeekSchedule())
 const defaultGroupSettings = () => ({
   frame_source_primary: 'snapshot',
   frame_source_fallback: 'rtsp',
-  device_interval_sec: 1
+  device_interval_sec: 1,
+  push_mode: 'per_device'
 })
 
 const form = reactive({

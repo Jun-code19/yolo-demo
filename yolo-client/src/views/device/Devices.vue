@@ -210,11 +210,10 @@
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column label="操作" width="230" fixed="right">
+            <el-table-column label="操作" width="200" fixed="right">
               <template #default="{ row }">
                 <el-button-group>
-                  <el-button type="warning" link @click.stop="setInterestArea(row)">区域</el-button>
-                  <el-button type="primary" link @click="handlePreview(row)">预览</el-button>
+                  <el-button type="warning" link @click="handlePreview(row)">画面</el-button>
                   <el-button type="primary" link @click="handleEdit(row)">编辑</el-button>
                   <el-button type="danger" link @click="handleDelete(row)">删除</el-button>
                 </el-button-group>
@@ -297,7 +296,7 @@
                     </div>
                   </div>
                   <el-button-group class="device-item-actions">
-                    <el-button link type="primary" size="small" @click="handlePreview(device)">预览</el-button>
+                    <el-button link type="warning" size="small" @click="handlePreview(device)">画面</el-button>
                     <el-button link type="primary" size="small" @click="handleEdit(device)">编辑</el-button>
                   </el-button-group>
                 </div>
@@ -412,69 +411,94 @@
       </template>
     </el-dialog>
 
-    <!-- 预览对话框 -->
+    <!-- 设备画面（实时预览 + 区域画线） -->
     <el-dialog 
       v-model="previewVisible" 
-      title="设备预览" 
-      width="50%" top="5vh"
+      :title="`设备画面 · ${currentDevice?.device_name || ''}`"
+      width="72%" top="4vh"
       destroy-on-close 
       @close="stopPreview"
       :z-index="100000"
       append-to-body
       class="preview-dialog high-priority-dialog"
     >
+      <div class="frame-dialog-toolbar">
+        <el-space wrap>
+          <el-switch
+            v-model="areaConfig.enabled"
+            active-text="启用区域"
+            inactive-text="未启用"
+          />
+          <el-button type="primary" size="small" @click="startDrawing" :disabled="!areaConfig.enabled">
+            开始绘制
+          </el-button>
+          <el-button size="small" @click="clearDrawing" :disabled="!areaConfig.enabled">清除区域</el-button>
+        </el-space>
+        <el-text type="info" size="small">左键添加顶点，右键完成（至少3点）</el-text>
+      </div>
+
       <div class="preview-container">
         <div v-if="previewLoading" class="loading-wrapper">
           <el-skeleton animated :rows="8" />
           <div class="loading-text">正在连接设备，请稍候...</div>
         </div>
-        <div v-else-if="previewError" class="error-wrapper">
+        <div v-else-if="previewError && !displayImage" class="error-wrapper">
           <el-icon :size="64">
             <CircleClose />
           </el-icon>
           <p>{{ previewError }}</p>
           <el-button @click="retryPreview">重试</el-button>
         </div>
-        <div v-else-if="!previewStream" class="video-placeholder">
+        <div v-else-if="!displayImage" class="video-placeholder">
           <el-icon :size="64">
             <VideoCamera />
           </el-icon>
-          <p>等待视频流连接...</p>
+          <p>等待画面...</p>
         </div>
-        <div v-else class="video-wrapper">
-          <!-- 视频元素 -->
-          <video ref="videoRef" class="video-player" autoplay muted @loadedmetadata="onVideoLoaded"></video>
-
-          <!-- 备用图像显示 -->
-          <img v-if="currentFrame" :src="currentFrame" class="fallback-image"
-            :style="{ display: showFallbackImage ? 'block' : 'none' }" />
-
+        <div v-else ref="previewWrapperRef" class="video-wrapper">
+          <img
+            :ref="(el) => { frameImageRef = el }"
+            :src="displayImage"
+            class="preview-image"
+            @load="onPreviewFrameLoaded"
+          />
+          <canvas
+            ref="drawingCanvas"
+            class="drawing-canvas"
+            @mousedown="handleMouseDown"
+            @mousemove="handleMouseMove"
+            @contextmenu.prevent="handleRightClick"
+          />
           <div class="stream-info">
             <span>{{ currentDevice?.device_name || '未知设备' }}</span>
+            <el-tag v-if="isStreaming" size="small" type="success" effect="dark">实时</el-tag>
             <span v-if="streamResolution">{{ streamResolution }}</span>
           </div>
         </div>
       </div>
+
       <div class="preview-controls">
-        <el-space>
-          <el-button @click="takeSnapshot" :disabled="!previewStream">
-            <el-icon>
-              <Camera />
-            </el-icon>截图
+        <el-space wrap>
+          <el-button @click="takeSnapshot" :disabled="!displayImage">
+            <el-icon><Camera /></el-icon>截图
           </el-button>
-          <el-button @click="toggleFallbackMode" v-if="previewStream">
-            切换显示模式
-          </el-button>
-          <el-button @click="toggleFullscreen">
-            <el-icon>
-              <FullScreen />
-            </el-icon>{{ isFullscreen ? '退出全屏' : '全屏' }}
+          <el-button @click="toggleFullscreen" :disabled="!displayImage">
+            <el-icon><FullScreen /></el-icon>{{ isFullscreen ? '退出全屏' : '全屏' }}
           </el-button>
         </el-space>
       </div>
+
       <template #footer>
         <span class="dialog-footer">
           <el-button @click="previewVisible = false">关闭</el-button>
+          <el-button
+            type="primary"
+            :loading="areaSaveLoading"
+            :disabled="!canSaveArea()"
+            @click="handleSaveAreaConfig"
+          >
+            保存区域
+          </el-button>
         </span>
       </template>
     </el-dialog>
@@ -573,6 +597,8 @@ import { useRouter } from 'vue-router'
 import { Plus, VideoCamera, CircleClose, Camera, Download, ArrowDown, Upload, UploadFilled, Search, Refresh, FullScreen, Folder, Setting, Share, Grid, Monitor, FolderOpened } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import deviceApi from '@/api/device'
+import { useDeviceRoiDrawing } from '@/composables/useDeviceRoiDrawing'
+import { useDeviceFramePreview } from '@/composables/useDeviceFramePreview'
 
 const router = useRouter()
 import {
@@ -694,16 +720,51 @@ const deviceRules = {
 }
 
 // 预览相关
-const previewLoading = ref(false)
-const previewError = ref(null)
-const previewStream = ref(null)
 const currentDevice = ref(null)
-const videoRef = ref(null)
-const streamResolution = ref('')
-let ws = null
-const currentFrame = ref(null)
-const showFallbackImage = ref(false)
+const previewWrapperRef = ref(null)
 const isFullscreen = ref(false)
+
+const {
+  areaConfig,
+  drawingCanvas,
+  frameImageRef,
+  areaSaveLoading,
+  loadAreaFromDevice,
+  resetAreaDraft,
+  startDrawing,
+  clearDrawing,
+  handleMouseDown,
+  handleMouseMove,
+  handleRightClick,
+  onFrameMediaLoaded,
+  refreshCanvasDrawing,
+  teardownDrawing,
+  canSaveArea,
+  saveAreaConfig,
+} = useDeviceRoiDrawing()
+
+const {
+  previewLoading,
+  previewError,
+  displayImage,
+  isStreaming,
+  streamResolution,
+  startPreview: startDevicePreview,
+  refreshPreview: refreshDevicePreview,
+  stopPreview: stopDevicePreview,
+} = useDeviceFramePreview({
+  onFrame: () => {
+    requestAnimationFrame(() => {
+      if (frameImageRef.value?.complete) {
+        refreshCanvasDrawing()
+      }
+    })
+  },
+})
+
+const onPreviewFrameLoaded = () => {
+  onFrameMediaLoaded()
+}
 
 // 导入相关
 const importDialogVisible = ref(false)
@@ -939,8 +1000,8 @@ const refreshStatus = async () => {
 
 // 处理全屏状态变化
 const handleFullscreenChange = () => {
-  isFullscreen.value = !!document.fullscreenElement || !!document.mozFullScreenElement || !!document.webkitFullscreenElement || !!document.msFullscreenElement;
-};
+  isFullscreen.value = !!document.fullscreenElement
+}
 
 // 初始化
 onMounted(() => {
@@ -961,12 +1022,6 @@ onMounted(() => {
 
 onUnmounted(() => {
   stopPreview()
-  // if (refreshInterval) {
-  //   clearInterval(refreshInterval)
-  // }
-  
-  // 确保清理全屏资源
-  stopFullscreenFrameUpdate()
   if (isFullscreen.value) {
     exitFullscreen()
   }
@@ -980,16 +1035,6 @@ onUnmounted(() => {
   // 移除键盘事件监听
   document.removeEventListener('keydown', handleKeyDown)
 })
-
-// 设置感兴趣区域（跳转区域设置页）
-const setInterestArea = (device) => {
-  const deviceId = device?.device_id
-  if (!deviceId) {
-    ElMessage.warning('设备ID无效，无法打开区域设置')
-    return
-  }
-  router.push(`/devices/area-config/${encodeURIComponent(deviceId)}`).catch(() => {})
-}
 
 // 处理键盘事件
 const handleKeyDown = (event) => {
@@ -1121,7 +1166,7 @@ const buildDeleteConfirmMessage = (deviceNames) => {
 
   return h('div', { class: 'delete-confirm-message' }, [
     h('p', { class: 'delete-confirm-line' }, actionText),
-    h('p', { class: 'delete-confirm-line delete-confirm-tip' }, '关联数据包括：检测配置、检测事件、性能记录、设备快照等。'),
+    h('p', { class: 'delete-confirm-line delete-confirm-tip' }, '关联数据包括：检测配置、检测事件、性能记录等。'),
     h('p', { class: 'delete-confirm-line delete-confirm-devices' }, [
       h('span', { class: 'delete-confirm-label' }, '设备：'),
       h('span', namesText)
@@ -1187,433 +1232,103 @@ const handleBatchDelete = () => {
   }).catch(() => { })
 }
 
-// 预览设备
-const handlePreview = (row) => {
+// 打开设备画面（实时预览 + 区域画线）
+const handlePreview = async (row) => {
   currentDevice.value = row
   previewVisible.value = true
-  previewLoading.value = true
-  previewError.value = null
-  previewStream.value = null
-  currentFrame.value = null
-  showFallbackImage.value = true
-  streamResolution.value = ''
-  isFullscreen.value = false // 重置全屏状态
-
-  // 清除之前的预览状态
-  if (videoRef.value && videoRef.value.srcObject) {
-    const tracks = videoRef.value.srcObject.getTracks()
-    tracks.forEach(track => track.stop())
-    videoRef.value.srcObject = null
-  }
-
-  // 延迟一帧，确保DOM加载完成再开始预览
-  setTimeout(() => {
-    startPreview()
-  }, 0)
-}
-
-// 开始预览
-const startPreview = async () => {
-  try {
-    if (!currentDevice.value) {
-      throw new Error('设备信息不完整')
-    }
-
-    if(currentDevice.value.status == false){
-      previewLoading.value = false
-      previewError.value = '设备离线，无法预览'
-      return
-    }
-
-    // 构建流地址
-    const { device_type, ip_address, port, username, password } = currentDevice.value
-
-    if (device_type === 'camera' || device_type === 'nvr') {
-      // 构建RTSP URL（根据摄像头类型可能需要调整URL格式）
-      // const rtspUrl = `rtsp://${username}:${password}@${ip_address}:${port}/cam/realmonitor?channel=1&subtype=0`
-
-      // 使用WebSocket连接服务器请求代理流
-      await connectToWebSocket()
-    } else {
-      throw new Error('不支持的设备类型')
-    }
-
-    previewLoading.value = false
-  } catch (error) {
-    // console.error('预览失败:', error)
-    previewLoading.value = false
-    previewError.value = `连接设备失败: ${error.message}`
-  }
-}
-
-// 连接WebSocket服务器
-const connectToWebSocket = async () => {
-  return new Promise((resolve, reject) => {
-    try {
-      // 关闭已有的连接
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.close()
-      }
-
-      // 创建新的WebSocket连接
-      ws = new WebSocket(`ws://${window.location.host}/ws/rtsp/preview`)
-
-      // 连接超时
-      const connectionTimeout = setTimeout(() => {
-        reject(new Error('连接超时'))
-      }, 10000)
-
-      ws.onopen = () => {
-        clearTimeout(connectionTimeout)
-        // console.log('WebSocket已连接，正在发送连接请求...')
-
-        // 发送连接请求
-        ws.send(JSON.stringify({
-          type: 'connect',
-          client_type: 'preview_client'
-        }))
-      }
-
-      ws.onmessage = handleWsMessage
-
-      ws.onerror = (error) => {
-        clearTimeout(connectionTimeout)
-        // console.error('WebSocket错误:', error)
-        reject(new Error('WebSocket连接错误'))
-      }
-
-      ws.onclose = () => {
-        // console.log('WebSocket已关闭')
-        if (previewVisible.value && !previewError.value) {
-          previewError.value = '视频流连接已断开'
-        }
-      }
-    } catch (error) {
-      // console.error('创建WebSocket连接失败:', error)
-      reject(error)
-    }
-  })
-}
-
-// 处理WebSocket消息
-const handleWsMessage = (event) => {
-  try {
-    const message = JSON.parse(event.data)
-    // console.log('接收到WebSocket消息:', message.type)
-
-    // 根据消息类型处理
-    switch (message.type) {
-      case 'connect_confirm':
-        // console.log('WebSocket连接确认')
-
-        // 发送预览请求
-        if (ws && ws.readyState === WebSocket.OPEN && currentDevice.value) {
-          // console.log('发送预览请求')
-          ws.send(
-            JSON.stringify({
-              type: 'preview_request',
-              device_id: currentDevice.value.device_id,
-              stream_url: buildRtspUrl(currentDevice.value)
-            })
-          )
-        }
-        break
-
-      case 'preview_start':
-        // console.log('预览流已开始', message)
-        previewLoading.value = false
-
-        // 如果预览流还未开始，则启动
-        if (!previewStream.value) {
-          // 确保状态被正确设置
-          startVideoStream()
-        }
-        break
-
-      case 'stream_data':
-        // 处理流数据
-        handleStreamData(message)
-        break
-
-      case 'error':
-        // console.error('服务器错误:', message.message)
-        previewLoading.value = false
-        previewError.value = `服务器错误: ${message.message}`
-        break
-
-      default:
-        // console.log('未处理的消息类型:', message.type)
-    }
-  } catch (error) {
-    // console.error('处理WebSocket消息错误:', error)
-  }
-}
-
-// 开始视频流播放
-const startVideoStream = () => {
-  // console.log('开始初始化视频流播放...');
+  isFullscreen.value = false
+  resetAreaDraft()
 
   try {
-    // 无论videoRef是否存在，都先将预览状态设置为true
-    previewLoading.value = false;
-    previewStream.value = true;
-    // console.log('视频预览状态已更新: previewStream =', previewStream.value);
-
-    // 检查浏览器支持
-    if (!window.MediaSource) {
-      // console.warn('浏览器不支持MediaSource API，将使用备用显示模式');
-      showFallbackImage.value = true;
-    }
-
-    // 如果videoRef已存在，可以进行其他初始化
-    if (videoRef.value) {
-      // console.log('videoRef已存在，可以初始化视频元素');
-    } else {
-      // console.log('videoRef尚未就绪，将在收到第一帧时初始化');
-    }
-  } catch (error) {
-    // console.error('启动视频流失败:', error);
-    previewError.value = `启动视频流失败: ${error.message}`;
+    const response = await deviceApi.getDevice(row.device_id)
+    currentDevice.value = response.data || row
+    loadAreaFromDevice(currentDevice.value)
+  } catch {
+    currentDevice.value = row
+    loadAreaFromDevice(row)
   }
+
+  if (currentDevice.value?.device_type !== 'camera' && currentDevice.value?.device_type !== 'nvr') {
+    ElMessage.warning('当前设备类型暂不支持画面预览')
+    return
+  }
+
+  await startDevicePreview(currentDevice.value)
 }
 
-// 处理流数据
-const handleStreamData = (data) => {
-  // console.log('收到流数据:', data.type, data.format || '(无格式信息)');
-
-  // 确保预览状态已初始化（双重保险）
-  if (!previewStream.value) {
-    // console.log('预览流状态未初始化，自动初始化');
-    previewLoading.value = false;
-    previewStream.value = true;
-  }
-
+const handleSaveAreaConfig = async () => {
+  if (!currentDevice.value?.device_id) return
   try {
-    // 检查数据格式
-    if (data.format === 'jpeg' && data.data) {
-      // console.log(`处理JPEG图像数据: ${data.width}x${data.height}, 帧ID:${data.frame_id}`);
-
-      // 基于Base64图像创建图像URL
-      const imageData = `data:image/jpeg;base64,${data.data}`;
-
-      // 更新当前帧，用于备用显示方式
-      currentFrame.value = imageData;
-
-      // 更新分辨率信息（无论显示模式如何）
-      if (!streamResolution.value && data.width && data.height) {
-        streamResolution.value = `${data.width}x${data.height}`;
-      }
-
-      // 如果当前在全屏模式，立即更新全屏图像
-      if (isFullscreen.value && showFallbackImage.value) {
-        updateFullscreenImage();
-      }
-
-      // 默认使用备用图像显示方式，简单可靠
-      if (!videoRef.value || !videoRef.value.parentElement) {
-        // console.log('使用备用图像显示模式 - videoRef不可用');
-        showFallbackImage.value = true;
-        return;
-      }
-
-      // 如果明确使用备用图像显示方式，则直接返回
-      if (showFallbackImage.value) {
-        return;
-      }
-
-      // 使用IMG元素更新视频帧
-      const img = new Image();
-      img.onload = () => {
-        // 确保videoRef仍然存在
-        if (!videoRef.value) {
-          // console.warn('videoRef在图像加载过程中消失，切换到备用模式');
-          showFallbackImage.value = true;
-          return;
-        }
-
-        try {
-          // 使用Canvas绘制图像
-          const canvas = document.createElement('canvas');
-          canvas.width = data.width;
-          canvas.height = data.height;
-          const ctx = canvas.getContext('2d');
-          ctx.drawImage(img, 0, 0);
-
-          // 直接将canvas内容显示在video元素上
-          if (!videoRef.value.srcObject) {
-            // 首次创建流
-            // console.log('创建新的Canvas流');
-            try {
-              const canvasStream = canvas.captureStream(15); // 15fps
-              videoRef.value.srcObject = canvasStream;
-              // console.log('视频流已连接到video元素');
-            } catch (e) {
-              // console.error('创建Canvas流失败，切换到备用模式:', e);
-              showFallbackImage.value = true;
-            }
-          } else {
-            // 更新现有流的图像 - 使用简化的方法
-            try {
-              const newStream = canvas.captureStream(15);
-              const oldStream = videoRef.value.srcObject;
-              videoRef.value.srcObject = newStream;
-
-              // 停止旧流的轨道
-              if (oldStream && oldStream.getTracks) {
-                oldStream.getTracks().forEach(track => track.stop());
-              }
-            } catch (e) {
-              // console.warn('更新Canvas流失败，切换到备用模式:', e);
-              showFallbackImage.value = true;
-            }
-          }
-        } catch (e) {
-          // console.error('Canvas操作失败，切换到备用模式:', e);
-          showFallbackImage.value = true;
-        }
-      };
-
-      img.onerror = (err) => {
-        // console.error('图像加载失败:', err);
-        previewError.value = '图像加载失败，请检查网络连接';
-      };
-
-      img.src = imageData;
-    } else if (data.data && !data.format) {
-      // console.log('收到二进制数据，尝试作为MP4片段处理');
-      // 二进制数据处理 (PyAV版本的后端)
-      if (window.appendVideoData) {
-        try {
-          const videoData = new Uint8Array(data.data);
-          window.appendVideoData(videoData);
-          // console.log('成功处理视频数据片段');
-        } catch (e) {
-          // console.error('处理视频片段失败:', e);
-          previewError.value = '视频解码失败';
-        }
-      } else {
-        // console.warn('window.appendVideoData未定义，无法处理MP4片段，切换到备用模式');
-        showFallbackImage.value = true;
-      }
-    } else {
-      // console.warn('收到未知格式的数据:', data);
-    }
+    await saveAreaConfig(currentDevice.value.device_id, deviceApi)
+    await reloadDevices()
   } catch (error) {
-    // console.error('处理视频数据错误:', error);
-    previewError.value = `视频处理错误: ${error.message}`;
-    showFallbackImage.value = true;  // 出错时默认使用备用模式
+    ElMessage.error(error.message || '保存区域失败')
   }
 }
 
-// 视频加载完成
-const onVideoLoaded = () => {
-  if (!videoRef.value) return
-
-  const { videoWidth, videoHeight } = videoRef.value
-  streamResolution.value = `${videoWidth}x${videoHeight}`
-}
-
-// 截图功能
-const takeSnapshot = () => {
-  if (!previewStream.value) return
-
-  try {
-    let canvas, ctx, width, height
-
-    if (showFallbackImage.value && currentFrame.value) {
-      // 备用图像模式：从当前帧截图
-      const img = new Image()
-      img.onload = () => {
-        width = img.naturalWidth || 640
-        height = img.naturalHeight || 480
-        
-        canvas = document.createElement('canvas')
-        canvas.width = width
-        canvas.height = height
-        ctx = canvas.getContext('2d')
-        
-        // 绘制图像
-        ctx.drawImage(img, 0, 0, width, height)
-        
-        // 下载截图
-        downloadSnapshot(canvas)
-      }
-      img.onerror = () => {
-        ElMessage.error('图像加载失败，无法截图')
-      }
-      img.src = currentFrame.value
-    } else if (videoRef.value && videoRef.value.videoWidth > 0) {
-      // 视频模式：从视频元素截图
-      width = videoRef.value.videoWidth
-      height = videoRef.value.videoHeight
-      
-      canvas = document.createElement('canvas')
-      canvas.width = width
-      canvas.height = height
-      ctx = canvas.getContext('2d')
-      
-      // 绘制当前视频帧
-      ctx.drawImage(videoRef.value, 0, 0, width, height)
-      
-      // 下载截图
-      downloadSnapshot(canvas)
-    } else {
-      ElMessage.warning('当前没有可用的视频流或图像，无法截图')
-    }
-  } catch (error) {
-    console.error('截图失败:', error)
-    ElMessage.error('截图失败')
-  }
-}
-
-// 下载截图
 const downloadSnapshot = (canvas) => {
   try {
     const image = canvas.toDataURL('image/png')
     const link = document.createElement('a')
     link.href = image
-    link.download = `${currentDevice.value?.device_name || 'device'}_snapshot_${new Date().toISOString().replace(/:/g, '-')}.png`
+    link.download = `${currentDevice.value?.device_name || 'device'}_${new Date().toISOString().replace(/:/g, '-')}.png`
     link.click()
-    
     ElMessage.success('截图已保存')
   } catch (error) {
-    console.error('保存截图失败:', error)
     ElMessage.error('保存截图失败')
   }
 }
 
-// 重试预览
-const retryPreview = () => {
-  previewError.value = null
-  previewLoading.value = true
-  startPreview()
+const takeSnapshot = () => {
+  const img = frameImageRef.value
+  if (!img || !displayImage.value) {
+    ElMessage.warning('当前没有可用画面，无法截图')
+    return
+  }
+  const canvas = document.createElement('canvas')
+  canvas.width = img.naturalWidth || img.clientWidth || 640
+  canvas.height = img.naturalHeight || img.clientHeight || 480
+  canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height)
+  downloadSnapshot(canvas)
 }
 
-// 停止预览
+const retryPreview = async () => {
+  if (currentDevice.value) {
+    await refreshDevicePreview()
+  }
+}
+
 const stopPreview = () => {
-  // 关闭WebSocket连接
-  if (ws) {
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'stop' }))
-    }
-    ws.close()
-    ws = null
+  stopDevicePreview()
+  if (isFullscreen.value) {
+    exitFullscreen()
   }
+  teardownDrawing()
+}
 
-  // 停止视频流
-  if (videoRef.value && videoRef.value.srcObject) {
-    const tracks = videoRef.value.srcObject.getTracks()
-    tracks.forEach(track => track.stop())
-    videoRef.value.srcObject = null
+const toggleFullscreen = async () => {
+  if (isFullscreen.value) {
+    exitFullscreen()
+    return
   }
+  const el = previewWrapperRef.value
+  if (!el?.requestFullscreen) {
+    ElMessage.warning('当前浏览器不支持全屏')
+    return
+  }
+  try {
+    await el.requestFullscreen()
+    isFullscreen.value = true
+  } catch (error) {
+    ElMessage.error(`进入全屏失败: ${error.message}`)
+  }
+}
 
-  // 停止全屏帧更新
-  stopFullscreenFrameUpdate()
-
-  // 重置状态
-  previewStream.value = null
-  streamResolution.value = ''
-  isFullscreen.value = false // 退出全屏
+const exitFullscreen = () => {
+  if (document.fullscreenElement) {
+    document.exitFullscreen?.()
+  }
+  isFullscreen.value = false
 }
 
 // 格式化日期时间
@@ -1643,188 +1358,6 @@ const getDeviceTypeTag = (type) => {
     'storage_node': 'danger'
   }
   return typeTagMap[type] || 'info'
-}
-
-// 切换备用图像显示模式
-const toggleFallbackMode = () => {
-  showFallbackImage.value = !showFallbackImage.value
-}
-
-// 切换全屏
-const toggleFullscreen = () => {
-  if (!isFullscreen.value) {
-    // 进入全屏
-    if (showFallbackImage.value && currentFrame.value) {
-      // 备用图像模式：全屏显示图像，并实时更新
-      createFullscreenDisplay()
-    } else if (videoRef.value) {
-      // 视频模式：使用浏览器原生全屏
-      if (videoRef.value.requestFullscreen) {
-        videoRef.value.requestFullscreen().catch(err => {
-          console.error(`错误进入全屏模式: ${err.message} (${err.name})`)
-        })
-      } else if (videoRef.value.mozRequestFullScreen) { // Firefox
-        videoRef.value.mozRequestFullScreen()
-      } else if (videoRef.value.webkitRequestFullscreen) { // Chrome, Safari and Opera
-        videoRef.value.webkitRequestFullscreen()
-      } else if (videoRef.value.msRequestFullscreen) { // IE/Edge
-        videoRef.value.msRequestFullscreen()
-      }
-      isFullscreen.value = true
-    }
-  } else {
-    // 退出全屏
-    exitFullscreen()
-  }
-}
-
-// 创建全屏显示（备用模式）
-const createFullscreenDisplay = () => {
-  // 创建全屏容器
-  const fullscreenDiv = document.createElement('div')
-  fullscreenDiv.id = 'fullscreen-container'
-  fullscreenDiv.style.cssText = `
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100vw;
-    height: 100vh;
-    background: #000;
-    z-index: 999999;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    cursor: pointer;
-  `
-  
-  // 创建图像元素
-  const fullscreenImg = document.createElement('img')
-  fullscreenImg.id = 'fullscreen-image'
-  fullscreenImg.style.cssText = `
-    max-width: 100%;
-    max-height: 100%;
-    object-fit: contain;
-  `
-  
-  // 创建设备信息显示
-  const infoDiv = document.createElement('div')
-  infoDiv.style.cssText = `
-    position: absolute;
-    bottom: 20px;
-    left: 20px;
-    right: 20px;
-    padding: 10px 15px;
-    background-color: rgba(0, 0, 0, 0.7);
-    color: #fff;
-    font-size: 14px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    border-radius: 4px;
-  `
-  
-  // 添加设备名称和分辨率信息
-  const deviceName = document.createElement('span')
-  deviceName.textContent = currentDevice.value?.device_name || '未知设备'
-  
-  const resolution = document.createElement('span')
-  resolution.textContent = streamResolution.value || ''
-  
-  infoDiv.appendChild(deviceName)
-  infoDiv.appendChild(resolution)
-  
-  // 添加退出全屏提示
-  const exitHint = document.createElement('div')
-  exitHint.style.cssText = `
-    position: absolute;
-    top: 20px;
-    right: 20px;
-    padding: 8px 12px;
-    background-color: rgba(0, 0, 0, 0.7);
-    color: #fff;
-    font-size: 12px;
-    border-radius: 4px;
-  `
-  exitHint.textContent = '点击任意位置或按ESC键退出全屏'
-  
-  fullscreenDiv.appendChild(fullscreenImg)
-  fullscreenDiv.appendChild(infoDiv)
-  fullscreenDiv.appendChild(exitHint)
-  
-  // 点击退出全屏
-  fullscreenDiv.onclick = () => exitFullscreen()
-  
-  // 添加到页面
-  document.body.appendChild(fullscreenDiv)
-  
-  // 设置初始图像
-  updateFullscreenImage()
-  
-  // 启动帧更新定时器
-  startFullscreenFrameUpdate()
-  
-  isFullscreen.value = true
-}
-
-// 更新全屏图像
-const updateFullscreenImage = () => {
-  if (!isFullscreen.value || !currentFrame.value) return
-  
-  const fullscreenImg = document.getElementById('fullscreen-image')
-  if (fullscreenImg) {
-    fullscreenImg.src = currentFrame.value
-  }
-}
-
-// 启动全屏帧更新
-const startFullscreenFrameUpdate = () => {
-  // 清除之前的定时器
-  if (window.fullscreenUpdateTimer) {
-    clearInterval(window.fullscreenUpdateTimer)
-  }
-  
-  // 创建新的定时器，每100ms更新一次（10fps）
-  window.fullscreenUpdateTimer = setInterval(() => {
-    if (isFullscreen.value && showFallbackImage.value && currentFrame.value) {
-      updateFullscreenImage()
-    } else {
-      // 如果不再全屏或切换到视频模式，停止更新
-      stopFullscreenFrameUpdate()
-    }
-  }, 100)
-}
-
-// 停止全屏帧更新
-const stopFullscreenFrameUpdate = () => {
-  if (window.fullscreenUpdateTimer) {
-    clearInterval(window.fullscreenUpdateTimer)
-    window.fullscreenUpdateTimer = null
-  }
-}
-
-// 退出全屏
-const exitFullscreen = () => {
-  // 停止帧更新
-  stopFullscreenFrameUpdate()
-  
-  // 移除自定义全屏显示
-  const customFullscreen = document.getElementById('fullscreen-container')
-  if (customFullscreen) {
-    document.body.removeChild(customFullscreen)
-  }
-  
-  // 退出浏览器原生全屏
-  if (document.exitFullscreen) {
-    document.exitFullscreen()
-  } else if (document.mozCancelFullScreen) { // Firefox
-    document.mozCancelFullScreen()
-  } else if (document.webkitExitFullscreen) { // Chrome, Safari and Opera
-    document.webkitExitFullscreen()
-  } else if (document.msExitFullscreen) { // IE/Edge
-    document.msExitFullscreen()
-  }
-  
-  isFullscreen.value = false
 }
 
 // 导入功能
@@ -2001,9 +1534,19 @@ const handleResetFilter = () => {
   display: flex;
   justify-content: center;
   align-items: center;
-  height: 400px;
+  height: min(52vh, 520px);
+  min-height: 360px;
   background-color: #f5f7fa;
   border-radius: 4px;
+}
+
+.frame-dialog-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
 }
 
 .video-placeholder {
@@ -2049,6 +1592,8 @@ const handleResetFilter = () => {
   height: 100%;
   object-fit: contain;
   background-color: #000;
+  pointer-events: none;
+  user-select: none;
 }
 
 .stream-info {
@@ -2062,6 +1607,16 @@ const handleResetFilter = () => {
   font-size: 12px;
   display: flex;
   justify-content: space-between;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.drawing-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 3;
+  cursor: crosshair;
 }
 
 .preview-controls {
@@ -2071,7 +1626,7 @@ const handleResetFilter = () => {
   justify-content: flex-end;
 }
 
-.fallback-image {
+.preview-image {
   position: absolute;
   top: 0;
   left: 0;
@@ -2079,7 +1634,8 @@ const handleResetFilter = () => {
   height: 100%;
   object-fit: contain;
   background-color: #000;
-  display: none;
+  pointer-events: none;
+  user-select: none;
 }
 
 .upload-demo {

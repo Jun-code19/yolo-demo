@@ -46,6 +46,11 @@ export const crowdAnalysisApi = {
   getAnalysisJobs(params = { page: 1, page_size: 10 }) {
     return apiClient.get('/jobs', { params });
   },
+
+  /** 下拉选择用：拉取全部任务（不分页截断） */
+  getAllAnalysisJobs() {
+    return apiClient.get('/jobs', { params: { page: 1, page_size: 500 } });
+  },
   
   // 获取特定分析任务详情
   getAnalysisJob(jobId) {

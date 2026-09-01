@@ -24,6 +24,7 @@ from src.data_pusher import data_pusher
 # 导入人群分析模块
 from src.crowd_analyzer import crowd_analyzer
 from src.vlm_inspection_engine import vlm_inspection_engine
+from src.alert_rule_engine import alert_rule_scheduler
 # 导入数据库模块
 from src.database import (
     SessionLocal, DetectionConfig, DetectionEvent, Device, DeviceGroup,
@@ -35,7 +36,7 @@ from src.inference_pipeline.pipeline_config import extract_inference_pipeline
 from src.run_detection_task import DetectionTask
 from src.group_detection_task import GroupDetectionTask
 from src.yolo_task_utils import resolve_yolo_task, load_yolo_model_classes
-from src.db_migrations import ensure_device_rtsp_columns, ensure_detection_config_stream_type, ensure_device_group_support, ensure_detection_config_group_mode, ensure_detection_log_device_id_nullable, ensure_crowd_analysis_job_extensions, ensure_vlm_inspection_tables, ensure_data_push_log_table, ensure_edge_server_platform_columns, ensure_device_monitor_method
+from src.db_migrations import ensure_device_rtsp_columns, ensure_detection_config_stream_type, ensure_device_group_support, ensure_detection_config_group_mode, ensure_detection_log_device_id_nullable, ensure_crowd_analysis_job_extensions, ensure_vlm_inspection_tables, ensure_data_push_log_table, ensure_edge_server_platform_columns, ensure_device_monitor_method, ensure_alert_rule_tables
 
 # 导入认证模块
 from api.auth import get_current_user, User
@@ -260,9 +261,6 @@ class DetectionServer:
         task = self.tasks[config_id]
         
         try:
-            # 获取当前的事件循环并设置到任务中
-            task.loop = asyncio.get_event_loop()
-            
             # 添加WebSocket客户端到检测任务
             task.add_client(websocket)
             
@@ -855,6 +853,7 @@ async def lifespan(app: FastAPI):
     ensure_data_push_log_table(engine)
     ensure_edge_server_platform_columns(engine)
     ensure_device_monitor_method(engine)
+    ensure_alert_rule_tables(engine)
     try:
         register_listener_types()
     except Exception as e:
@@ -908,6 +907,12 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"启动 VLM 巡检服务失败: {e}")
 
+    # 6c. 启动复合告警规则调度器（评估 + 推送）
+    try:
+        alert_rule_scheduler.start()
+    except Exception as e:
+        logger.error(f"启动复合告警规则调度器失败: {e}")
+
     # 7. 启动数据监听服务
     try:
         db = SessionLocal()
@@ -951,6 +956,12 @@ async def lifespan(app: FastAPI):
         vlm_inspection_engine.stop()
     except Exception as e:
         logger.error(f"停止 VLM 巡检服务失败: {e}")
+
+    # 3c. 停止复合告警规则调度器
+    try:
+        alert_rule_scheduler.stop()
+    except Exception as e:
+        logger.error(f"停止复合告警规则调度器失败: {e}")
 
     # 4. 停止检测任务
     for config_id, task in list(detection_server.tasks.items()):
@@ -1240,12 +1251,6 @@ async def detection_preview_websocket(websocket: WebSocket, config_id: str): # �
     task = detection_server.tasks[config_id]
 
     try:
-        # 确保任务的事件循环已设置
-        if not task.loop:
-            loop = asyncio.get_event_loop()
-            task.loop = loop
-            logger.info(f"为检测任务 {config_id} 设置主事件循环")
-        
         # 发送初始连接成功消息
         await websocket.send_json({
             "status": "success",
@@ -1283,6 +1288,9 @@ from api.crowd_analysis import router as crowd_analysis_router
 from api.vlm_inspection import router as vlm_inspection_router
 app.include_router(crowd_analysis_router, prefix="/api/v2")
 app.include_router(vlm_inspection_router, prefix="/api/v2")
+
+from api.alert_rule_detect import router as alert_rule_detect_router
+app.include_router(alert_rule_detect_router, prefix="/api/v2")
 
 if os.path.isdir("storage"):
     app.mount("/storage", StaticFiles(directory="storage"), name="storage")

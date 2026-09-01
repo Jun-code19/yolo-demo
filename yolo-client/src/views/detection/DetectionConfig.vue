@@ -796,6 +796,38 @@
                   </div>
                 </div>
                 </div>
+
+                <div v-if="formState.config_mode === 'device'" class="config-section-block">
+                  <div class="config-section-title">事件推送</div>
+                  <p class="section-hint">智能方案命中及检测事件推送时使用，须与数据推送配置中的 tags 匹配</p>
+                  <div class="save-options-grid">
+                    <el-form-item label="推送标签" class="grid-item">
+                      <el-select
+                        v-model="formState.pushLabel"
+                        filterable
+                        allow-create
+                        default-first-option
+                        clearable
+                        placeholder="选择或输入推送标签"
+                        class="w-full"
+                      >
+                        <el-option v-for="tag in pushTagOptions" :key="tag" :label="tag" :value="tag" />
+                      </el-select>
+                    </el-form-item>
+                    <el-form-item label="推送间隔" class="grid-item">
+                      <div class="input-with-unit">
+                        <el-input-number
+                          v-model="formState.alarm_interval"
+                          :min="0"
+                          :max="3600"
+                          controls-position="right"
+                        />
+                        <span class="unit-label">秒</span>
+                      </div>
+                      <!-- <div class="field-hint">0 表示不限制间隔；大于 0 为同类告警冷却时间</div> -->
+                    </el-form-item>
+                  </div>
+                </div>
               </div>
             </div>
           </el-tab-pane>
@@ -836,6 +868,8 @@ import {
   scheduleToBackend
 } from '@/utils/weeklySchedule';
 import { getScenarioSummaryLabel } from '@/utils/smartScenarios';
+import { usePushConfigTags } from '@/composables/usePushConfigTags';
+import { DEFAULT_SMART_SCHEME_PUSH_TAG } from '@/constants/pushTags';
 
 export default defineComponent({
   name: 'DetectionConfig',
@@ -859,6 +893,7 @@ export default defineComponent({
   },
   setup() {
     const router = useRouter();
+    const { pushTagOptions, loadPushConfigTags } = usePushConfigTags();
 
     // 数据加载状态
     const loading = ref(false);
@@ -961,6 +996,8 @@ export default defineComponent({
       save_mode: 'none',
       save_duration: 10,
       max_storage_days: 30,
+      pushLabel: DEFAULT_SMART_SCHEME_PUSH_TAG,
+      alarm_interval: 15,
       frameInterval: 5,
       weeklySchedule: createFullWeekSchedule(),
       pipelineMode: 'yolo_only',
@@ -1115,6 +1152,29 @@ export default defineComponent({
       formState.pipelineMarginRatio = marginRatio != null
         ? Math.round(Number(marginRatio) * 100)
         : 15;
+    };
+
+    const resetPushSettings = () => {
+      formState.pushLabel = DEFAULT_SMART_SCHEME_PUSH_TAG;
+      formState.alarm_interval = 15;
+    };
+
+    const applyPushSettings = (areaCoordinates) => {
+      formState.pushLabel = areaCoordinates?.pushLabel || DEFAULT_SMART_SCHEME_PUSH_TAG;
+      formState.alarm_interval = areaCoordinates?.alarm_interval ?? 15;
+    };
+
+    const buildAreaCoordinatesForSubmit = () => {
+      const base = editingAreaCoordinates.value
+        ? { ...editingAreaCoordinates.value }
+        : { version: 2, scenarios: [] };
+      return {
+        ...base,
+        version: base.version ?? 2,
+        scenarios: Array.isArray(base.scenarios) ? base.scenarios : [],
+        pushLabel: (formState.pushLabel || '').trim(),
+        alarm_interval: formState.alarm_interval ?? 15,
+      };
     };
 
     const resetRuntimeDefaults = () => {
@@ -1496,6 +1556,7 @@ export default defineComponent({
       loadDeviceGroups();
       loadModelList();
       loadVlmResources();
+      loadPushConfigTags();
       reloadConfigList();
     });
 
@@ -1534,6 +1595,7 @@ export default defineComponent({
       });
       resetRuntimeDefaults();
       resetPipelineDefaults();
+      resetPushSettings();
       editingAreaCoordinates.value = null;
       originalPipelineJson.value = '';
       wasEnabledBeforeEdit.value = false;
@@ -1555,6 +1617,7 @@ export default defineComponent({
       applyRuntimeConfig(record.schedule_config);
       applyInferencePipeline(record.schedule_config);
       editingAreaCoordinates.value = record.area_coordinates || null;
+      applyPushSettings(record.area_coordinates);
       originalPipelineJson.value = JSON.stringify(
         record.schedule_config?.inference_pipeline || { mode: 'yolo_only' }
       );
@@ -1641,6 +1704,7 @@ export default defineComponent({
                 submitData.config_mode = 'device';
                 submitData.frequency = formState.frequency;
                 submitData.stream_type = formState.stream_type;
+                submitData.area_coordinates = buildAreaCoordinatesForSubmit();
               }
 
               if (isEdit.value) {
@@ -1668,6 +1732,7 @@ export default defineComponent({
                   submitData.device_id = formState.device_id;
                   submitData.stream_type = formState.stream_type;
                   submitData.frequency = formState.frequency;
+                  submitData.area_coordinates = buildAreaCoordinatesForSubmit();
                 }
                 await detectionConfigApi.createConfig(submitData);
                 ElMessage.success('配置创建成功');
@@ -1814,6 +1879,7 @@ export default defineComponent({
       isEdit,
       formRef,
       formState,
+      pushTagOptions,
       rules,
       targetClasses,
       formatDateTime,
@@ -2696,6 +2762,17 @@ export default defineComponent({
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
+}
+
+.section-hint {
+  margin: 0 0 12px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #909399;
+}
+
+.w-full {
+  width: 100%;
 }
 
 .dialog-footer-simple {

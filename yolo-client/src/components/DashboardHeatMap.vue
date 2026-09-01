@@ -1,5 +1,5 @@
 <template>
-  <div class="dashboard-heatmap">
+  <div ref="heatmapRootRef" class="dashboard-heatmap">
     <div v-if="!hasConfig" class="no-config">
       <el-icon :size="48">
         <PictureRounded />
@@ -13,105 +13,229 @@
       </el-button>
     </div>
 
-    <div v-else-if="displayMode === 'preview'" class="preview-mode">
-      <div class="preview-grid">
-        <div v-for="area in displayAreas" :key="area.id" class="area-card" :style="{
-          backgroundColor: getAreaColor(area),
-          borderColor: getAreaBorderColor(area)
-        }" @click="showAreaDetail(area)">
-          <div class="area-name">{{ area.name }}</div>
-          <div class="area-count">{{ area.currentCount || 0 }}</div>
-          <div class="area-unit">人</div>
-          <div class="area-density">{{ calculateDensity(area) }} 人/m²</div>
+    <div v-else class="map-mode" :class="{ 'map-mode--full': isFullMapMode }">
+      <canvas
+        ref="mapCanvasRef"
+        class="map-canvas interactive-canvas"
+        :class="{ 'is-dragging': viewState.isDragging }"
+        @click="handleCanvasClick"
+        @wheel.prevent="handleCanvasWheel"
+        @mousedown="handleCanvasMouseDown"
+        @mousemove="handleCanvasMouseMove"
+        @mouseup="handleCanvasMouseUp"
+        @mouseleave="handleCanvasMouseLeave"
+        @dblclick.prevent="resetView"
+      />
+
+      <!-- 迷你模式：控件贴面板边缘 -->
+      <template v-if="isMiniMapMode">
+        <div v-if="parkStats" class="park-stats-panel">
+          <div class="park-stats-title">{{ parkStats.title || '园内人数' }}</div>
+          <div class="park-stats-grid">
+            <div class="park-stat-item"><span class="label">园内</span><span class="value">{{ parkStats.stayingCount ?? 0 }}</span></div>
+            <div class="park-stat-item"><span class="label">进入</span><span class="value enter">{{ parkStats.enteredCount ?? 0 }}</span></div>
+            <div class="park-stat-item"><span class="label">离开</span><span class="value exit">{{ parkStats.exitedCount ?? 0 }}</span></div>
+          </div>
         </div>
-      </div>
+        <button v-if="showExpandButton" type="button" class="fullmap-expand-btn" @click="openFullMapDialog">全屏查看</button>
+        <div class="map-view-hint">滚轮缩放 · 拖拽平移 · 双击重置</div>
+        <div class="full-legend full-color-legend">
+          <div class="legend-title">人数色阶</div>
+          <div class="legend-gradient" :style="{ background: heatmapLegendGradient }"></div>
+          <div class="legend-labels">
+            <span>0</span>
+            <span>{{ maxCount }}</span>
+          </div>
+        </div>
+        <div class="mini-legend area-overview-legend">
+          <div class="mini-legend-title">区域概览</div>
+          <div class="mini-legend-list">
+            <div class="legend-item" v-for="area in legendAreas" :key="area.id">
+              <div class="legend-color" :style="{ backgroundColor: getAreaColor(area) }"></div>
+              <span class="legend-text">{{ area.name }}: {{ formatFeatureCount(area) }}</span>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <!-- 完整地图：控件挂到中栏锚点，避免被 board-content 层遮挡 -->
+      <Teleport to="#board-map-ui-anchor" :disabled="!isFullMapMode">
+        <div v-if="isFullMapMode" class="map-ui-frame map-ui-frame--anchored">
+          <div class="map-ui-row map-ui-row-top">
+            <div v-if="parkStats" class="park-stats-panel park-stats-panel--frame">
+              <div class="park-stats-title">{{ parkStats.title || '园内人数' }}</div>
+              <div class="park-stats-grid">
+                <div class="park-stat-item"><span class="label">园内</span><span class="value">{{ parkStats.stayingCount ?? 0 }}</span></div>
+                <div class="park-stat-item"><span class="label">进入</span><span class="value enter">{{ parkStats.enteredCount ?? 0 }}</span></div>
+                <div class="park-stat-item"><span class="label">离开</span><span class="value exit">{{ parkStats.exitedCount ?? 0 }}</span></div>
+              </div>
+            </div>
+            <div v-else class="map-ui-placeholder" aria-hidden="true"></div>
+            <div class="map-title-badge">人数分布</div>
+            <div class="full-legend full-color-legend map-ui-legend">
+              <div class="legend-title">人数色阶</div>
+              <div class="legend-gradient" :style="{ background: heatmapLegendGradient }"></div>
+              <div class="legend-labels">
+                <span>0</span>
+                <span>{{ maxCount }}</span>
+              </div>
+            </div>
+          </div>
+          <div class="map-ui-row map-ui-row-bottom">
+            <div class="mini-legend area-overview-legend map-ui-overview">
+              <div class="mini-legend-title">区域概览</div>
+              <div class="mini-legend-list">
+                <div class="legend-item" v-for="area in legendAreas" :key="`frame-${area.id}`">
+                  <div class="legend-color" :style="{ backgroundColor: getAreaColor(area) }"></div>
+                  <span class="legend-text">{{ area.name }}: {{ formatFeatureCount(area) }}</span>
+                </div>
+              </div>
+            </div>
+            <div class="map-view-hint map-ui-hint">滚轮缩放 · 拖拽平移 · 双击重置</div>
+          </div>
+        </div>
+      </Teleport>
     </div>
 
-    <div v-else-if="displayMode === 'mini'" class="mini-mode">
-      <canvas ref="miniCanvas" class="mini-canvas" @click="handleCanvasClick" @mousemove="handleCanvasMouseMove"
-        @mouseleave="handleCanvasMouseLeave"></canvas>
-      <div class="mini-legend">
-        <div class="legend-item" v-for="area in displayAreas.slice(0, 5)" :key="area.id">
-          <div class="legend-color" :style="{ backgroundColor: getAreaColor(area) }"></div>
-          <span class="legend-text">{{ area.name }}: {{ area.currentCount || 0 }}人</span>
+    <Teleport to="body">
+      <div v-if="showFullMapDialog" class="fullmap-overlay" @click.self="closeFullMapDialog">
+        <div class="fullmap-shell">
+          <div class="fullmap-toolbar">
+            <div class="fullmap-toolbar-title">完整地图</div>
+            <div class="fullmap-toolbar-actions">
+              <button type="button" class="toolbar-btn" @click="resetView">重置视图</button>
+              <button type="button" class="toolbar-btn primary" @click="closeFullMapDialog">关闭</button>
+            </div>
+          </div>
+          <div class="fullmap-body">
+            <canvas
+              ref="expandedCanvas"
+              class="map-canvas expanded-canvas"
+              :class="{ 'is-dragging': viewState.isDragging }"
+              @click="handleCanvasClick"
+              @wheel.prevent="handleCanvasWheel"
+              @mousedown="handleCanvasMouseDown"
+              @mousemove="handleCanvasMouseMove"
+              @mouseup="handleCanvasMouseUp"
+              @mouseleave="handleCanvasMouseLeave"
+              @dblclick.prevent="resetView"
+            />
+            <div class="fullmap-float-layer">
+              <div class="map-view-hint expanded-hint">滚轮缩放 · 拖拽平移 · 双击重置</div>
+              <div class="full-legend full-color-legend expanded-color-legend">
+                <div class="legend-title">人数色阶</div>
+                <div class="legend-gradient" :style="{ background: heatmapLegendGradient }"></div>
+                <div class="legend-labels">
+                  <span>0</span>
+                  <span>{{ maxCount }}</span>
+                </div>
+              </div>
+              <div class="mini-legend area-overview-legend expanded-area-overview">
+                <div class="mini-legend-title">区域概览</div>
+                <div class="mini-legend-list">
+                  <div class="legend-item" v-for="area in legendAreas" :key="`expanded-overview-${area.id}`">
+                    <div class="legend-color" :style="{ backgroundColor: getAreaColor(area) }"></div>
+                    <span class="legend-text">{{ area.name }}: {{ formatFeatureCount(area) }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
-    </div>
+    </Teleport>
 
-    <div v-else-if="displayMode === 'full'" class="full-mode">
-      <canvas ref="fullCanvas" class="full-canvas" @click="handleCanvasClick" @mousemove="handleCanvasMouseMove"
-        @mouseleave="handleCanvasMouseLeave"></canvas>
-      <div class="full-legend">
-        <div class="legend-title">人数分布</div>
-        <div class="legend-gradient"></div>
-        <div class="legend-labels">
-          <span>0</span>
-          <span>{{ maxCount }}</span>
+    <!-- 区域详情（居中浮层，不遮挡整页） -->
+    <Teleport to="body" :disabled="!showFullMapDialog">
+      <div
+        v-if="showAreaDetailDialog && selectedArea"
+        class="area-detail-overlay"
+        :class="{ 'area-detail-overlay--global': showFullMapDialog }"
+        @click.self="closeAreaDetail"
+      >
+      <div class="area-detail-panel">
+        <div class="area-detail-head">
+          <span class="area-detail-title">{{ selectedArea.name }}</span>
+          <button type="button" class="detail-close-btn" @click="closeAreaDetail">关闭</button>
+        </div>
+        <div class="area-detail">
+          <div class="detail-item">
+            <label>当前数量</label>
+            <span class="value">{{ selectedArea.stayingCount ?? selectedArea.currentCount ?? 0 }} {{ selectedArea.displayUnit || '人' }}</span>
+          </div>
+          <div v-if="selectedArea.enteredCount || selectedArea.exitedCount" class="detail-item">
+            <label>进入 / 离开</label>
+            <span class="value">{{ selectedArea.enteredCount || 0 }} / {{ selectedArea.exitedCount || 0 }}</span>
+          </div>
+          <!-- <div class="detail-item">
+            <label>计量单位</label>
+            <span class="value">{{ selectedArea.displayUnit || '人' }}</span>
+          </div> -->
+          <div class="detail-item">
+            <label>区域面积</label>
+            <span class="value">{{ selectedArea.shapeType === 'point' ? '—' : `${calculateAreaSize(selectedArea)} m²` }}</span>
+          </div>
+          <div class="detail-item">
+            <label>人口密度</label>
+            <span class="value">{{ selectedArea.shapeType === 'point' ? '—' : `${calculateDensity(selectedArea)} ${selectedArea.displayUnit || '人'}/m²` }}</span>
+          </div>
+          <div class="detail-item">
+            <label>绑定任务</label>
+            <span class="value">{{ selectedArea.dataSourceName || '未绑定' }}</span>
+          </div>
+          <div class="detail-item">
+            <label>最后更新</label>
+            <span class="value">{{ formatTime(lastUpdateTime) }}</span>
+          </div>
         </div>
       </div>
-    </div>
-
-    <!-- 悬停提示框 -->
-    <div v-if="hoveredArea && showTooltip" class="area-tooltip"
-      :style="{ left: tooltipPosition.x + 'px', top: tooltipPosition.y + 'px' }">
-      <div class="tooltip-title">{{ hoveredArea.name }}</div>
-      <div class="tooltip-content">
-        <div class="tooltip-item">
-          <span class="tooltip-label">当前人数：</span>
-          <span class="tooltip-value">{{ hoveredArea.currentCount || 0 }}人</span>
-        </div>
-        <div class="tooltip-item">
-          <span class="tooltip-label">密度：</span>
-          <span class="tooltip-value">{{ calculateDensity(hoveredArea) }} 人/m²</span>
-        </div>
       </div>
-    </div>
-
-    <!-- 区域详情弹窗 -->
-    <el-dialog v-model="showAreaDetailDialog" :title="selectedArea?.name" width="250px">
-      <div v-if="selectedArea" class="area-detail">
-        <div class="detail-item">
-          <label>当前人数：</label>
-          <span class="value">{{ selectedArea.currentCount || 0 }} 人</span>
-        </div>
-        <div class="detail-item">
-          <label>区域面积：</label>
-          <span class="value">{{ calculateAreaSize(selectedArea) }} m²</span>
-        </div>
-        <div class="detail-item">
-          <label>人口密度：</label>
-          <span class="value">{{ calculateDensity(selectedArea) }} 人/m²</span>
-        </div>
-        <div class="detail-item">
-          <label>绑定任务：</label>
-          <span class="value">{{ selectedArea.dataSourceName }}</span>
-        </div>
-        <div class="detail-item">
-          <label>最后更新：</label>
-          <span class="value">{{ formatTime(lastUpdateTime) }}</span>
-        </div>
-      </div>
-    </el-dialog>
+    </Teleport>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { PictureRounded, Setting } from '@element-plus/icons-vue'
+import {
+  HEATMAP_LEGEND_GRADIENT,
+  computeMaxAreaCount,
+  getAreaCount,
+  getHeatmapColor,
+  getHeatmapStrokeColor,
+} from '@/utils/heatmapColors'
+import { normalizeHeatmapDisplayMode } from '@/api/dashboard'
+
+const heatmapLegendGradient = HEATMAP_LEGEND_GRADIENT
 
 const router = useRouter()
-const emit = defineEmits(['open-map-zoom'])
-const miniCanvas = ref(null)
-const fullCanvas = ref(null)
+const mapCanvasRef = ref(null)
+const expandedCanvas = ref(null)
+const showFullMapDialog = ref(false)
+const heatmapRootRef = ref(null)
 const showAreaDetailDialog = ref(false)
 const selectedArea = ref(null)
 const hoveredArea = ref(null)
-const showTooltip = ref(false)
-const tooltipPosition = ref({ x: 0, y: 0 })
+
+const MINI_MAP_DEFAULT_SCALE = 1
+const FULL_MAP_DEFAULT_SCALE = 0.85
+
+const getDefaultMapScale = (mode) => (mode === 'full' ? FULL_MAP_DEFAULT_SCALE : MINI_MAP_DEFAULT_SCALE)
+
+const viewState = reactive({
+  scale: MINI_MAP_DEFAULT_SCALE,
+  offsetX: 0,
+  offsetY: 0,
+  isDragging: false,
+  lastMouseX: 0,
+  lastMouseY: 0,
+  dragMoved: false,
+})
 
 const config = ref({})
 const areas = ref([])
+const parkStats = ref(null)
 const crowdJobs = ref([])
 const mapImage = ref(null)
 const lastUpdateTime = ref(null)
@@ -120,7 +244,13 @@ let resizeObserver = null
 
 // 计算属性
 const hasConfig = computed(() => config.value.mapId && areas.value.length > 0)
-const displayMode = computed(() => config.value.displayMode || 'preview')
+const normalizeDisplayMode = normalizeHeatmapDisplayMode
+
+const displayMode = computed(() => normalizeDisplayMode(config.value.displayMode))
+const defaultMapScale = computed(() => getDefaultMapScale(displayMode.value))
+const isFullMapMode = computed(() => displayMode.value === 'full')
+const isMiniMapMode = computed(() => displayMode.value === 'mini')
+const showExpandButton = computed(() => isMiniMapMode.value)
 const maxAreas = computed(() => config.value.maxAreas || 6)
 const refreshInterval = computed(() => (config.value.refreshInterval || 30) * 1000)
 
@@ -131,10 +261,12 @@ const displayAreas = computed(() => {
     .slice(0, maxAreas.value)
 })
 
-const maxCount = computed(() => {
-  if (!displayAreas.value.length) return 100
-  return Math.max(...displayAreas.value.map(area => area.currentCount || 0), 1)
+const legendAreas = computed(() => {
+  return [...areas.value]
+    .sort((a, b) => getAreaCount(b) - getAreaCount(a))
 })
+
+const maxCount = computed(() => computeMaxAreaCount(areas.value, 'polygon'))
 
 onMounted(async () => {
   await loadConfig()
@@ -164,29 +296,28 @@ onUnmounted(() => {
 })
 
 // 监听显示模式变化
-watch(displayMode, (newMode) => {
-  nextTick(() => {
-    // 重新设置ResizeObserver
-    if (resizeObserver) {
-      resizeObserver.disconnect()
-
-      if (newMode === 'mini' && miniCanvas.value) {
-        resizeObserver.observe(miniCanvas.value)
-        drawMiniCanvas()
-      } else if (newMode === 'full' && fullCanvas.value) {
-        resizeObserver.observe(fullCanvas.value)
-        drawFullCanvas()
-      }
-    }
-  })
+watch(displayMode, (mode) => {
+  viewState.scale = getDefaultMapScale(mode)
+  viewState.offsetX = 0
+  viewState.offsetY = 0
+  scheduleCanvasRedraw()
 })
+
+watch(
+  () => hasConfig.value,
+  () => {
+    nextTick(scheduleCanvasRedraw)
+  }
+)
 
 // 监听悬停区域变化，重绘canvas
 watch(hoveredArea, () => {
-  if (displayMode.value === 'mini') {
-    drawMiniCanvas()
-  } else if (displayMode.value === 'full') {
-    drawFullCanvas()
+  scheduleCanvasRedraw()
+})
+
+watch(showFullMapDialog, (visible) => {
+  if (visible) {
+    nextTick(drawExpandedCanvas)
   }
 })
 
@@ -199,7 +330,7 @@ const loadConfig = async () => {
     if (result.success && result.data) {
       config.value = {
         mapId: result.data.map_id.toString(),
-        displayMode: result.data.display_mode,
+        displayMode: normalizeDisplayMode(result.data.display_mode),
         maxAreas: result.data.max_areas,
         refreshInterval: result.data.refresh_interval,
         ...result.data.config
@@ -223,6 +354,7 @@ const loadConfig = async () => {
       // console.error('加载本地配置失败:', e)
     }
   }
+  viewState.scale = getDefaultMapScale(normalizeDisplayMode(config.value.displayMode))
 }
 
 // 加载数据
@@ -239,16 +371,22 @@ const loadData = async () => {
       areas.value = result.data.areas.map(area => ({
         id: area.id.toString(),
         name: area.name,
+        shapeType: area.shape_type || 'polygon',
         points: area.points,
         color: area.color,
         jobId: area.data_source_id,
+        dataSourceType: area.data_source_type,
+        displayUnit: area.display_unit || '人',
         currentCount: area.current_count || 0,
+        stayingCount: area.staying_count ?? area.current_count ?? 0,
+        enteredCount: area.entered_count || 0,
+        exitedCount: area.exited_count || 0,
         maxCapacity: area.max_capacity,
         areaSize: area.area_size,
-        dataSourceType: area.data_source_type,
         dataSourceName: area.data_source_name,
         lastUpdateTime: area.last_update_time
       }))
+      parkStats.value = result.data.park_stats || null
 
       // 处理地图数据
       if (result.data.map) {
@@ -256,13 +394,8 @@ const loadData = async () => {
         const img = new Image()
         img.onload = () => {
           mapImage.value = img
-          nextTick(() => {
-            if (displayMode.value === 'mini') {
-              drawMiniCanvas()
-            } else if (displayMode.value === 'full') {
-              drawFullCanvas()
-            }
-          })
+          scheduleCanvasRedraw()
+          setTimeout(scheduleCanvasRedraw, 100)
         }
         img.src = mapData.image_url
       }
@@ -343,13 +476,8 @@ const loadMapImage = () => {
         const img = new Image()
         img.onload = () => {
           mapImage.value = img
-          nextTick(() => {
-            if (displayMode.value === 'mini') {
-              drawMiniCanvas()
-            } else if (displayMode.value === 'full') {
-              drawFullCanvas()
-            }
-          })
+          scheduleCanvasRedraw()
+          setTimeout(scheduleCanvasRedraw, 100)
         }
         img.src = map.imageUrl
       }
@@ -381,66 +509,86 @@ const setupCanvasSize = (canvas) => {
   return { ctx, width: rect.width, height: rect.height }
 }
 
-// 绘制迷你画布
-const drawMiniCanvas = () => {
-  if (!miniCanvas.value || !mapImage.value) return
+// 绘制地图画布
+const isInteractiveCanvas = (canvasEl) => {
+  if (!canvasEl) return false
+  return canvasEl === mapCanvasRef.value || canvasEl === expandedCanvas.value
+}
 
-  const setup = setupCanvasSize(miniCanvas.value)
+const getMapTransform = (width, height, canvasEl = null) => {
+  if (!mapImage.value || width <= 0 || height <= 0) return null
+  const baseScale = Math.min(width / mapImage.value.width, height / mapImage.value.height)
+  const interactive = isInteractiveCanvas(canvasEl)
+  const scale = interactive ? baseScale * viewState.scale : baseScale
+  const mapWidth = mapImage.value.width * scale
+  const mapHeight = mapImage.value.height * scale
+  const x = (width - mapWidth) / 2 + (interactive ? viewState.offsetX : 0)
+  const y = (height - mapHeight) / 2 + (interactive ? viewState.offsetY : 0)
+  return { scale, x, y }
+}
+
+const drawMapCanvas = (canvasEl) => {
+  if (!canvasEl || !mapImage.value) return
+
+  const setup = setupCanvasSize(canvasEl)
   if (!setup) return
 
   const { ctx, width, height } = setup
-
-  // 清除画布
   ctx.clearRect(0, 0, width, height)
 
-  // 绘制地图背景
-  const scale = Math.min(width / mapImage.value.width, height / mapImage.value.height)
+  const transform = getMapTransform(width, height, canvasEl)
+  if (!transform) return
+
+  const { scale, x, y } = transform
   const mapWidth = mapImage.value.width * scale
   const mapHeight = mapImage.value.height * scale
-  const x = (width - mapWidth) / 2
-  const y = (height - mapHeight) / 2
-
   ctx.drawImage(mapImage.value, x, y, mapWidth, mapHeight)
 
-  // 绘制区域
-  if (areas.value && areas.value.length > 0) {
-    areas.value.forEach(area => {
-      if (area.points && area.points.length >= 3) {
-        drawAreaOnCanvas(ctx, area, { x, y, scale })
-      }
-    })
+  if (areas.value?.length) {
+    const polygonAreas = areas.value.filter(
+      (area) => area.points?.length && (area.shapeType || 'polygon') !== 'point' && area.points.length >= 3
+    )
+    const projectAreas = areas.value.filter((area) => area.shapeType === 'point' && area.points?.length)
+
+    polygonAreas.forEach((area) => drawAreaOnCanvas(ctx, area, { x, y, scale }))
+    projectAreas.forEach((area) => drawProjectOnCanvas(ctx, area, { x, y, scale }))
   }
 }
 
-// 绘制完整画布
-const drawFullCanvas = () => {
-  if (!fullCanvas.value || !mapImage.value) return
+const drawMapCanvasView = () => drawMapCanvas(mapCanvasRef.value)
 
-  const setup = setupCanvasSize(fullCanvas.value)
-  if (!setup) return
+const drawExpandedCanvas = () => drawMapCanvas(expandedCanvas.value)
 
-  const { ctx, width, height } = setup
+const scheduleCanvasRedraw = () => {
+  nextTick(() => {
+    drawMapCanvasView()
+    if (showFullMapDialog.value) {
+      drawExpandedCanvas()
+    }
+  })
+}
 
-  // 清除画布
-  ctx.clearRect(0, 0, width, height)
+const resetView = () => {
+  viewState.scale = defaultMapScale.value
+  viewState.offsetX = 0
+  viewState.offsetY = 0
+  viewState.isDragging = false
+  viewState.dragMoved = false
+  scheduleCanvasRedraw()
+}
 
-  // 绘制地图背景
-  const scale = Math.min(width / mapImage.value.width, height / mapImage.value.height)
-  const mapWidth = mapImage.value.width * scale
-  const mapHeight = mapImage.value.height * scale
-  const x = (width - mapWidth) / 2
-  const y = (height - mapHeight) / 2
+const openFullMapDialog = () => {
+  showFullMapDialog.value = true
+  nextTick(() => {
+    drawExpandedCanvas()
+    if (resizeObserver && expandedCanvas.value) {
+      resizeObserver.observe(expandedCanvas.value)
+    }
+  })
+}
 
-  ctx.drawImage(mapImage.value, x, y, mapWidth, mapHeight)
-
-  // 绘制区域
-  if (areas.value && areas.value.length > 0) {
-    areas.value.forEach(area => {
-      if (area.points && area.points.length >= 3) {
-        drawAreaOnCanvas(ctx, area, { x, y, scale })
-      }
-    })
-  }
+const closeFullMapDialog = () => {
+  showFullMapDialog.value = false
 }
 
 // 在画布上绘制区域
@@ -449,83 +597,100 @@ const drawAreaOnCanvas = (ctx, area, transform) => {
 
   const { x: offsetX, y: offsetY, scale } = transform
   const isHovered = hoveredArea.value && hoveredArea.value.id === area.id
+  const count = getAreaCount(area)
+  const strokeColor = getHeatmapStrokeColor(count, maxCount.value)
+
+  const canvasPoints = area.points.map(point => ({
+    x: point.x * scale + offsetX,
+    y: point.y * scale + offsetY,
+  }))
 
   ctx.beginPath()
-  const firstPoint = area.points[0]
-  ctx.moveTo(firstPoint.x * scale + offsetX, firstPoint.y * scale + offsetY)
-
-  area.points.forEach(point => {
-    ctx.lineTo(point.x * scale + offsetX, point.y * scale + offsetY)
-  })
+  ctx.moveTo(canvasPoints[0].x, canvasPoints[0].y)
+  canvasPoints.forEach(point => ctx.lineTo(point.x, point.y))
   ctx.closePath()
 
-  // 悬停时的特殊效果
-  if (isHovered) {
-    // 绘制光晕效果
-    ctx.save()
-    ctx.shadowColor = getAreaBorderColor(area)
-    ctx.shadowBlur = 20
-    ctx.shadowOffsetX = 0
-    ctx.shadowOffsetY = 0
-
-    // 填充半透明背景
-    const hoverColor = getAreaColor(area).replace(/[\d\.]+\)$/g, '0.6)')
-    ctx.fillStyle = hoverColor
-    ctx.fill()
-
-    ctx.restore()
-  }
-
-  // 填充颜色
-  ctx.fillStyle = getAreaColor(area)
+  const fillColor = getHeatmapColor(count, maxCount.value, isHovered ? 0.62 : 0.52)
+  ctx.fillStyle = fillColor
   ctx.fill()
 
-  // 绘制边框
-  ctx.strokeStyle = getAreaBorderColor(area)
-  ctx.lineWidth = isHovered ? Math.max(2, scale * 3) : Math.max(1, scale * 2)
-
-  // 悬停时边框发光效果
-  if (isHovered) {
-    ctx.save()
-    ctx.shadowColor = getAreaBorderColor(area)
-    ctx.shadowBlur = 10
-    ctx.shadowOffsetX = 0
-    ctx.shadowOffsetY = 0
-  }
-
+  ctx.strokeStyle = '#ffffff'
+  ctx.lineWidth = isHovered ? Math.max(4, scale * 4) : Math.max(3, scale * 3)
   ctx.stroke()
 
-  if (isHovered) {
-    ctx.restore()
-  }
+  ctx.strokeStyle = strokeColor
+  ctx.lineWidth = isHovered ? Math.max(2, scale * 2.5) : Math.max(1.5, scale * 2)
+  ctx.stroke()
 
-  // 绘制标签 - 动态调整字体大小
   const center = calculateAreaCenter(area)
   const centerX = center.x * scale + offsetX
   const centerY = center.y * scale + offsetY
+  drawDashboardLabel(ctx, centerX, centerY, area.name, formatFeatureCount(area), isHovered)
+}
 
-  // 根据缩放比例调整字体大小
-  const fontSize = Math.max(12, Math.min(16, scale * 12))
+const formatFeatureCount = (area) => {
+  const unit = area.displayUnit || '人'
+  const count = area.stayingCount ?? area.currentCount ?? 0
+  return `${count} ${unit}`
+}
 
-  ctx.fillStyle = !isHovered ? '#fff' : '#333'
-  ctx.font = `${isHovered ? 'bold ' : ''}${fontSize}px Arial`
+const drawProjectOnCanvas = (ctx, area, transform) => {
+  const { x: offsetX, y: offsetY, scale } = transform
+  const point = area.points[0]
+  const cx = point.x * scale + offsetX
+  const cy = point.y * scale + offsetY
+  const radius = Math.max(8, scale * 10)
+  const isHovered = hoveredArea.value && hoveredArea.value.id === area.id
+
+  ctx.beginPath()
+  ctx.arc(cx, cy, radius + Math.max(4, scale * 5), 0, Math.PI * 2)
+  ctx.fillStyle = isHovered ? 'rgba(255, 138, 101, 0.3)' : 'rgba(255, 138, 101, 0.18)'
+  ctx.fill()
+
+  ctx.beginPath()
+  ctx.arc(cx, cy, radius, 0, Math.PI * 2)
+  ctx.fillStyle = area.color || 'rgba(255, 138, 101, 0.95)'
+  ctx.fill()
+  ctx.strokeStyle = '#ffffff'
+  ctx.lineWidth = Math.max(2, scale * 2.5)
+  ctx.stroke()
+
+  ctx.beginPath()
+  ctx.arc(cx, cy, radius * 0.35, 0, Math.PI * 2)
+  ctx.fillStyle = '#ffffff'
+  ctx.fill()
+
+  drawDashboardLabel(ctx, cx, cy + radius + Math.max(14, scale * 12), area.name, formatFeatureCount(area), isHovered, 'rgba(180, 83, 9, 0.9)')
+}
+
+const drawDashboardLabel = (ctx, x, y, title, subtitle, isHovered, bgColor = 'rgba(15, 23, 42, 0.86)') => {
+  const fontSize = 12
+  ctx.font = `bold ${fontSize}px "Microsoft YaHei", Arial`
+  const titleWidth = ctx.measureText(title).width
+  ctx.font = `${fontSize - 1}px "Microsoft YaHei", Arial`
+  const subtitleWidth = ctx.measureText(subtitle).width
+  const width = Math.max(titleWidth, subtitleWidth) + 18
+  const height = 34
+  const left = x - width / 2
+  const top = y - height / 2
+
+  ctx.fillStyle = isHovered ? 'rgba(255, 138, 101, 0.92)' : bgColor
+  ctx.beginPath()
+  if (typeof ctx.roundRect === 'function') {
+    ctx.roundRect(left, top, width, height, 6)
+  } else {
+    ctx.rect(left, top, width, height)
+  }
+  ctx.fill()
+
+  ctx.fillStyle = '#ffffff'
+  ctx.font = `bold ${fontSize}px "Microsoft YaHei", Arial`
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
-
-  // 添加文字阴影效果
-  // ctx.shadowColor = isHovered ? 'rgba(0, 0, 0, 0.8)' : 'rgba(255, 255, 255, 0.8)'
-  // ctx.shadowBlur = isHovered ? 4 : 2
-  // ctx.shadowOffsetX = 1
-  // ctx.shadowOffsetY = 1
-
-  ctx.fillText(area.name, centerX, centerY - fontSize * 0.6)
-  ctx.fillText(`${area.currentCount || 0}人`, centerX, centerY + fontSize * 0.6)
-
-  // 重置阴影
-  ctx.shadowColor = 'transparent'
-  ctx.shadowBlur = 0
-  ctx.shadowOffsetX = 0
-  ctx.shadowOffsetY = 0
+  ctx.fillText(title, x, y - 6)
+  ctx.font = `${fontSize - 1}px "Microsoft YaHei", Arial`
+  ctx.fillStyle = '#ffe4d6'
+  ctx.fillText(subtitle, x, y + 8)
 }
 
 // 自动刷新
@@ -554,55 +719,37 @@ const handleConfigUpdate = (event) => {
 
 // 处理窗口大小变化
 const handleWindowResize = () => {
-  nextTick(() => {
-    if (displayMode.value === 'mini') {
-      drawMiniCanvas()
-    } else if (displayMode.value === 'full') {
-      drawFullCanvas()
-    }
-  })
+  scheduleCanvasRedraw()
 }
 
-// 初始化ResizeObserver
 const initResizeObserver = () => {
-  if (typeof ResizeObserver !== 'undefined') {
-    resizeObserver = new ResizeObserver((entries) => {
-      for (let entry of entries) {
-        if (entry.target === miniCanvas.value || entry.target === fullCanvas.value) {
-          nextTick(() => {
-            if (displayMode.value === 'mini' && miniCanvas.value) {
-              drawMiniCanvas()
-            } else if (displayMode.value === 'full' && fullCanvas.value) {
-              drawFullCanvas()
-            }
-          })
-          break
-        }
-      }
-    })
+  if (typeof ResizeObserver === 'undefined') return
 
-    // 观察canvas元素
-    nextTick(() => {
-      if (miniCanvas.value) {
-        resizeObserver.observe(miniCanvas.value)
-      }
-      if (fullCanvas.value) {
-        resizeObserver.observe(fullCanvas.value)
-      }
-    })
-  }
+  resizeObserver = new ResizeObserver(() => {
+    scheduleCanvasRedraw()
+  })
+
+  nextTick(() => {
+    if (heatmapRootRef.value) {
+      resizeObserver.observe(heatmapRootRef.value)
+    }
+    scheduleCanvasRedraw()
+  })
 }
 
 // 工具函数
 const getAreaColor = (area) => {
-  const density = calculateDensity(area)
-  const intensity = Math.min(density / 0.1, 1)
-  const alpha = 0.3 + intensity * 0.4
-  return area.color ? area.color.replace(/[\d\.]+\)$/g, `${alpha})`) : `rgba(74, 144, 226, ${alpha})`
+  if (area.shapeType === 'point') {
+    return area.color || 'rgba(255, 138, 101, 0.95)'
+  }
+  return getHeatmapColor(getAreaCount(area), maxCount.value, 0.55)
 }
 
 const getAreaBorderColor = (area) => {
-  return area.color ? area.color.replace(/rgba?/, 'rgb').replace(/,\s*[\d\.]+\)/, ')') : '#4a90e2'
+  if (area.shapeType === 'point') {
+    return area.color ? area.color.replace(/rgba?/, 'rgb').replace(/,\s*[\d.]+\)/, ')') : '#ff8a65'
+  }
+  return getHeatmapStrokeColor(getAreaCount(area), maxCount.value)
 }
 
 const calculateDensity = (area) => {
@@ -649,56 +796,68 @@ const showAreaDetail = (area) => {
   showAreaDetailDialog.value = true
 }
 
+const closeAreaDetail = () => {
+  showAreaDetailDialog.value = false
+}
+
 // 鼠标事件处理
 const handleCanvasClick = (event) => {
+  if (viewState.dragMoved) return
   const area = getAreaAtPoint(event)
   if (area) {
     showAreaDetail(area)
   } else {
-    // 向父组件发送事件，传递当前组件的地图数据
-    emit('open-map-zoom', {
-      mapImage: mapImage.value,
-      areas: areas.value,
-      config: config.value
-    })
+    closeAreaDetail()
   }
 }
 
+const handleCanvasWheel = (event) => {
+  viewState.scale = Math.max(0.5, Math.min(5, viewState.scale * (event.deltaY > 0 ? 0.9 : 1.1)))
+  scheduleCanvasRedraw()
+}
+
+const handleCanvasMouseDown = (event) => {
+  if (event.button !== 0) return
+  viewState.isDragging = true
+  viewState.dragMoved = false
+  viewState.lastMouseX = event.clientX
+  viewState.lastMouseY = event.clientY
+}
+
+const handleCanvasMouseUp = () => {
+  viewState.isDragging = false
+}
+
 const handleCanvasMouseMove = (event) => {
-  let currentCanvas = null;
-  if (miniCanvas.value && miniCanvas.value.contains(event.target)) {
-    currentCanvas = miniCanvas.value;
-  } else if (fullCanvas.value && fullCanvas.value.contains(event.target)) {
-    currentCanvas = fullCanvas.value;
+  if (viewState.isDragging) {
+    const dx = event.clientX - viewState.lastMouseX
+    const dy = event.clientY - viewState.lastMouseY
+    if (Math.abs(dx) > 2 || Math.abs(dy) > 2) {
+      viewState.dragMoved = true
+      hoveredArea.value = null
+    }
+    viewState.offsetX += dx
+    viewState.offsetY += dy
+    viewState.lastMouseX = event.clientX
+    viewState.lastMouseY = event.clientY
+    scheduleCanvasRedraw()
+    return
   }
 
-  if (!currentCanvas) return; // 如果不是在canvas上移动，则不处理
+  const currentCanvas = event.target
+  if (!currentCanvas?.getContext) return
 
   const area = getAreaAtPoint(event)
   if (area !== hoveredArea.value) {
     hoveredArea.value = area
-    if (area) {
-      showTooltip.value = true
-      updateTooltipPosition(event, currentCanvas)
-    } else {
-      showTooltip.value = false
-    }
-  } else if (area) {
-    updateTooltipPosition(event, currentCanvas)
+    scheduleCanvasRedraw()
   }
 }
 
 const handleCanvasMouseLeave = () => {
+  viewState.isDragging = false
   hoveredArea.value = null
-  showTooltip.value = false
-}
-
-const updateTooltipPosition = (event, canvasRef) => {
-  const rect = canvasRef.getBoundingClientRect()
-  tooltipPosition.value = {
-    x: event.clientX - rect.left + 20,
-    y: event.clientY - rect.top + 20
-  }
+  scheduleCanvasRedraw()
 }
 
 // 获取鼠标位置的区域
@@ -710,20 +869,26 @@ const getAreaAtPoint = (event) => {
 
   if (!mapImage.value) return null
 
-  // 计算地图变换
-  const scale = Math.min(rect.width / mapImage.value.width, rect.height / mapImage.value.height)
-  const mapWidth = mapImage.value.width * scale
-  const mapHeight = mapImage.value.height * scale
-  const offsetX = (rect.width - mapWidth) / 2
-  const offsetY = (rect.height - mapHeight) / 2
+  const transform = getMapTransform(rect.width, rect.height, canvas)
+  if (!transform) return null
 
-  // 转换为地图坐标
-  const mapX = (x - offsetX) / scale
-  const mapY = (y - offsetY) / scale
+  const mapX = (x - transform.x) / transform.scale
+  const mapY = (y - transform.y) / transform.scale
 
-  // 检查哪个区域包含这个点
   for (const area of areas.value) {
-    if (area.points && area.points.length >= 3) {
+    if (area.shapeType === 'point' && area.points?.length) {
+      const p = area.points[0]
+      const radius = Math.max(12, transform.scale * 14) / transform.scale
+      const dx = mapX - p.x
+      const dy = mapY - p.y
+      if (dx * dx + dy * dy <= radius * radius) {
+        return area
+      }
+    }
+  }
+
+  for (const area of areas.value) {
+    if ((area.shapeType || 'polygon') !== 'point' && area.points && area.points.length >= 3) {
       if (isPointInPolygon(mapX, mapY, area.points)) {
         return area
       }
@@ -747,7 +912,7 @@ const isPointInPolygon = (x, y, polygon) => {
 
 
 const goToManagement = () => {
-  router.push('/heatmap-management')
+  router.push({ path: '/system', query: { tab: 'map_config' } })
 }
 </script>
 
@@ -793,159 +958,272 @@ const goToManagement = () => {
   }
 }
 
-.preview-mode {
-  flex: 1;
-  padding: 8px;
+.map-mode {
+  flex: 1 1 0;
+  min-height: 0;
+  position: relative;
   overflow: hidden;
   display: flex;
   flex-direction: column;
 }
 
-.preview-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+/* 完整地图：控件框（Teleport 至中栏锚点） */
+.map-ui-frame {
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
   gap: 8px;
-  flex: 1;
-  overflow: auto;
-  align-content: start;
+  padding: 8px;
+  box-sizing: border-box;
+  pointer-events: none;
 }
 
-/* 响应式网格布局 */
-@media (max-width: 400px) {
-  .preview-grid {
-    grid-template-columns: repeat(2, 1fr);
-    gap: 6px;
-  }
+.map-ui-frame--anchored {
+  position: absolute;
+  inset: 0;
 }
 
-@media (min-width: 401px) and (max-width: 600px) {
-  .preview-grid {
-    grid-template-columns: repeat(3, 1fr);
-    gap: 8px;
-  }
-}
-
-@media (min-width: 601px) {
-  .preview-grid {
-    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-    gap: 12px;
-  }
-}
-
-.area-card {
+.map-ui-row {
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 12px 8px;
-  border-radius: 8px;
-  border: 2px solid;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  min-height: 80px;
-  aspect-ratio: 1;
-  position: relative;
-  overflow: hidden;
+  align-items: flex-start;
+  gap: 10px;
+  pointer-events: none;
 }
 
-/* 区域卡片响应式调整 */
-@media (max-width: 400px) {
-  .area-card {
-    padding: 8px 4px;
-    min-height: 60px;
-  }
-
-  .area-name {
-    font-size: 10px !important;
-  }
-
-  .area-count {
-    font-size: 18px !important;
-  }
-
-  .area-unit {
-    font-size: 10px !important;
-  }
-
-  .area-density {
-    font-size: 8px !important;
-  }
+.map-ui-row > * {
+  pointer-events: auto;
 }
 
-@media (min-width: 401px) and (max-width: 600px) {
-  .area-card {
-    padding: 10px 6px;
-    min-height: 70px;
-  }
-
-  .area-name {
-    font-size: 11px !important;
-  }
-
-  .area-count {
-    font-size: 20px !important;
-  }
+.map-ui-row-top {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: start;
 }
 
-.area-card:hover {
-  transform: scale(1.05);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+.map-ui-row-bottom {
+  align-items: flex-end;
+  justify-content: space-between;
 }
 
-.area-name {
-  font-size: 12px;
-  font-weight: bold;
-  color: #333;
-  margin-bottom: 8px;
-  text-align: center;
+.park-stats-panel--frame {
+  position: static;
+  justify-self: start;
+  min-width: 0;
+  max-width: 100%;
+  padding: 8px 10px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.22);
 }
 
-.area-count {
-  font-size: 24px;
-  font-weight: bold;
-  color: #333;
-  line-height: 1;
-}
-
-.area-unit {
-  font-size: 12px;
-  color: #666;
+.park-stats-panel--frame .park-stats-title {
   margin-bottom: 4px;
+  font-size: 11px;
 }
 
-.area-density {
-  font-size: 10px;
-  color: #999;
+.park-stats-panel--frame .park-stat-item .value {
+  font-size: 14px;
 }
 
-.mini-mode,
-.full-mode {
-  flex: 1;
-  position: relative;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
+.map-title-badge {
+  justify-self: center;
+  padding: 5px 14px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #ffd4b8;
+  background: rgba(11, 20, 36, 0.82);
+  border: 1px solid rgba(255, 138, 101, 0.35);
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+  line-height: 1.4;
 }
 
-.mini-canvas,
-.full-canvas {
+.map-ui-legend {
+  position: static;
+  justify-self: end;
+  top: auto;
+  right: auto;
+  min-width: 92px;
+  max-width: 120px;
+  padding: 8px;
+}
+
+.map-ui-overview {
+  position: static;
+  bottom: auto;
+  left: auto;
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: min(480px, 70%);
+  max-height: 92px;
+}
+
+.map-ui-overview .mini-legend-list {
+  max-height: 68px;
+}
+
+.map-ui-hint {
+  position: static;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.map-ui-placeholder {
+  min-width: 0;
+  min-height: 1px;
+}
+
+.interactive-canvas {
+  flex: 1 1 0;
+  min-height: 0;
   width: 100%;
   height: 100%;
-  cursor: pointer;
   display: block;
-  object-fit: contain;
+  cursor: grab;
+  position: relative;
+  z-index: 1;
+}
+
+.interactive-canvas.is-dragging {
+  cursor: grabbing;
+}
+
+.full-mode .map-view-hint,
+.full-mode .full-color-legend,
+.full-mode .area-overview-legend,
+.map-mode .map-view-hint,
+.map-mode .full-color-legend,
+.map-mode .area-overview-legend {
+  pointer-events: none;
+}
+
+.map-mode .area-overview-legend .mini-legend-list {
+  pointer-events: auto;
+}
+
+.park-stats-panel {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 8;
+  min-width: 180px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: linear-gradient(160deg, rgba(11, 20, 36, 0.94) 0%, rgba(21, 42, 74, 0.94) 100%);
+  border: 1px solid rgba(255, 138, 101, 0.35);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+}
+
+.park-stats-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #ffd4b8;
+  margin-bottom: 8px;
+}
+
+.park-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.park-stat-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.park-stat-item .label {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.62);
+}
+
+.park-stat-item .value {
+  font-size: 16px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.park-stat-item .value.enter {
+  color: #7dd3fc;
+}
+
+.park-stat-item .value.exit {
+  color: #fdba74;
+}
+
+.map-canvas {
+  flex: 1 1 0;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.expanded-canvas {
+  cursor: grab;
+}
+
+.expanded-canvas.is-dragging {
+  cursor: grabbing;
+}
+
+.fullmap-expand-btn {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 7;
+  padding: 5px 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 138, 101, 0.45);
+  background: rgba(11, 20, 36, 0.88);
+  color: #ffd4b8;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.fullmap-expand-btn:hover {
+  background: rgba(255, 138, 101, 0.22);
+  border-color: rgba(255, 138, 101, 0.65);
 }
 
 .mini-legend {
   position: absolute;
   bottom: 8px;
   left: 8px;
-  /* background: rgba(255, 255, 255, 0.9); */
-  padding: 6px;
-  border-radius: 4px;
+  z-index: 6;
+  padding: 8px 10px;
+  border-radius: 8px;
   font-size: 10px;
-  max-width: calc(100% - 16px);
-  backdrop-filter: blur(5px);
+  max-width: min(240px, calc(100% - 16px));
+  background: linear-gradient(160deg, rgba(11, 20, 36, 0.92) 0%, rgba(21, 42, 74, 0.92) 100%);
+  border: 1px solid rgba(255, 138, 101, 0.24);
+  backdrop-filter: blur(8px);
+}
+
+.mini-legend-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: #ffd4b8;
+  margin-bottom: 6px;
+}
+
+.mini-legend-list,
+.area-overview-legend .mini-legend-list {
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.expanded-area-overview .mini-legend-list {
+  max-height: min(360px, 42vh);
+}
+
+.mini-legend-list .legend-text,
+.area-overview-legend .legend-text {
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 10px;
+  line-height: 1.3;
 }
 
 @media (max-width: 400px) {
@@ -970,16 +1248,136 @@ const goToManagement = () => {
   margin-right: 6px;
 }
 
-.full-legend {
+.full-legend.full-color-legend {
   position: absolute;
-  top: 16px;
-  right: 16px;
-  background: rgba(255, 255, 255, 0.9);
+  top: 44px;
+  right: 12px;
+  z-index: 6;
+  background: linear-gradient(160deg, rgba(11, 20, 36, 0.92) 0%, rgba(21, 42, 74, 0.92) 100%);
+  border: 1px solid rgba(255, 138, 101, 0.28);
   padding: 10px;
+  border-radius: 8px;
+  min-width: 100px;
+  max-width: min(160px, calc(100% - 32px));
+  backdrop-filter: blur(8px);
+}
+
+.area-overview-legend {
+  max-width: min(260px, calc(100% - 120px));
+}
+
+.full-color-legend.expanded-color-legend {
+  top: 12px;
+  right: 12px;
+}
+
+.fullmap-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  background: rgba(5, 12, 24, 0.78);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.fullmap-shell {
+  width: min(96vw, 1400px);
+  height: min(92vh, 900px);
+  display: flex;
+  flex-direction: column;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 138, 101, 0.28);
+  background: linear-gradient(160deg, rgba(11, 20, 36, 0.98) 0%, rgba(21, 42, 74, 0.98) 100%);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.45);
+}
+
+.fullmap-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.fullmap-toolbar-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #ffd4b8;
+}
+
+.fullmap-toolbar-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.toolbar-btn {
+  padding: 6px 14px;
   border-radius: 6px;
-  min-width: 80px;
-  max-width: calc(100% - 32px);
-  backdrop-filter: blur(5px);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.86);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.toolbar-btn.primary {
+  border-color: rgba(255, 138, 101, 0.45);
+  background: rgba(255, 138, 101, 0.18);
+  color: #ffd4b8;
+}
+
+.fullmap-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.fullmap-float-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.fullmap-float-layer .mini-legend-list {
+  pointer-events: auto;
+}
+
+.expanded-canvas {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+}
+
+.expanded-hint {
+  bottom: 12px;
+  right: 12px;
+}
+
+.map-view-hint {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  z-index: 6;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.72);
+  background: rgba(11, 20, 36, 0.72);
+  border: 1px solid rgba(255, 138, 101, 0.22);
+  pointer-events: none;
+}
+
+.full-legend .legend-title,
+.full-legend .legend-labels {
+  color: rgba(255, 255, 255, 0.78);
 }
 
 @media (max-width: 400px) {
@@ -1009,9 +1407,6 @@ const goToManagement = () => {
 
 .legend-gradient {
   height: 20px;
-  background: linear-gradient(to right,
-      rgba(74, 144, 226, 0.3) 0%,
-      rgba(74, 144, 226, 0.7) 100%);
   border-radius: 4px;
   margin-bottom: 4px;
 }
@@ -1023,109 +1418,104 @@ const goToManagement = () => {
   color: #666;
 }
 
+.area-detail-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(5, 12, 24, 0.42);
+}
+
+.area-detail-overlay--global {
+  position: fixed;
+  inset: 0;
+  z-index: 4000;
+}
+
+.area-detail-panel {
+  position: relative;
+  width: min(300px, 90%);
+  border-radius: 10px;
+  background: linear-gradient(160deg, rgba(11, 20, 36, 0.98) 0%, rgba(21, 42, 74, 0.98) 100%);
+  border: 1px solid rgba(255, 138, 101, 0.35);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+
+.area-detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(255, 138, 101, 0.22);
+  background: rgba(10, 20, 40, 0.55);
+}
+
+.area-detail-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #f8fafc;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detail-close-btn {
+  flex-shrink: 0;
+  padding: 4px 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 138, 101, 0.45);
+  background: rgba(255, 138, 101, 0.12);
+  color: #ffd4b8;
+  font-size: 12px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.detail-close-btn:hover {
+  background: rgba(255, 138, 101, 0.28);
+  color: #fff;
+}
+
+.area-detail {
+  padding: 10px 12px 12px;
+}
+
 .area-detail .detail-item {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 10px;
   margin-bottom: 8px;
-  padding: 4px 0;
-  border-bottom: 1px solid #f0f0f0;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .area-detail .detail-item:last-child {
   border-bottom: none;
   margin-bottom: 0;
+  padding-bottom: 0;
 }
 
 .area-detail label {
-  font-weight: 500;
-  color: #666;
+  flex-shrink: 0;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.62);
 }
 
 .area-detail .value {
-  /* font-weight: bold; */
-  color: #333;
+  font-size: 12px;
+  color: #ffd4b8;
+  text-align: right;
+  word-break: break-all;
 }
 
 .dialog-footer {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-}
-
-/* 悬停提示框样式 */
-.area-tooltip {
-  position: fixed;
-  background: linear-gradient(135deg,
-      rgba(30, 60, 114, 0.95) 0%,
-      rgba(15, 26, 46, 0.98) 100%);
-  border: 1px solid rgba(255, 138, 101, 0.6);
-  border-radius: 8px;
-  padding: 12px;
-  box-shadow:
-    0 8px 32px rgba(0, 0, 0, 0.4),
-    0 0 20px rgba(255, 138, 101, 0.3);
-  backdrop-filter: blur(15px);
-  z-index: 9999;
-  pointer-events: none;
-  max-width: 200px;
-  animation: tooltipFadeIn 0.3s ease;
-}
-
-@keyframes tooltipFadeIn {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
-
-.tooltip-title {
-  font-size: 14px;
-  font-weight: bold;
-  color: #ffffff;
-  margin-bottom: 8px;
-  padding-bottom: 6px;
-  border-bottom: 1px solid rgba(255, 138, 101, 0.4);
-  text-align: center;
-}
-
-.tooltip-content {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.tooltip-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.tooltip-label {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.8);
-}
-
-.tooltip-value {
-  font-size: 12px;
-  font-weight: bold;
-  color: #ff8a65;
-  text-shadow: 0 0 8px rgba(255, 138, 101, 0.6);
-}
-
-
-
-/* 添加canvas鼠标悬停样式 */
-.mini-canvas,
-.full-canvas {
-  cursor: pointer;
-  transition: filter 0.3s ease;
-}
-
-.mini-canvas:hover,
-.full-canvas:hover {
-  filter: brightness(1.05);
 }
 </style> 

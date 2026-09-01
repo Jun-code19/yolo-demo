@@ -28,6 +28,7 @@ from src.database import (
 from src.tracker import ObjectTracker
 # 导入数据推送模块
 from src.data_pusher import data_pusher
+from src.frame_acquisition import open_rtsp_capture, probe_rtsp_host
 from src.rtsp_url import build_rtsp_url
 from src.detection_runtime import is_within_active_period, get_frame_interval
 from src.smart_scenarios import is_multi_scenario_config, normalize_smart_config, SCENARIO_TYPE_LABELS, _resolve_counting_type
@@ -103,6 +104,7 @@ class DetectionTask:
         self.cap = None
         self.ffmpeg_decoder = None  # 添加GPU解码器
         self.thread = None
+        self.frame_thread = None
         self.lock = Lock()  # 初始化锁
         self.frame_buffer = deque(maxlen=1)  # 存储最近的帧
         self.last_detection_time = time.time()
@@ -110,8 +112,10 @@ class DetectionTask:
         self.reconnect_attempts = 0
         self.max_reconnect_attempts = 5
         self.clients = set()  # WebSocket客户端集合，用于实时预览
-        self.loop = None  # 添加事件循环引用
-        self.message_queue = asyncio.Queue()  # 添加消息队列
+        self._detection_loop = None  # 检测线程专属事件循环
+        self._preview_loop = None  # FastAPI/Uvicorn 预览广播循环
+        self.loop = None  # 兼容旧引用，始终指向 _detection_loop
+        self.message_queue = None  # 预览广播队列（绑定 _preview_loop）
         self.broadcast_task = None  # 添加广播任务引用
 
         # 初始化目标追踪参数
@@ -183,6 +187,8 @@ class DetectionTask:
     
     def connect_to_camera(self): # 连接到RTSP摄像机
         """连接到RTSP摄像机"""
+        if self.stop_event.is_set():
+            return False
         try:
             if self.connected or self.cap or self.ffmpeg_decoder:
                 self.release_camera_connection("重新连接前释放")
@@ -191,6 +197,9 @@ class DetectionTask:
             device = db.query(Device).filter(Device.device_id == self.device_id).first()
             config = db.query(DetectionConfig).filter(DetectionConfig.config_id == self.config_id).first()
             db.close()
+
+            if self.stop_event.is_set():
+                return False
             
             if not device:
                 logger.error(f"设备信息不存在: {self.device_id}")
@@ -200,6 +209,22 @@ class DetectionTask:
                 self.stream_type = config.stream_type or 'main'
 
             rtsp_url = build_rtsp_url(device, stream_type=self.stream_type)
+
+            if self.stop_event.is_set():
+                return False
+
+            reachable, host_port = probe_rtsp_host(rtsp_url, timeout=2.0)
+            if not reachable:
+                if not self.stop_event.is_set():
+                    logger.error(
+                        "摄像机 %s RTSP 端口不可达 (%s)，请检查 IP、网段、路由或防火墙",
+                        self.device_id,
+                        host_port,
+                    )
+                return False
+
+            if self.stop_event.is_set():
+                return False
 
             # 优先使用GPU解码器
             if self.use_gpu_decoder:
@@ -213,23 +238,36 @@ class DetectionTask:
                 except Exception as e:
                     logger.warning(f"GPU解码器初始化失败，回退到OpenCV: {e}")
             
-            # 回退到OpenCV解码
+            # 回退到OpenCV解码（仅在拉流线程内调用，避免跨线程 release）
             logger.info(f"使用OpenCV解码器连接: {self.device_id}")
-            self.cap = cv2.VideoCapture(rtsp_url)
-            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # 设置缓冲区大小为1，减少延迟
-            self.cap.set(cv2.CAP_PROP_FPS, 25)  # 设置帧率
+            if self.stop_event.is_set():
+                return False
+            cap = open_rtsp_capture(rtsp_url)
+            if self.stop_event.is_set():
+                try:
+                    cap.release()
+                except Exception:
+                    pass
+                return False
+
+            self.cap = cap
+            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            self.cap.set(cv2.CAP_PROP_FPS, 25)
 
             if self.cap.isOpened():
                 self.fps = self.cap.get(cv2.CAP_PROP_FPS)
                 self.connected = True
                 self.reconnect_attempts = 0
                 return True
-            else:
+
+            self.release_camera_connection("连接失败")
+            if not self.stop_event.is_set():
                 logger.error(f"无法连接到摄像机: {self.device_id}")
-                return False
+            return False
                 
         except Exception as e:
-            logger.error(f"连接摄像机时出错: {e}")
+            if not self.stop_event.is_set():
+                logger.error(f"连接摄像机时出错: {e}")
             return False
 
     def _is_streaming_allowed(self) -> bool:
@@ -237,7 +275,7 @@ class DetectionTask:
         return is_within_active_period(datetime.now(), self.runtime_config)
 
     def release_camera_connection(self, reason: str = "") -> None:
-        """释放摄像机连接并清空帧缓冲"""
+        """释放摄像机连接（必须在拉流线程内调用，避免 FFmpeg 跨线程崩溃）"""
         with self.lock:
             self.frame_buffer.clear()
 
@@ -255,12 +293,16 @@ class DetectionTask:
                 logger.warning(f"释放解码器失败: {self.device_id}, {e}")
             self.ffmpeg_decoder = None
 
-        if self.connected:
+        if self.connected or reason in ("任务停止", "拉流线程退出"):
             suffix = f" ({reason})" if reason else ""
             logger.info(f"已断开摄像机拉流: {self.device_id}{suffix}")
 
         self.connected = False
         self.reconnect_attempts = 0
+
+    def _wait_or_stop(self, timeout: float) -> bool:
+        """可中断等待，返回 True 表示应停止。"""
+        return self.stop_event.wait(timeout=timeout)
 
     def read_frame(self): # 从摄像机读取帧的线程函数
         """从摄像机读取帧的线程函数"""
@@ -268,85 +310,102 @@ class DetectionTask:
         last_reconnect_time = time.time()
         schedule_paused = False
 
-        while not self.stop_event.is_set():
-            try:
-                if not self._is_streaming_allowed():
-                    if self.connected or self.cap or self.ffmpeg_decoder:
-                        self.release_camera_connection("生效时段外暂停拉流")
-                    if not schedule_paused:
-                        schedule_paused = True
-                        logger.info(f"生效时段外，暂停拉流: {self.device_id}")
-                    time.sleep(1.0)
-                    continue
-
-                if schedule_paused:
-                    schedule_paused = False
-                    error_count = 0
-                    last_reconnect_time = time.time()
-                    self.reconnect_attempts = 0
-                    logger.info(f"进入生效时段，恢复拉流: {self.device_id}")
-
-                # 改进重连逻辑，添加退避策略
-                if not self.connected or error_count > 30:
-                    current_time = time.time()
-                    # 添加最小间隔时间，防止频繁重试
-                    if current_time - last_reconnect_time > self.reconnect_attempts * 2:
-                        if self.reconnect_attempts < self.max_reconnect_attempts:
-                            logger.info(f"尝试重新连接摄像机: {self.device_id} (尝试 {self.reconnect_attempts + 1}/{self.max_reconnect_attempts})")
-                            last_reconnect_time = current_time
-                            self.reconnect_attempts += 1
-                            if self.connect_to_camera():
-                                error_count = 0
-                            else:
-                                time.sleep(min(2 * self.reconnect_attempts, 10))  # 指数退避策略，最长等待10秒
-                                continue
-                        else:
-                            logger.error(f"重连摄像机 {self.device_id} 失败，停止检测任务")
+        try:
+            while not self.stop_event.is_set():
+                try:
+                    if not self._is_streaming_allowed():
+                        if self.connected or self.cap or self.ffmpeg_decoder:
+                            self.release_camera_connection("生效时段外暂停拉流")
+                        if not schedule_paused:
+                            schedule_paused = True
+                            logger.info(f"生效时段外，暂停拉流: {self.device_id}")
+                        if self._wait_or_stop(1.0):
                             break
-                    else:
-                        time.sleep(0.5)  # 短暂等待
                         continue
-                
-                # 根据解码器类型读取帧
-                if self.ffmpeg_decoder:
-                    # 使用GPU解码器
-                    try:
-                        # 完全关闭调试信息，提高性能
-                        ret, frame = self.ffmpeg_decoder.read()
-                        
-                    except Exception as e:
-                        ret, frame = False, None
-                else:
-                    # 使用OpenCV解码器
-                    ret, frame = self.cap.read()
-                
-                if not ret:
-                    error_count += 1
-                    logger.warning(f"从摄像机 {self.device_id} 获取帧失败 ({error_count}/30)")
-                    
-                    # 完全关闭调试信息，提高性能
-                    time.sleep(0.01)  # 最小化等待时间，最大化实时性
-                    continue
-                
-                # 重置错误计数
-                if error_count > 0:
-                    error_count = 0
 
-                # 使用锁来确保线程安全
-                with self.lock:
-                    self.frame_buffer.append(frame)  # 将帧添加到缓冲区
-            
-            except Exception as e:
-                logger.error(f"读取帧时出错: {e}")
-                error_count += 1
-                time.sleep(0.1)  # 短暂暂停后重试
+                    if schedule_paused:
+                        schedule_paused = False
+                        error_count = 0
+                        last_reconnect_time = time.time()
+                        self.reconnect_attempts = 0
+                        logger.info(f"进入生效时段，恢复拉流: {self.device_id}")
+
+                    # 改进重连逻辑，添加退避策略
+                    if not self.connected or error_count > 30:
+                        if self.stop_event.is_set():
+                            break
+                        current_time = time.time()
+                        # 添加最小间隔时间，防止频繁重试
+                        if current_time - last_reconnect_time > self.reconnect_attempts * 2:
+                            if self.reconnect_attempts < self.max_reconnect_attempts:
+                                logger.info(f"尝试重新连接摄像机: {self.device_id} (尝试 {self.reconnect_attempts + 1}/{self.max_reconnect_attempts})")
+                                last_reconnect_time = current_time
+                                self.reconnect_attempts += 1
+                                if self.connect_to_camera():
+                                    error_count = 0
+                                else:
+                                    if self._wait_or_stop(min(2 * self.reconnect_attempts, 10)):
+                                        break
+                                    continue
+                            else:
+                                logger.error(f"重连摄像机 {self.device_id} 失败，停止检测任务")
+                                break
+                        else:
+                            if self._wait_or_stop(0.5):
+                                break
+                            continue
+                    
+                    if self.stop_event.is_set():
+                        break
+
+                    # 根据解码器类型读取帧
+                    if self.ffmpeg_decoder:
+                        if self.stop_event.is_set():
+                            break
+                        try:
+                            ret, frame = self.ffmpeg_decoder.read()
+                        except Exception:
+                            ret, frame = False, None
+                    else:
+                        if not self.cap or self.stop_event.is_set():
+                            break
+                        ret, frame = self.cap.read()
+                    
+                    if self.stop_event.is_set():
+                        break
+
+                    if not ret:
+                        error_count += 1
+                        logger.warning(f"从摄像机 {self.device_id} 获取帧失败 ({error_count}/30)")
+                        
+                        if self._wait_or_stop(0.01):
+                            break
+                        continue
+                    
+                    # 重置错误计数
+                    if error_count > 0:
+                        error_count = 0
+
+                    # 使用锁来确保线程安全
+                    with self.lock:
+                        self.frame_buffer.append(frame)
+                
+                except Exception as e:
+                    logger.error(f"读取帧时出错: {e}")
+                    error_count += 1
+                    if self._wait_or_stop(0.1):
+                        break
+        finally:
+            reason = "任务停止" if self.stop_event.is_set() else "拉流线程退出"
+            self.release_camera_connection(reason)
 
     def run_detection(self): # 执行检测的主循环
         """执行检测的主循环"""
         # 为检测线程创建和设置事件循环
         try:
-            self.loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(self.loop)          
+            self._detection_loop = asyncio.new_event_loop()
+            self.loop = self._detection_loop
+            asyncio.set_event_loop(self._detection_loop)
         except Exception as e:
             logger.error(f"为检测线程创建事件循环失败: {e}")
         
@@ -356,10 +415,13 @@ class DetectionTask:
                 if not self.load_model():
                     return
             
-            # 启动读取帧的线程
-            self.thread = threading.Thread(target=self.read_frame)
-            self.thread.daemon = True
-            self.thread.start()
+            # 启动读取帧的线程（与检测主线程分离，避免 stop 时 join 错对象）
+            self.frame_thread = threading.Thread(
+                target=self.read_frame,
+                name=f"frame-{self.config_id}",
+            )
+            self.frame_thread.daemon = True
+            self.frame_thread.start()
 
             frame_count = 0
 
@@ -377,13 +439,15 @@ class DetectionTask:
             while not self.stop_event.is_set():
                 try:
                     if not is_within_active_period(datetime.now(), self.runtime_config):
-                        time.sleep(0.5)
+                        if self._wait_or_stop(0.5):
+                            break
                         continue
 
                     # 性能监控和动态调整
                     current_time = time.time()
                     if current_time - last_performance_check > self.performance_check_interval:
-                        self._adjust_performance_parameters()
+                        if not self.stop_event.is_set():
+                            self._adjust_performance_parameters()
                         last_performance_check = current_time
                         skip_frame_count = self.skip_frame_count
                                   
@@ -392,8 +456,12 @@ class DetectionTask:
                         if self.frame_buffer:
                             frame_rgb = self.frame_buffer[-1]  # 获取最新的帧
                         else:
-                            time.sleep(0.01)  # 短暂等待
+                            if self._wait_or_stop(0.01):
+                                break
                             continue  # 如果没有帧，跳过
+
+                    if self.stop_event.is_set():
+                        break
 
                     # 优化：每skip_frame_count帧执行一次检测，减少计算负担
                     frame_count += 1
@@ -405,6 +473,8 @@ class DetectionTask:
                     if should_detect:
                          # 执行检测
                         detect_frame = frame_rgb.copy()
+                        if self.stop_event.is_set():
+                            break
                         # img_result = frame_rgb.copy() 保留如果保存不带检测结果的帧，可以用于调试 _process_detection_events                 
                         # 使用 try-except 捕获模型推理过程中的错误
                         try:
@@ -415,6 +485,8 @@ class DetectionTask:
                                 is_onnx=self.is_onnx_model,
                                 confidence=self.confidence,
                             )
+                            if self.stop_event.is_set():
+                                break
                             # 获取速度
                             speed = results[0].speed
                             # 处理检测结果
@@ -481,32 +553,57 @@ class DetectionTask:
                     
                     # 动态休眠，根据客户端连接情况调整
                     if self.clients:
-                        time.sleep(0.01)  # 有客户端时短暂休眠
+                        if self._wait_or_stop(0.01):
+                            break
                     else:
-                        time.sleep(0.05)  # 无客户端时较长休眠
+                        if self._wait_or_stop(0.05):
+                            break
                     
                 except Exception as e:
                     logger.error(f"检测过程中出错: {e}")
-                    time.sleep(0.1)
+                    if self._wait_or_stop(0.1):
+                        break
 
         except Exception as e:
             logger.error(f"检测任务异常: {e}")
         finally:
-            # 关闭事件循环（在子线程内执行）
+            if self.frame_thread and self.frame_thread.is_alive() and self.frame_thread is not threading.current_thread():
+                self.frame_thread.join(timeout=1)
+            self._shutdown_detection_loop()
+
+    def _shutdown_detection_loop(self) -> None:
+        """在检测线程内安全关闭专属事件循环（绝不触碰预览主循环）"""
+        loop = self._detection_loop
+        if not loop or loop.is_closed():
+            return
+        try:
+            if loop.is_running():
+                return
+            loop.run_until_complete(loop.shutdown_asyncgens())
+        except RuntimeError as exc:
+            logger.debug("检测事件循环关闭跳过: %s", exc)
+        except Exception as exc:
+            logger.warning("关闭检测事件循环失败: %s", exc)
+        finally:
             try:
-                # 关闭异步生成器
-                self.loop.run_until_complete(self.loop.shutdown_asyncgens())
-            finally:
-                self.loop.close()
-                logger.info(f"事件循环已关闭: {self.config_id}")
+                if not loop.is_closed():
+                    loop.close()
+            except Exception as exc:
+                logger.debug("检测事件循环 close 失败: %s", exc)
+            self._detection_loop = None
+            if self.loop is loop:
+                self.loop = None
+            logger.info(f"事件循环已关闭: {self.config_id}")
     
     def _adjust_performance_parameters(self):
         """动态调整性能参数"""
         try:
             import psutil
             
-            # 获取系统资源使用情况
-            cpu_percent = psutil.cpu_percent(interval=1)
+            # 非阻塞采样，避免 stop 时在 cpu_percent(interval=1) 卡住
+            cpu_percent = psutil.cpu_percent(interval=None)
+            if cpu_percent == 0:
+                cpu_percent = psutil.cpu_percent(interval=0.05)
             memory_percent = psutil.virtual_memory().percent
             
             # 根据CPU使用率调整跳帧数
@@ -647,7 +744,15 @@ class DetectionTask:
             return
         
         self.stop_event.clear()
-        self.thread = threading.Thread(target=self.run_detection)
+        self.frame_thread = None
+        self.clients.clear()
+        self.broadcast_task = None
+        self.message_queue = None
+        self._preview_loop = None
+        self.thread = threading.Thread(
+            target=self.run_detection,
+            name=f"detect-{self.config_id}",
+        )
         self.thread.daemon = True
         self.thread.start()
     
@@ -655,30 +760,57 @@ class DetectionTask:
         """停止检测任务"""
         logger.info(f"正在停止检测任务: {self.config_id}")
         self.stop_event.set()
-        
-        # 停止广播任务
-        if self.broadcast_task:
-            self.broadcast_task.cancel()
-            try:
-                await self.broadcast_task
-            except asyncio.CancelledError:
-                logger.info(f"广播任务已取消: {self.config_id}")
-        
-        # 发送停止信号到消息队列
-        try:
-            if self.loop and not self.message_queue.empty():
-                await self.message_queue.put(None)
-        except Exception as e:
-            logger.error(f"发送停止信号到消息队列失败: {e}")
-        
-        if self.thread:
-            self.thread.join(timeout=5)
+        self.clients.clear()
+        # 不在此线程 release 摄像机（OpenCV/FFmpeg 跨线程 release 会导致进程崩溃）
+
+        # 停止预览广播（运行在 FastAPI 主循环，不可在检测线程里 await）
+        await self._stop_broadcast_worker()
+
+        # 在线程池中 join，拉流线程 finally 中会 release 摄像机
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, self._join_worker_threads)
+
+        if self.vlm_runner:
+            self.vlm_runner.shutdown()
+
+    def _join_worker_threads(self) -> None:
+        """等待拉流/检测线程结束（同步，供 asyncio.to_thread 调用）"""
+        if self.frame_thread and self.frame_thread.is_alive():
+            self.frame_thread.join(timeout=4)
+            if self.frame_thread.is_alive():
+                logger.warning(f"拉流线程未能及时停止: {self.config_id}")
+
+        if self.thread and self.thread.is_alive():
+            self.thread.join(timeout=8)
             if self.thread.is_alive():
                 logger.warning(f"检测线程未能及时停止: {self.config_id}")
 
-        self.release_camera_connection("任务停止")
-        if self.vlm_runner:
-            self.vlm_runner.shutdown()
+    async def _stop_broadcast_worker(self) -> None:
+        """取消预览广播协程并清空队列"""
+        task = self.broadcast_task
+        self.broadcast_task = None
+        if task and not task.done():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                logger.info(f"广播任务已取消: {self.config_id}")
+            except Exception as exc:
+                logger.debug("取消广播任务: %s", exc)
+
+        if self.message_queue is not None:
+            try:
+                while not self.message_queue.empty():
+                    self.message_queue.get_nowait()
+                    self.message_queue.task_done()
+            except Exception:
+                pass
+            try:
+                await self.message_queue.put(None)
+            except Exception as exc:
+                logger.debug("发送广播停止信号失败: %s", exc)
+        self.message_queue = None
+        self._preview_loop = None
     
     def _process_vlm_pipeline(self, img_result, detections, speed, cooldown_period):
         """YOLO 初筛后异步调用 VLM（verify / analyze）"""
@@ -839,10 +971,18 @@ class DetectionTask:
                     "occupancy_change_decrease",
                     "occupancy_report",
                 ) or counting in ("occupancy", "flow") or evt.startswith("occupancy_"):
-                    self._create_counting_event(event_info, img_result, detections)
-                    self.push_counting_event_legacy(event_info, img_result, detections, speed)
-                    if evt == "occupancy_alert":
-                        self._check_alert(event_info.get("current_count", 0))
+                    # 定期上报：有推送标签才推送，不入库（事件列表仅保留增减/超限）
+                    if evt == "occupancy_report" or event_info.get("_periodic_only"):
+                        push_label = event_info.get("pushLabel")
+                        if not push_label and self.area_coordinates:
+                            push_label = self.area_coordinates.get("pushLabel")
+                        if push_label:
+                            self.push_counting_event_legacy(event_info, img_result, detections, speed)
+                    else:
+                        self._create_counting_event(event_info, img_result, detections)
+                        self.push_counting_event_legacy(event_info, img_result, detections, speed)
+                        if evt == "occupancy_alert":
+                            self._check_alert(event_info.get("current_count", 0))
                 elif analysis == "behavior" or scenario_type == "behavior" or evt.startswith(
                     ("line_cross", "area_")
                 ):
@@ -1243,10 +1383,11 @@ class DetectionTask:
                 "detections": detections
             }
             
-            # 将消息放入队列（线程安全）
-            if self.loop and self.loop.is_running():
-                self.loop.call_soon_threadsafe(
-                    lambda: self.message_queue.put_nowait(message)
+            # 将消息放入队列（线程安全，仅通过预览主循环）
+            preview_loop = self._preview_loop
+            if preview_loop and preview_loop.is_running() and self.message_queue is not None:
+                preview_loop.call_soon_threadsafe(
+                    lambda msg=message: self.message_queue.put_nowait(msg)
                 )
        
         except Exception as e:
@@ -1410,20 +1551,21 @@ class DetectionTask:
         """添加WebSocket客户端到广播列表"""
         self.clients.add(websocket)
         logger.info(f"客户端已连接到检测任务 {self.config_id}, 当前客户端数: {len(self.clients)}")
-        
-        # 如果没有广播任务，立即启动一个
+
+        try:
+            preview_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            logger.error(f"预览连接不在异步上下文中，无法启动广播: {self.config_id}")
+            return
+
+        self._preview_loop = preview_loop
+        if self.message_queue is None:
+            self.message_queue = asyncio.Queue()
+
         if not self.broadcast_task or self.broadcast_task.done():
             try:
-                # 确保在正确的事件循环中创建任务
-                if self.loop and self.loop.is_running():
-                    self.broadcast_task = asyncio.run_coroutine_threadsafe(
-                        self.broadcast_worker(),
-                        self.loop
-                    )
-                else:
-                    self.loop = asyncio.get_event_loop()
-                    self.broadcast_task = asyncio.create_task(self.broadcast_worker())
-                    logger.info(f"为检测任务 {self.config_id} 创建了新的广播任务")
+                self.broadcast_task = preview_loop.create_task(self.broadcast_worker())
+                logger.info(f"为检测任务 {self.config_id} 创建了新的广播任务")
             except Exception as e:
                 logger.error(f"创建广播任务失败: {e}")
     
@@ -1432,8 +1574,8 @@ class DetectionTask:
         if websocket in self.clients:
             self.clients.remove(websocket)
             logger.info(f"客户端已断开连接，检测任务 {self.config_id}, 当前客户端数: {len(self.clients)}")
-            
-            # 如果没有客户端了，停止广播任务
-            if not self.clients and self.broadcast_task:
+
+            # 无客户端时标记广播任务结束（实际 cancel 由 stop 或任务自然退出）
+            if not self.clients and self.broadcast_task and not self.broadcast_task.done():
                 self.broadcast_task.cancel()
                 self.broadcast_task = None

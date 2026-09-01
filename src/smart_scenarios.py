@@ -672,7 +672,10 @@ class ScenarioProcessor:
                     "timestamp": self.tracker.frame_count,
                 }
             elif interval_ok:
+                push_label = self._scenario_push_label(parsed)
                 state["last_stats_emit"] = now
+                if not push_label:
+                    return events
                 key = f"{parsed['id']}:occupancy_report:{current_total}:{int(now)}"
                 events[key] = {
                     "scenario_id": parsed["id"],
@@ -687,7 +690,7 @@ class ScenarioProcessor:
                     "area_counts": area_counts,
                     "today_in_count": state.get("today_in_count", 0),
                     "today_out_count": state.get("today_out_count", 0),
-                    "pushLabel": self._scenario_push_label(parsed),
+                    "pushLabel": push_label,
                     "timestamp": self.tracker.frame_count,
                     "_periodic_only": True,
                 }

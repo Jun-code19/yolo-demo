@@ -1,7 +1,14 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, status
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
-from src.database import get_db, HeatmapMap, HeatmapArea, HeatmapBinding, HeatmapDashboardConfig, HeatmapHistory,CrowdAnalysisJob
+from src.database import get_db, HeatmapMap, HeatmapArea, HeatmapBinding, HeatmapDashboardConfig, HeatmapHistory, CrowdAnalysisJob, PlatformSetting
+from src.heatmap_stats import (
+    resolve_binding_stats,
+    build_area_response,
+    compute_park_stats,
+    build_area_description_meta,
+    get_area_display_unit,
+)
 from typing import Optional, Dict, Any, List
 import os
 import json
@@ -46,7 +53,9 @@ class HeatmapAreaCreate(BaseModel):
     map_id: int
     name: str
     points: List[Dict[str, float]]
+    shape_type: str = "polygon"
     color: str = "rgba(74, 144, 226, 0.5)"
+    display_unit: Optional[str] = "人"
     max_capacity: Optional[int] = None
     description: Optional[str] = None
     scale_factor: float = 1.0
@@ -55,6 +64,7 @@ class HeatmapAreaResponse(BaseModel):
     id: int
     map_id: int
     name: str
+    shape_type: str = "polygon"
     points: List[Dict[str, float]]
     color: str
     area_size: float
@@ -63,7 +73,11 @@ class HeatmapAreaResponse(BaseModel):
     data_source_type: Optional[str]
     data_source_id: Optional[str]
     data_source_name: Optional[str]
-    current_count: Optional[int]
+    display_unit: Optional[str] = "人"
+    current_count: Optional[int] = 0
+    staying_count: Optional[int] = 0
+    entered_count: Optional[int] = 0
+    exited_count: Optional[int] = 0
     last_update_time: Optional[datetime]
     created_at: datetime
     updated_at: datetime
@@ -77,12 +91,48 @@ class HeatmapBindingCreate(BaseModel):
     refresh_interval: int = 30
     config: Optional[Dict[str, Any]] = None
 
+DEFAULT_DASHBOARD_SCREEN_NAME = "园区 AI 视觉监测大屏"
+DASHBOARD_SCREEN_NAME_SETTING_KEY = "dashboard_screen_name"
+
+
+def resolve_dashboard_screen_name(db: Session) -> str:
+    config = db.query(HeatmapDashboardConfig).filter(
+        HeatmapDashboardConfig.is_active.is_(True)
+    ).order_by(HeatmapDashboardConfig.updated_at.desc()).first()
+    if config and config.screen_name:
+        name = str(config.screen_name).strip()
+        if name:
+            return name
+
+    setting = db.query(PlatformSetting).filter(
+        PlatformSetting.setting_key == DASHBOARD_SCREEN_NAME_SETTING_KEY
+    ).first()
+    if setting and isinstance(setting.setting_value, dict):
+        name = str(setting.setting_value.get("screen_name") or "").strip()
+        if name:
+            return name
+
+    return DEFAULT_DASHBOARD_SCREEN_NAME
+
+
+def normalize_display_mode(mode: str) -> str:
+    """preview 已废弃，归并为 mini"""
+    if mode == "full":
+        return "full"
+    return "mini"
+
+
 class HeatmapDashboardConfigModel(BaseModel):
     map_id: int
-    display_mode: str = "preview"
+    display_mode: str = "mini"
     max_areas: int = 6
     refresh_interval: int = 30
+    screen_name: Optional[str] = None
     config: Optional[Dict[str, Any]] = None
+
+
+class DashboardScreenNameModel(BaseModel):
+    screen_name: str
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
@@ -323,50 +373,12 @@ async def get_map_areas(map_id: int, db: Session = Depends(get_db)):
         
         result = []
         for area in areas:
-            # 获取该区域的绑定信息
             binding = db.query(HeatmapBinding).filter(
                 HeatmapBinding.area_id == area.id,
                 HeatmapBinding.is_active == True
             ).first()
-
-            if binding:
-                crowd_analysis = db.query(CrowdAnalysisJob).filter(CrowdAnalysisJob.job_id == binding.data_source_id).first()
-            else:
-                crowd_analysis = None
-            
-            # 安全获取人数统计
-            current_count = 0
-            if crowd_analysis and crowd_analysis.last_result:
-                try:
-                    if isinstance(crowd_analysis.last_result, dict):
-                        current_count = int(crowd_analysis.last_result.get("total_person_count", 0))
-                    else:
-                        # 如果last_result是JSON字符串，需要解析
-                        import json
-                        result_data = json.loads(crowd_analysis.last_result) if isinstance(crowd_analysis.last_result, str) else crowd_analysis.last_result
-                        current_count = int(result_data.get("total_person_count", 0))
-                except (ValueError, TypeError, json.JSONDecodeError):
-                    current_count = 0
-            
-            area_dict = {
-                "id": area.id,
-                "map_id": area.map_id,
-                "name": area.name,
-                "points": area.points,
-                "color": area.color,
-                "area_size": area.area_size,
-                "max_capacity": area.max_capacity,
-                "description": area.description,
-                "data_source_type": binding.data_source_type if binding else None,
-                "data_source_id": binding.data_source_id if binding else None,
-                "data_source_name": binding.data_source_name if binding else None,
-                "current_count": current_count,
-                "last_update_time": crowd_analysis.last_run if crowd_analysis else None,
-                "created_at": area.created_at,
-                "updated_at": area.updated_at,
-                "is_active": area.is_active
-            }
-            result.append(area_dict)
+            stats = resolve_binding_stats(db, binding)
+            result.append(build_area_response(area, binding, stats))
         
         return result
         
@@ -378,17 +390,19 @@ async def get_map_areas(map_id: int, db: Session = Depends(get_db)):
 async def create_area(area: HeatmapAreaCreate, db: Session = Depends(get_db)):
     """创建区域"""
     try:
-        # 计算区域面积
-        area_size = calculate_polygon_area(area.points, area.scale_factor)
+        shape_type = area.shape_type if area.shape_type in ("polygon", "point") else "polygon"
+        # 计算区域面积（项目点无面积）
+        area_size = 0 if shape_type == "point" else calculate_polygon_area(area.points, area.scale_factor)
         
         db_area = HeatmapArea(
             map_id=area.map_id,
             name=area.name,
+            shape_type=shape_type,
             points=area.points,
             color=area.color,
             area_size=area_size,
             max_capacity=area.max_capacity,
-            description=area.description
+            description=build_area_description_meta(getattr(area, "display_unit", None)),
         )
         
         db.add(db_area)
@@ -419,20 +433,30 @@ async def update_area(area_id: int, area_data: Dict[str, Any], db: Session = Dep
         # 更新字段
         if 'name' in area_data:
             db_area.name = area_data['name']
+
+        if 'shape_type' in area_data:
+            shape_type = area_data['shape_type']
+            db_area.shape_type = shape_type if shape_type in ("polygon", "point") else "polygon"
         
         if 'points' in area_data:
             db_area.points = area_data['points']
+            shape_type = getattr(db_area, "shape_type", None) or "polygon"
             # 重新计算面积
-            area_size = calculate_polygon_area(area_data['points'], area_data.get('scale_factor', 1.0))
-            db_area.area_size = area_size
+            if shape_type == "point":
+                db_area.area_size = 0
+            else:
+                area_size = calculate_polygon_area(area_data['points'], area_data.get('scale_factor', 1.0))
+                db_area.area_size = area_size
         
         if 'color' in area_data:
             db_area.color = area_data['color']
         
         if 'max_capacity' in area_data:
             db_area.max_capacity = area_data['max_capacity']
-        
-        if 'description' in area_data:
+
+        if 'display_unit' in area_data:
+            db_area.description = build_area_description_meta(area_data.get('display_unit'))
+        elif 'description' in area_data:
             db_area.description = area_data['description']
         
         db_area.updated_at = datetime.now()
@@ -483,13 +507,18 @@ async def create_binding(binding: HeatmapBindingCreate, db: Session = Depends(ge
             old_binding.is_active = False
         
         # 创建新绑定
+        binding_config = dict(binding.config or {})
+        area = db.query(HeatmapArea).filter(HeatmapArea.id == binding.area_id).first()
+        if area and not binding_config.get("display_unit"):
+            binding_config["display_unit"] = get_area_display_unit(area, binding_config)
+
         db_binding = HeatmapBinding(
             area_id=binding.area_id,
             data_source_type=binding.data_source_type,
             data_source_id=binding.data_source_id,
             data_source_name=binding.data_source_name,
             refresh_interval=binding.refresh_interval,
-            config=binding.config or {}
+            config=binding_config
         )
         
         db.add(db_binding)
@@ -562,9 +591,10 @@ async def get_dashboard_config(db: Session = Depends(get_db)):
             config_dict = {
                 "id": config.id,
                 "map_id": config.map_id,
-                "display_mode": config.display_mode,
+                "display_mode": normalize_display_mode(config.display_mode or "mini"),
                 "max_areas": config.max_areas,
                 "refresh_interval": config.refresh_interval,
+                "screen_name": resolve_dashboard_screen_name(db),
                 "config": config.config,
                 "created_at": config.created_at,
                 "updated_at": config.updated_at,
@@ -572,7 +602,12 @@ async def get_dashboard_config(db: Session = Depends(get_db)):
             }
             return {'success': True, 'data': config_dict}
         else:
-            return {'success': True, 'data': None}
+            return {
+                'success': True,
+                'data': {
+                    'screen_name': resolve_dashboard_screen_name(db),
+                }
+            }
         
     except Exception as e:
         print(f"获取展板配置错误: {e}")
@@ -590,9 +625,10 @@ async def save_dashboard_config(config: HeatmapDashboardConfigModel, db: Session
         # 创建新配置
         db_config = HeatmapDashboardConfig(
             map_id=config.map_id,
-            display_mode=config.display_mode,
+            display_mode=normalize_display_mode(config.display_mode),
             max_areas=config.max_areas,
             refresh_interval=config.refresh_interval,
+            screen_name=(config.screen_name or DEFAULT_DASHBOARD_SCREEN_NAME).strip()[:128] or DEFAULT_DASHBOARD_SCREEN_NAME,
             config=config.config or {}
         )
         
@@ -608,6 +644,38 @@ async def save_dashboard_config(config: HeatmapDashboardConfigModel, db: Session
     except Exception as e:
         print(f"保存展板配置错误: {e}")
         raise HTTPException(status_code=500, detail="保存展板配置失败")
+
+@heatmap_router.put("/dashboard/screen-name")
+async def save_dashboard_screen_name(payload: DashboardScreenNameModel, db: Session = Depends(get_db)):
+    """保存大屏名称（无地图配置时写入平台设置）"""
+    try:
+        name = (payload.screen_name or "").strip() or DEFAULT_DASHBOARD_SCREEN_NAME
+        name = name[:128]
+
+        config = db.query(HeatmapDashboardConfig).filter(
+            HeatmapDashboardConfig.is_active.is_(True)
+        ).order_by(HeatmapDashboardConfig.updated_at.desc()).first()
+
+        if config:
+            config.screen_name = name
+        else:
+            setting = db.query(PlatformSetting).filter(
+                PlatformSetting.setting_key == DASHBOARD_SCREEN_NAME_SETTING_KEY
+            ).first()
+            if setting:
+                setting.setting_value = {"screen_name": name}
+                setting.updated_at = datetime.now()
+            else:
+                db.add(PlatformSetting(
+                    setting_key=DASHBOARD_SCREEN_NAME_SETTING_KEY,
+                    setting_value={"screen_name": name},
+                ))
+
+        db.commit()
+        return {"success": True, "data": {"screen_name": name}}
+    except Exception as e:
+        print(f"保存大屏名称错误: {e}")
+        raise HTTPException(status_code=500, detail="保存大屏名称失败")
 
 @heatmap_router.get("/dashboard/data")
 async def get_dashboard_data(db: Session = Depends(get_db)):
@@ -639,31 +707,12 @@ async def get_dashboard_data(db: Session = Depends(get_db)):
                 HeatmapBinding.area_id == area.id,
                 HeatmapBinding.is_active == True
             ).first()
-
-            if binding:
-                crowd_analysis = db.query(CrowdAnalysisJob).filter(CrowdAnalysisJob.job_id == binding.data_source_id).first()
-            else:
-                crowd_analysis = None
-            
-            area_dict = {
-                "id": area.id,
-                "map_id": area.map_id,
-                "name": area.name,
-                "points": area.points,
-                "color": area.color,
-                "area_size": area.area_size,
-                "max_capacity": area.max_capacity,
-                "description": area.description,
-                "data_source_type": binding.data_source_type if binding else None,
-                "data_source_id": binding.data_source_id if binding else None,
-                "data_source_name": binding.data_source_name if binding else None,
-                "current_count": crowd_analysis.last_result.get("total_person_count", 0) if crowd_analysis and crowd_analysis.last_result else 0,
-                "last_update_time": crowd_analysis.last_run if crowd_analysis else None,
-                "created_at": area.created_at,
-                "updated_at": area.updated_at,
-                "is_active": area.is_active
-            }
-            areas_data.append(area_dict)
+            stats = resolve_binding_stats(db, binding)
+            areas_data.append(build_area_response(area, binding, stats))
+        
+        park_stats = None
+        if config.config and isinstance(config.config, dict):
+            park_stats = compute_park_stats(db, config.config.get("park_stats"))
         
         map_dict = None
         if map_data:
@@ -689,7 +738,8 @@ async def get_dashboard_data(db: Session = Depends(get_db)):
             'success': True,
             'data': {
                 'map': map_dict,
-                'areas': areas_data
+                'areas': areas_data,
+                'park_stats': park_stats,
             }
         }
         

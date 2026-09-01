@@ -22,11 +22,14 @@ DEFAULT_GROUP_SETTINGS = {
     "frame_source_primary": "snapshot",
     "frame_source_fallback": "rtsp",
     "device_interval_sec": 1.0,
+    "push_mode": "per_device",  # per_device | bundled
 }
 
 
 def _normalize_group_settings(settings: Optional[Dict]) -> Dict:
     merged = {**DEFAULT_GROUP_SETTINGS, **(settings or {})}
+    if merged.get("push_mode") not in ("per_device", "bundled"):
+        merged["push_mode"] = "per_device"
     return merged
 
 

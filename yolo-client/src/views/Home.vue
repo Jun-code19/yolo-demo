@@ -65,14 +65,15 @@
           <div class="stat-content">
             <div class="stat-icon">
               <el-icon color="#F56C6C">
-                <Timer />
+                <DataLine />
               </el-icon>
             </div>
             <div class="stat-info">
-              <div class="stat-value">{{ comprehensiveData.performance?.accuracy || 0 }}%</div>
-              <div class="stat-label">检测准确率</div>
+              <div class="stat-value">{{ formatConfidenceValue(comprehensiveData.performance) }}</div>
+              <div class="stat-label">平均置信度</div>
               <div class="stat-detail">
-                <span class="time">{{ comprehensiveData.performance?.avg_detection_time?.toFixed(3) || 0 }}s 平均耗时</span>
+                <span class="perf-time">{{ formatDetectionTimeValue(comprehensiveData.performance) }}</span>
+                <span class="perf-time-label">近 7 天检测耗时</span>
               </div>
             </div>
           </div>
@@ -206,8 +207,8 @@
                   检测事件
                 </span>
                 <span class="legend-item">
-                  <span class="legend-color external"></span>
-                  外部事件
+                  <span class="legend-color alert-rule"></span>
+                  规则告警
                 </span>
                 <span class="legend-item">
                   <span class="legend-color scheme"></span>
@@ -328,8 +329,7 @@ import { useRouter } from 'vue-router'
 import {
   VideoCameraFilled,
   Warning,
-  DataLine,
-  Timer
+  DataLine
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import * as echarts from 'echarts'
@@ -367,11 +367,11 @@ const piePanels = [
     ]
   },
   {
-    key: 'external',
-    title: '外部事件',
+    key: 'alertRule',
+    title: '规则引擎',
     views: [
-      { value: 'status', label: '状态' },
-      { value: 'engine', label: '引擎' }
+      { value: 'rule', label: '规则' },
+      { value: 'status', label: '状态' } 
     ]
   }
 ]
@@ -380,7 +380,7 @@ const pieViewMode = reactive({
   detection: 'type',
   modelPipeline: 'modelType',
   vlm: 'jobStatus',
-  external: 'status'
+  alertRule: 'rule'
 })
 
 const pieChartRefMap = {}
@@ -414,6 +414,22 @@ const comprehensiveData = reactive({
 const loading = ref(false)
 const scrollOffset = ref(0)
 let scrollInterval = null
+
+const formatConfidenceValue = (performance) => {
+  const sampleCount = performance?.avg_confidence_sample_count ?? 0
+  if (!sampleCount) return '--'
+  const value = performance?.avg_confidence
+  if (value == null || Number.isNaN(Number(value))) return '--'
+  return `${Number(value).toFixed(1)}%`
+}
+
+const formatDetectionTimeValue = (performance) => {
+  const sampleCount = performance?.avg_detection_time_sample_count ?? 0
+  if (!sampleCount) return '--'
+  const value = performance?.avg_detection_time
+  if (value == null || Number.isNaN(Number(value))) return '--'
+  return `${Number(value).toFixed(1)}ms`
+}
 
 // 获取完整仪表盘数据
 const fetchComprehensiveData = async () => {
@@ -555,25 +571,28 @@ const getSwitchablePieData = (key, mode) => {
     }
   }
 
-  if (mode === 'engine') {
-    const engineDistribution = comprehensiveData.events?.external_events?.engine_distribution || {}
+  if (key === 'alertRule') {
+    if (mode === 'rule') {
+      const ruleDistribution = comprehensiveData.events?.alert_rules?.rule_distribution || {}
+      return {
+        seriesName: '规则命中分布',
+        items: Object.entries(ruleDistribution).map(([ruleName, count]) => ({
+          name: ruleName || '未命名规则',
+          value: count
+        }))
+      }
+    }
+    const statusDistribution = comprehensiveData.events?.alert_rules?.status_distribution || {}
     return {
-      seriesName: '外部事件引擎',
-      items: Object.entries(engineDistribution).map(([engine, count]) => ({
-        name: engine || '未知引擎',
+      seriesName: '规则告警状态',
+      items: Object.entries(statusDistribution).map(([status, count]) => ({
+        name: getAlertStatusLabel(status),
         value: count
       }))
     }
   }
 
-  const statusDistribution = comprehensiveData.events?.external_events?.status_distribution || {}
-  return {
-    seriesName: '外部事件状态',
-    items: Object.entries(statusDistribution).map(([status, count]) => ({
-      name: getStatusLabel(status),
-      value: count
-    }))
-  }
+  return { seriesName: '', items: [] }
 }
 
 const renderSwitchablePie = (key) => {
@@ -680,7 +699,7 @@ const renderTrendChart = () => {
   const trends = comprehensiveData.trends?.daily || []
   const dates = trends.map(item => item.date)
   const detectionData = trends.map(item => item.detection_events)
-  const externalData = trends.map(item => item.external_events)
+  const alertRuleData = trends.map(item => item.alert_rules)
   const schemeData = trends.map(item => item.scheme_events)
 
   const option = {
@@ -691,7 +710,7 @@ const renderTrendChart = () => {
       }
     },
     legend: {
-      data: ['检测事件', '外部事件', '订阅事件']
+      data: ['检测事件', '规则告警', '订阅事件']
     },
     grid: {
       left: '3%',
@@ -721,9 +740,9 @@ const renderTrendChart = () => {
         smooth: true
       },
       {
-        name: '外部事件',
+        name: '规则告警',
         type: 'line',
-        data: externalData,
+        data: alertRuleData,
         itemStyle: {
           color: '#67C23A'
         },
@@ -790,15 +809,25 @@ const getEventTypeName = (eventType) => {
 const getActivitySourceLabel = (activity) => {
   const content = activity?.content || ''
   if (content.includes('[VLM推理]')) return 'VLM 推理'
-  if (activity?.source === 'external') return '外部事件'
+  if (activity?.source === 'alert_rule') return '规则引擎'
   return '本地检测'
 }
 
 const getActivityTagType = (activity) => {
   const content = activity?.content || ''
   if (content.includes('[VLM推理]')) return 'warning'
-  if (activity?.source === 'external') return 'success'
+  if (activity?.source === 'alert_rule') return 'success'
   return 'primary'
+}
+
+// 获取告警状态标签
+const getAlertStatusLabel = (status) => {
+  const map = {
+    new: '新建',
+    acknowledged: '已确认',
+    ignored: '已忽略'
+  }
+  return map[status] || status
 }
 
 // 获取状态标签
@@ -1155,8 +1184,14 @@ watch(comprehensiveData, () => {
   color: #409EFF;
 }
 
-.stat-detail .time {
+.stat-detail .perf-time {
   color: #E6A23C;
+  font-weight: 500;
+  margin-right: 6px;
+}
+
+.stat-detail .perf-time-label {
+  color: #909399;
 }
 
 .module-col {
@@ -1238,7 +1273,7 @@ watch(comprehensiveData, () => {
   background-color: #409EFF;
 }
 
-.legend-color.external {
+.legend-color.alert-rule {
   background-color: #67C23A;
 }
 

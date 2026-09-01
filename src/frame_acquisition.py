@@ -1,10 +1,12 @@
 """单帧取图：API 截图 / RTSP 单帧，支持主备静默切换"""
 import hashlib
 import logging
+import os
 import re
 import secrets
+import socket
 import threading
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -13,6 +15,46 @@ import requests
 from src.rtsp_url import build_rtsp_url
 
 logger = logging.getLogger(__name__)
+
+RTSP_URL_PREFIXES = ("rtsp://", "rtsps://")
+
+
+def open_rtsp_capture(rtsp_url: str) -> cv2.VideoCapture:
+    """用 FFMPEG 后端打开 RTSP，避免 Windows 上默认走 CAP_IMAGES。"""
+    url = (rtsp_url or "").strip()
+    if url.lower().startswith(RTSP_URL_PREFIXES):
+        # 海康等设备在 Windows 上 UDP 不稳定，优先 TCP；5s 超时避免长时间阻塞
+        os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|stimeout;5000000"
+        return cv2.VideoCapture(url, cv2.CAP_FFMPEG)
+    return cv2.VideoCapture(url)
+
+
+def probe_rtsp_host(rtsp_url: str, timeout: float = 3.0) -> Tuple[bool, str]:
+    """探测 RTSP 主机端口是否可达，返回 (可达, 主机:端口)。"""
+    url = (rtsp_url or "").strip()
+    if not url.lower().startswith(RTSP_URL_PREFIXES):
+        return True, ""
+    try:
+        from urllib.parse import urlparse
+
+        parsed = urlparse(url)
+        host = parsed.hostname or ""
+        port = parsed.port or 554
+        if not host:
+            return True, ""
+        with socket.create_connection((host, port), timeout=timeout):
+            return True, f"{host}:{port}"
+    except OSError:
+        try:
+            from urllib.parse import urlparse
+
+            parsed = urlparse(url)
+            host = parsed.hostname or "unknown"
+            port = parsed.port or 554
+            return False, f"{host}:{port}"
+        except Exception:
+            return False, "unknown"
+
 
 DEFAULT_GROUP_SETTINGS = {
     "frame_source_primary": "snapshot",
@@ -125,7 +167,7 @@ class FrameAcquisitionService:
         def _read_once():
             cap = None
             try:
-                cap = cv2.VideoCapture(rtsp_url)
+                cap = open_rtsp_capture(rtsp_url)
                 cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
                 if not cap.isOpened():
                     return

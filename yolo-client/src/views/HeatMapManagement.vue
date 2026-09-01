@@ -9,7 +9,10 @@
             已选择地图：{{ getMapName(currentMapId) }}
           </el-tag>
           <el-tag v-if="currentAreas.length > 0" type="info" size="small" style="margin-left: 8px;">
-            {{ currentAreas.length }} 个区域
+            {{ getPolygonAreasCount() }} 个区域
+          </el-tag>
+          <el-tag v-if="getProjectPointsCount() > 0" type="info" size="small" style="margin-left: 8px;">
+            {{ getProjectPointsCount() }} 个项目点
           </el-tag>
           <el-tag v-if="getBoundAreasCount() > 0" type="warning" size="small" style="margin-left: 8px;">
             {{ getBoundAreasCount() }} 个已绑定
@@ -32,6 +35,7 @@
         :full-page="true"
         @map-selected="handleMapSelected"
         @areas-updated="handleAreasUpdated"
+        @maps-changed="handleMapsChanged"
       />
     </div>
 
@@ -51,9 +55,8 @@
         </el-form-item>
         <el-form-item label="显示模式" prop="displayMode">
           <el-radio-group v-model="displayConfig.displayMode">
-            <el-radio value="preview">预览模式（色块）</el-radio>
-            <el-radio value="mini">迷你地图</el-radio>
-            <el-radio value="full">完整地图</el-radio>
+            <el-radio value="mini">迷你地图（面板内交互）</el-radio>
+            <el-radio value="full">完整地图（底层全屏）</el-radio>
           </el-radio-group>
         </el-form-item>
         <el-form-item label="刷新间隔" prop="refreshInterval">
@@ -72,6 +75,25 @@
             :max="20"
           />
         </el-form-item>
+        <el-divider content-position="left">园内人数</el-divider>
+        <el-form-item label="启用显示">
+          <el-switch v-model="displayConfig.parkStats.enabled" />
+        </el-form-item>
+        <el-form-item v-if="displayConfig.parkStats.enabled" label="标题">
+          <el-input v-model="displayConfig.parkStats.title" maxlength="20" />
+        </el-form-item>
+        <el-form-item v-if="displayConfig.parkStats.enabled" label="订阅监控">
+          <el-select
+            v-model="displayConfig.parkStats.schemeIds"
+            multiple
+            filterable
+            collapse-tags
+            placeholder="选择人数统计订阅（园内 = 各订阅「进入 − 离开」之和，单点可为负）"
+            style="width: 100%"
+          >
+            <el-option v-for="scheme in numberStatSchemes" :key="scheme.id" :label="scheme.label" :value="scheme.id" />
+          </el-select>
+        </el-form-item>
       </el-form>
       <template #footer>
         <span class="dialog-footer">
@@ -89,7 +111,8 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { ArrowLeft, Select, Refresh } from '@element-plus/icons-vue'
 import HeatMapManager from '@/components/HeatMapManager.vue'
-import { dashboardMapApi } from '@/api/dashboard'
+import { dashboardMapApi, normalizeHeatmapDisplayMode } from '@/api/dashboard'
+import { smartSchemeApi } from '@/api/smart_scheme'
 
 const router = useRouter()
 const heatMapManagerRef = ref(null)
@@ -100,13 +123,21 @@ const showDisplayConfig = ref(false)
 const availableMaps = ref([])
 const currentMapId = ref(null)
 const currentAreas = ref([])
+const numberStatSchemes = ref([])
+
+const defaultParkStats = () => ({
+  enabled: false,
+  title: '园内人数',
+  schemeIds: [],
+})
 
 // 展板显示配置
 const displayConfig = reactive({
   mapId: '',
-  displayMode: 'preview',
+  displayMode: 'mini',
   refreshInterval: 30,
-  maxAreas: 6
+  maxAreas: 6,
+  parkStats: defaultParkStats(),
 })
 
 // 表单验证规则
@@ -131,8 +162,24 @@ const displayRules = {
 
 onMounted(async () => {
   await loadAvailableMaps()
+  await loadNumberStatSchemes()
   await loadCurrentDisplayConfig()
 })
+
+const loadNumberStatSchemes = async () => {
+  try {
+    const response = await smartSchemeApi.getSchemes({ page: 1, page_size: 100, event_type: 'number_stat' })
+    const items = response.data?.items || response.data?.data?.items || response.data?.data || []
+    numberStatSchemes.value = (Array.isArray(items) ? items : []).map((scheme) => ({
+      id: scheme.id,
+      label: scheme.camera_name
+        ? `${scheme.camera_name}${scheme.remarks ? ` · ${scheme.remarks}` : ''}`
+        : (scheme.remarks || scheme.id),
+    }))
+  } catch (error) {
+    numberStatSchemes.value = []
+  }
+}
 
 // 加载可用地图列表
 const loadAvailableMaps = async () => {
@@ -168,9 +215,15 @@ const loadCurrentDisplayConfig = async () => {
     if (response.data && response.data.success && response.data.data) {
       const config = response.data.data
       displayConfig.mapId = config.map_id ? config.map_id.toString() : ''
-      displayConfig.displayMode = config.display_mode || 'preview'
+      displayConfig.displayMode = normalizeHeatmapDisplayMode(config.display_mode || 'mini')
       displayConfig.refreshInterval = config.refresh_interval || 30
       displayConfig.maxAreas = config.max_areas || 6
+      const park = config.config?.park_stats
+      if (park) {
+        displayConfig.parkStats.enabled = !!park.enabled
+        displayConfig.parkStats.title = park.title || '园内人数'
+        displayConfig.parkStats.schemeIds = [...(park.scheme_ids || [])]
+      }
     }
   } catch (error) {
     console.error('加载展板配置失败:', error)
@@ -181,8 +234,25 @@ const loadCurrentDisplayConfig = async () => {
 // 处理地图选择
 const handleMapSelected = (mapId) => {
   currentMapId.value = mapId
+  if (!mapId) {
+    currentAreas.value = []
+    return
+  }
   if (!displayConfig.mapId || displayConfig.mapId === '') {
     displayConfig.mapId = mapId
+  }
+}
+
+const handleMapsChanged = async () => {
+  await loadAvailableMaps()
+  if (currentMapId.value && !availableMaps.value.some(m => m.id === currentMapId.value)) {
+    currentMapId.value = availableMaps.value[0]?.id || null
+    currentAreas.value = []
+    if (currentMapId.value) {
+      displayConfig.mapId = currentMapId.value
+    } else {
+      displayConfig.mapId = ''
+    }
   }
 }
 
@@ -216,7 +286,7 @@ const saveToDisplay = () => {
   }
   
   // 检查是否有区域绑定了数据源
-  const hasBinding = currentAreas.value.some(area => area.jobId && area.jobId !== '')
+  const hasBinding = currentAreas.value.some(area => (area.sourceId || area.jobId) && (area.sourceId || area.jobId) !== '')
   if (!hasBinding) {
     ElMessage.warning('请至少为一个区域绑定数据源')
     return
@@ -237,12 +307,17 @@ const confirmDisplayConfig = async () => {
     // 构建API请求数据
     const configData = {
       map_id: parseInt(displayConfig.mapId),
-      display_mode: displayConfig.displayMode,
+      display_mode: normalizeHeatmapDisplayMode(displayConfig.displayMode),
       refresh_interval: displayConfig.refreshInterval,
       max_areas: displayConfig.maxAreas,
       config: {
         lastUpdated: new Date().toISOString(),
-        areas: currentAreas.value
+        areas: currentAreas.value,
+        park_stats: {
+          enabled: displayConfig.parkStats.enabled,
+          title: displayConfig.parkStats.title?.trim() || '园内人数',
+          scheme_ids: displayConfig.parkStats.enabled ? [...displayConfig.parkStats.schemeIds] : [],
+        },
       }
     }
     
@@ -289,7 +364,15 @@ const getMapName = (mapId) => {
 
 // 获取已绑定区域数量
 const getBoundAreasCount = () => {
-  return currentAreas.value.filter(area => area.jobId && area.jobId !== '').length
+  return currentAreas.value.filter(area => (area.sourceId || area.jobId) && (area.sourceId || area.jobId) !== '').length
+}
+
+const getPolygonAreasCount = () => {
+  return currentAreas.value.filter(area => (area.shapeType || 'polygon') === 'polygon').length
+}
+
+const getProjectPointsCount = () => {
+  return currentAreas.value.filter(area => area.shapeType === 'point').length
 }
 
 </script>

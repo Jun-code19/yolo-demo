@@ -42,6 +42,11 @@ apiClient_v2.interceptors.request.use(
   error => Promise.reject(error)
 )
 
+export const DEFAULT_DASHBOARD_SCREEN_NAME = '园区 AI 视觉监测大屏'
+
+/** preview 已废弃，统一归并为 mini */
+export const normalizeHeatmapDisplayMode = (mode) => (mode === 'full' ? 'full' : 'mini')
+
 export const dashboardMapApi = {
   uploadDashboardMap: (data) => apiClient_v1.post('/heatmap/maps', data, {
     headers: {
@@ -59,17 +64,19 @@ export const dashboardMapApi = {
   deleteDashboardMap: (mapId) => apiClient_v1.delete(`/heatmap/maps/${mapId}`),
   getDashboardConfig: () => apiClient_v1.get('/heatmap/dashboard/config'),
   saveDashboardConfig: (data) => apiClient_v1.post('/heatmap/dashboard/config', data),
+  saveDashboardScreenName: (screenName) => apiClient_v1.put('/heatmap/dashboard/screen-name', { screen_name: screenName }),
   getDashboardData: () => apiClient_v1.get('/heatmap/dashboard/data'),
 }
 
 export const dashboardIntegrationApi = {
   getConfig: () => apiClient_v1.get('/settings/dashboard-integrations'),
   saveConfig: (data) => apiClient_v1.put('/settings/dashboard-integrations', data),
+  testWaitTime: (data) => apiClient_v1.post('/settings/dashboard-integrations/test-wait-time', data),
 }
 
-export const getWaitTimeData = async () => {
+export const getWaitTimeData = async (timeoutMs = 70000) => {
   try {
-    const response = await apiClient_v1.get('/dashboard/wait-time');
+    const response = await apiClient_v1.get('/dashboard/wait-time', { timeout: timeoutMs });
     return response.data?.data ?? response.data;
   } catch (error) {
     console.error('Error fetching wait time data:', error);

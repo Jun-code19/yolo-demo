@@ -44,15 +44,6 @@ const routes = [
     }
   },
   {
-    path: '/devices/area-config/:deviceId',
-    name: 'AreaConfigSetting',
-    component: () => import('../views/device/AreaConfigSetting.vue'),
-    meta: {
-      requiresAuth: true,
-      title: '区域设置'
-    }
-  },
-  {
     path: '/realtime',
     name: 'RealtimeDetection',
     component: () => import('../views/detection/RealtimeDetection.vue'),
@@ -227,12 +218,15 @@ const routes = [
   },
   {
     path: '/heatmap-management',
-    name: 'HeatMapManagement',
-    component: () => import('../views/HeatMapManagement.vue'),
+    redirect: { path: '/system', query: { tab: 'map_config' } }
+  },
+  {
+    path: '/alert-rules',
+    name: 'AlertRuleHub',
+    component: () => import('../views/alert-rules/AlertRuleHub.vue'),
     meta: {
-      requiresAuth: false,
-      title: '人数热力图管理',
-      layout: 'fullscreen'
+      requiresAuth: true,
+      title: '规则引擎'
     }
   },
   {

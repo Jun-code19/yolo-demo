@@ -17,7 +17,7 @@
         定时截图 → VLM 语义检测。请先在
         <el-link type="primary" @click="router.push('/models/vlm')">模型管理 · VLM 大模型</el-link>
         中注册模型并配置 API Key，可用图片试跑验证 Prompt。
-        告警推送需在<strong>数据推送配置</strong>的 tags 中包含任务标签（如 <code>vlm_inspection</code>）或 <code>vlm_alert</code>。
+        告警推送需在<strong>数据推送配置</strong>的 tags 中包含任务标签（如 <code>vlm_inspection</code> 或 <code>vlm_alert</code>）。
       </template>
     </el-alert>
 
@@ -36,9 +36,35 @@
         </el-table-column>
         <el-table-column label="告警标签" min-width="160">
           <template #default="scope">
-            <el-tag v-for="tag in (scope.row.alert_labels || []).slice(0, 3)" :key="tag" size="small" style="margin-right: 4px">
-              {{ tag }}
-            </el-tag>
+            <template v-if="(scope.row.alert_labels || []).length">
+              <el-tooltip
+                :content="formatAlertLabelsTooltip(scope.row.alert_labels)"
+                placement="top"
+                :show-after="300"
+                :disabled="scope.row.alert_labels.length <= VISIBLE_ALERT_LABEL_COUNT"
+              >
+                <div class="alert-labels-cell">
+                  <el-tag
+                    v-for="tag in scope.row.alert_labels.slice(0, VISIBLE_ALERT_LABEL_COUNT)"
+                    :key="tag"
+                    size="small"
+                    class="alert-label-tag"
+                  >
+                    {{ tag }}
+                  </el-tag>
+                  <el-tag
+                    v-if="scope.row.alert_labels.length > VISIBLE_ALERT_LABEL_COUNT"
+                    size="small"
+                    type="info"
+                    effect="plain"
+                    class="alert-label-more"
+                  >
+                    +{{ scope.row.alert_labels.length - VISIBLE_ALERT_LABEL_COUNT }}
+                  </el-tag>
+                </div>
+              </el-tooltip>
+            </template>
+            <span v-else>-</span>
           </template>
         </el-table-column>
         <el-table-column label="设备" min-width="100">
@@ -116,6 +142,7 @@ import {
 import VlmInspectionDialog from './VlmInspectionDialog.vue'
 
 const router = useRouter()
+const VISIBLE_ALERT_LABEL_COUNT = 3
 const loading = ref(false)
 const jobList = ref([])
 const modelMap = ref({})
@@ -170,6 +197,8 @@ const fetchPrompts = async () => {
 
 const getModelName = id => modelMap.value[id] || id || '-'
 const getPromptName = id => promptMap.value[id] || id || '-'
+
+const formatAlertLabelsTooltip = (labels) => (labels || []).join('、') || '-'
 
 const getScheduleSummary = scheduleConfig => {
   const runtime = scheduleConfig?.runtime
@@ -256,5 +285,22 @@ const deleteJob = jobId => {
 .pagination {
   margin-top: 20px;
   text-align: right;
+}
+
+.alert-labels-cell {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-width: 100%;
+  cursor: default;
+}
+
+.alert-label-tag {
+  flex-shrink: 0;
+  max-width: none;
+}
+
+.alert-label-more {
+  flex-shrink: 0;
 }
 </style>

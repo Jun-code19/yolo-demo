@@ -669,6 +669,7 @@ class HeatmapArea(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     map_id = Column(Integer, ForeignKey('heatmap_maps.id'), nullable=False, comment="关联地图ID")
     name = Column(String(255), nullable=False, comment="区域名称")
+    shape_type = Column(String(20), default='polygon', comment="形状类型: polygon区域 / point项目点")
     points = Column(JSONB, nullable=False, comment="区域多边形坐标点")
     color = Column(String(50), default='rgba(74, 144, 226, 0.5)', comment="区域颜色")
     area_size = Column(Float, default=0, comment="区域面积(平方米)")
@@ -710,6 +711,7 @@ class HeatmapDashboardConfig(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     map_id = Column(Integer, ForeignKey('heatmap_maps.id'), nullable=False, comment="关联地图ID")
     display_mode = Column(Enum('preview', 'mini', 'full', name='display_mode_enum'), default='preview', comment="显示模式")
+    screen_name = Column(String(128), comment="大屏标题名称")
     max_areas = Column(Integer, default=6, comment="最大显示区域数")
     refresh_interval = Column(Integer, default=30, comment="刷新间隔(秒)")
     config = Column(JSONB, comment="其他配置信息")
@@ -719,6 +721,66 @@ class HeatmapDashboardConfig(Base):
     
     # 关系
     map = relationship("HeatmapMap", back_populates="dashboard_configs")
+
+class AlertRule(Base):
+    """复合告警规则（定时扫表评估）"""
+    __tablename__ = "alert_rule"
+
+    rule_id = Column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
+    name = Column(String(255), nullable=False)
+    description = Column(Text)
+    enabled = Column(Boolean, default=True)
+    device_id = Column(String(64), ForeignKey("device.device_id"), nullable=True)
+    definition = Column(JSONB, nullable=False, default=dict)
+    priority = Column(Integer, default=100)
+    push_tags = Column(String(500))
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    device = relationship("Device")
+    state = relationship("AlertRuleState", back_populates="rule", uselist=False, cascade="all, delete-orphan")
+    alerts = relationship("CompositeAlert", back_populates="rule", cascade="all, delete-orphan")
+
+
+class AlertRuleState(Base):
+    """规则评估状态（watermark / 持续条件 / 冷却）"""
+    __tablename__ = "alert_rule_state"
+
+    rule_id = Column(String(64), ForeignKey("alert_rule.rule_id"), primary_key=True)
+    watermark = Column(DateTime, nullable=True)
+    condition_state = Column(JSONB, default=dict)
+    last_fired_at = Column(DateTime, nullable=True)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    rule = relationship("AlertRule", back_populates="state")
+
+
+class CompositeAlert(Base):
+    """规则命中记录（复合告警）"""
+    __tablename__ = "composite_alert"
+
+    alert_id = Column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
+    rule_id = Column(String(64), ForeignKey("alert_rule.rule_id"), nullable=False)
+    device_id = Column(String(64), ForeignKey("device.device_id"), nullable=True)
+    title = Column(String(255), nullable=False)
+    summary = Column(Text)
+    matched_events = Column(JSONB, nullable=False, default=list)
+    definition_snapshot = Column(JSONB)
+    status = Column(String(20), default="new")
+    fired_at = Column(DateTime, default=datetime.now)
+    created_at = Column(DateTime, default=datetime.now)
+
+    rule = relationship("AlertRule", back_populates="alerts")
+    device = relationship("Device")
+
+
+Index("idx_alert_rule_enabled", AlertRule.enabled)
+Index("idx_alert_rule_device_id", AlertRule.device_id)
+Index("idx_composite_alert_rule_id", CompositeAlert.rule_id)
+Index("idx_composite_alert_fired_at", CompositeAlert.fired_at.desc())
+Index("idx_composite_alert_device_id", CompositeAlert.device_id)
+Index("idx_composite_alert_status", CompositeAlert.status)
+
 
 class PlatformSetting(Base):
     """平台级键值配置（如大屏外部接口）"""

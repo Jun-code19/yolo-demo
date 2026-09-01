@@ -211,7 +211,18 @@
         <el-form-item label="标签" prop="tags">
           <el-select v-model="pushForm.tags" multiple filterable allow-create default-first-option
             placeholder="请选择或输入标签（可多选）" style="width: 100%;" popper-append-to-body>
-            <el-option v-for="tag in commonTags" :key="tag" :label="tag" :value="tag" />
+            <el-option-group
+              v-for="group in pushTagGroups"
+              :key="group.label"
+              :label="group.label"
+            >
+              <el-option
+                v-for="tag in group.tags"
+                :key="tag.value"
+                :label="tag.label"
+                :value="tag.value"
+              />
+            </el-option-group>
           </el-select>
           <div class="form-help-text">
             标签用于将推送配置应用于不同的数据源，例如：detection、device_123、alarm
@@ -303,6 +314,7 @@
 import { ref, reactive, onMounted, computed } from 'vue';
 import { dataPushApi } from '../../api/data_push';
 import { detectionConfigApi } from '../../api/detection';
+import { PUSH_TAG_GROUPS, COMMON_PUSH_TAGS } from '@/constants/pushTags';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { Plus, Refresh, Document, CircleCheck, TrendCharts } from '@element-plus/icons-vue';
 import PushLogPanel from './PushLogPanel.vue';
@@ -356,15 +368,10 @@ export default {
     });
     const pushFormRef = ref(null)
 
-    const commonTags = ref([
-      'detection',
-      'alarm',
-      'system',
-      'statistics'
-    ]);
+    const pushTagGroups = PUSH_TAG_GROUPS
 
     const allTags = computed(() => {
-      const tags = new Set();
+      const tags = new Set(COMMON_PUSH_TAGS);
       pushConfigs.value.forEach(config => {
         if (config.tags && Array.isArray(config.tags)) {
           config.tags.forEach(tag => tags.add(tag));
@@ -489,6 +496,7 @@ export default {
       pushForm.push_id = '';
       pushForm.push_name = '';
       pushForm.config_id = '';
+      pushForm.tags = [];
       pushForm.push_method = 'http';
       pushForm.http_url = '';
       pushForm.http_method = 'POST';
@@ -665,7 +673,7 @@ export default {
       isEdit,
       pushForm,
       formRules,
-      commonTags,
+      pushTagGroups,
       allTags,
       currentPage,
       pageSize,
@@ -719,6 +727,14 @@ export default {
 .tag-item {
   margin-right: 4px;
   margin-bottom: 4px;
+}
+
+.form-help-text code {
+  font-size: 11px;
+  color: #606266;
+  background: #f4f4f5;
+  padding: 1px 4px;
+  border-radius: 3px;
 }
 
 .form-help-text {

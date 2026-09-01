@@ -94,7 +94,7 @@ def format_datetime(dt: datetime) -> str:
 @router.get("/manager", response_model=Dict[str, Any], tags=["事件订阅管理"])
 def get_schemes(
     page: int = Query(1, ge=1, description="页码"),
-    page_size: int = Query(10, ge=1, le=100, description="每页数量"),
+    page_size: int = Query(10, ge=1, le=500, description="每页数量"),
     camera_id: Optional[str] = Query(None, description="摄像头ID"),
     event_type: Optional[str] = Query(None, description="事件类型"),
     status: Optional[str] = Query(None, description="状态"),

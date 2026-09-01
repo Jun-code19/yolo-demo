@@ -6,7 +6,7 @@
         <el-tab-pane label="系统状态" name="status"></el-tab-pane>
         <el-tab-pane label="系统日志" name="logs"></el-tab-pane>
         <el-tab-pane label="检测日志" name="detection_logs"></el-tab-pane>
-        <el-tab-pane label="外部数据" name="integrations"></el-tab-pane>
+        <el-tab-pane label="地图配置" name="map_config"></el-tab-pane>
         <el-tab-pane label="设备监控" name="device_monitor"></el-tab-pane>
       </el-tabs>
     </div>
@@ -286,19 +286,9 @@
       </el-card>
     </div>
 
-    <!-- 大屏外部数据配置 -->
-    <div v-if="activeTab === 'integrations'" class="integrations-panel">
-      <el-card>
-        <template #header>
-          <div class="card-header">
-            <div>
-              <div class="panel-title">大屏外部数据</div>
-              <div class="panel-desc">配置数据大屏使用的排队时长与天气接口，密钥由服务端安全代理</div>
-            </div>
-          </div>
-        </template>
-        <DashboardIntegrationConfig />
-      </el-card>
+    <!-- 地图配置 -->
+    <div v-if="activeTab === 'map_config'" class="integrations-panel">
+      <DashboardMapConfig />
     </div>
 
     <!-- 清除日志对话框 -->
@@ -349,7 +339,7 @@ import { useRoute } from 'vue-router'
 import { Refresh, Download, Delete } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import systemLogApi from '@/api/system_log'
-import DashboardIntegrationConfig from '@/components/DashboardIntegrationConfig.vue'
+import DashboardMapConfig from '@/components/DashboardMapConfig.vue'
 import DeviceMonitorConfig from '@/components/DeviceMonitorConfig.vue'
 
 const route = useRoute()
@@ -359,8 +349,8 @@ const activeTab = ref('status')
 
 const syncTabFromRoute = () => {
   const tab = route.query.tab
-  if (tab === 'integrations') {
-    activeTab.value = 'integrations'
+  if (tab === 'map_config' || tab === 'integrations') {
+    activeTab.value = 'map_config'
   } else if (tab === 'device_monitor') {
     activeTab.value = 'device_monitor'
   }

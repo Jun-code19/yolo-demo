@@ -25,6 +25,8 @@ const attachAuth = (client) => {
 attachAuth(apiClientV1)
 attachAuth(apiClientV2)
 
+import { COMMON_PUSH_TAGS as PUSH_TAGS_FROM_CONSTANTS } from '@/constants/pushTags'
+
 export const deviceMonitorApi = {
   getConfig: () => apiClientV1.get('/settings/device-monitor'),
   saveConfig: (data) => apiClientV1.put('/settings/device-monitor', data),
@@ -33,16 +35,7 @@ export const deviceMonitorApi = {
   reloadScheduler: () => apiClientV2.post('/settings/device-monitor/reload')
 }
 
-export const COMMON_PUSH_TAGS = [
-  'device_online_status',
-  // 'detection',
-  // 'alarm',
-  // 'system',
-  // 'statistics',
-  // 'crowd_analysis',
-  // 'vlm_inspection',
-  // 'external_event'
-]
+export const COMMON_PUSH_TAGS = [...PUSH_TAGS_FROM_CONSTANTS]
 
 export const PROBE_METHOD_OPTIONS = [
   { value: 'rtsp', label: 'RTSP 拉流', desc: '通道级探测，适合摄像头/NVR' },
