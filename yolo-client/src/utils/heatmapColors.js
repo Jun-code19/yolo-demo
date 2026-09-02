@@ -18,6 +18,10 @@ export function getHeatmapRatio(count, maxCount) {
   return Math.min(Math.max(count / max, 0), 1)
 }
 
+export function getHeatmapRgbAtRatio(ratio) {
+  return interpolateHeatmapRgb(ratio)
+}
+
 function lerp(a, b, t) {
   return a + (b - a) * t
 }
@@ -52,7 +56,13 @@ export function getHeatmapStrokeColor(count, maxCount) {
 }
 
 export function computeMaxAreaCount(areas, shapeType = 'polygon') {
-  const list = (areas || []).filter((area) => (area.shapeType || 'polygon') === shapeType)
+  const list = (areas || []).filter((area) => (area.shapeType || area.shape_type || 'polygon') === shapeType)
+  if (!list.length) return 1
+  return Math.max(...list.map(getAreaCount), 1)
+}
+
+export function computeMaxFeatureCount(areas) {
+  const list = areas || []
   if (!list.length) return 1
   return Math.max(...list.map(getAreaCount), 1)
 }

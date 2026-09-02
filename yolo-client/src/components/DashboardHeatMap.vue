@@ -62,22 +62,24 @@
       <Teleport to="#board-map-ui-anchor" :disabled="!isFullMapMode">
         <div v-if="isFullMapMode" class="map-ui-frame map-ui-frame--anchored">
           <div class="map-ui-row map-ui-row-top">
-            <div v-if="parkStats" class="park-stats-panel park-stats-panel--frame">
-              <div class="park-stats-title">{{ parkStats.title || '园内人数' }}</div>
-              <div class="park-stats-grid">
-                <div class="park-stat-item"><span class="label">园内</span><span class="value">{{ parkStats.stayingCount ?? 0 }}</span></div>
-                <div class="park-stat-item"><span class="label">进入</span><span class="value enter">{{ parkStats.enteredCount ?? 0 }}</span></div>
-                <div class="park-stat-item"><span class="label">离开</span><span class="value exit">{{ parkStats.exitedCount ?? 0 }}</span></div>
+            <div class="map-ui-top-side map-ui-top-left">
+              <div v-if="parkStats" class="park-stats-panel park-stats-panel--frame">
+                <div class="park-stats-title">{{ parkStats.title || '园内人数' }}</div>
+                <div class="park-stats-grid">
+                  <div class="park-stat-item"><span class="label">园内</span><span class="value">{{ parkStats.stayingCount ?? 0 }}</span></div>
+                  <div class="park-stat-item"><span class="label">进入</span><span class="value enter">{{ parkStats.enteredCount ?? 0 }}</span></div>
+                  <div class="park-stat-item"><span class="label">离开</span><span class="value exit">{{ parkStats.exitedCount ?? 0 }}</span></div>
+                </div>
               </div>
             </div>
-            <div v-else class="map-ui-placeholder" aria-hidden="true"></div>
-            <div class="map-title-badge">人数分布</div>
-            <div class="full-legend full-color-legend map-ui-legend">
-              <div class="legend-title">人数色阶</div>
-              <div class="legend-gradient" :style="{ background: heatmapLegendGradient }"></div>
-              <div class="legend-labels">
-                <span>0</span>
-                <span>{{ maxCount }}</span>
+            <div class="map-ui-top-side map-ui-top-right">
+              <div class="full-legend full-color-legend map-ui-legend">
+                <div class="legend-title">人数色阶</div>
+                <div class="legend-gradient" :style="{ background: heatmapLegendGradient }"></div>
+                <div class="legend-labels">
+                  <span>0</span>
+                  <span>{{ maxCount }}</span>
+                </div>
               </div>
             </div>
           </div>
@@ -200,12 +202,14 @@ import { useRouter } from 'vue-router'
 import { PictureRounded, Setting } from '@element-plus/icons-vue'
 import {
   HEATMAP_LEGEND_GRADIENT,
-  computeMaxAreaCount,
+  computeMaxFeatureCount,
   getAreaCount,
   getHeatmapColor,
+  getHeatmapRatio,
+  getHeatmapRgbAtRatio,
   getHeatmapStrokeColor,
 } from '@/utils/heatmapColors'
-import { normalizeHeatmapDisplayMode } from '@/api/dashboard'
+import { DEFAULT_FUSION_CONFIG, normalizeHeatmapDisplayMode, normalizeHeatmapRenderStyle, normalizeLabelMode } from '@/api/dashboard'
 
 const heatmapLegendGradient = HEATMAP_LEGEND_GRADIENT
 
@@ -247,6 +251,16 @@ const hasConfig = computed(() => config.value.mapId && areas.value.length > 0)
 const normalizeDisplayMode = normalizeHeatmapDisplayMode
 
 const displayMode = computed(() => normalizeDisplayMode(config.value.displayMode))
+const renderStyle = computed(() => normalizeHeatmapRenderStyle(config.value.renderStyle))
+const isFusionRenderMode = computed(() => renderStyle.value === 'fusion')
+const fusionConfig = computed(() => ({
+  ...DEFAULT_FUSION_CONFIG,
+  ...(config.value.fusionConfig || {}),
+}))
+const labelMode = computed(() => normalizeLabelMode(
+  config.value.labelMode,
+  fusionConfig.value.showLabels,
+))
 const defaultMapScale = computed(() => getDefaultMapScale(displayMode.value))
 const isFullMapMode = computed(() => displayMode.value === 'full')
 const isMiniMapMode = computed(() => displayMode.value === 'mini')
@@ -261,12 +275,11 @@ const displayAreas = computed(() => {
     .slice(0, maxAreas.value)
 })
 
-const legendAreas = computed(() => {
-  return [...areas.value]
-    .sort((a, b) => getAreaCount(b) - getAreaCount(a))
-})
+const legendAreas = computed(() => (
+  [...areas.value].sort((a, b) => getAreaCount(b) - getAreaCount(a))
+))
 
-const maxCount = computed(() => computeMaxAreaCount(areas.value, 'polygon'))
+const maxCount = computed(() => computeMaxFeatureCount(areas.value))
 
 onMounted(async () => {
   await loadConfig()
@@ -303,6 +316,11 @@ watch(displayMode, (mode) => {
   scheduleCanvasRedraw()
 })
 
+watch(renderStyle, () => {
+  invalidateFusionLayerCache()
+  scheduleCanvasRedraw()
+})
+
 watch(
   () => hasConfig.value,
   () => {
@@ -315,6 +333,10 @@ watch(hoveredArea, () => {
   scheduleCanvasRedraw()
 })
 
+watch([labelMode, maxAreas], () => {
+  scheduleCanvasRedraw()
+})
+
 watch(showFullMapDialog, (visible) => {
   if (visible) {
     nextTick(drawExpandedCanvas)
@@ -322,24 +344,45 @@ watch(showFullMapDialog, (visible) => {
 })
 
 // 加载配置
+const applyDashboardConfig = (apiData) => {
+  const extra = apiData?.config && typeof apiData.config === 'object' ? apiData.config : {}
+  config.value = {
+    ...extra,
+    mapId: apiData?.map_id != null ? apiData.map_id.toString() : (extra.mapId || ''),
+    displayMode: normalizeDisplayMode(apiData?.display_mode || extra.displayMode),
+    maxAreas: apiData?.max_areas ?? extra.maxAreas ?? 6,
+    refreshInterval: apiData?.refresh_interval ?? extra.refreshInterval ?? 30,
+    renderStyle: normalizeHeatmapRenderStyle(extra.render_style || extra.renderStyle),
+    labelMode: normalizeLabelMode(
+      extra.label_mode || extra.labelMode,
+      extra.fusion_config?.showLabels ?? extra.fusionConfig?.showLabels,
+    ),
+    fusionConfig: {
+      ...DEFAULT_FUSION_CONFIG,
+      ...(extra.fusion_config || extra.fusionConfig || {}),
+    },
+  }
+}
+
 const loadConfig = async () => {
   try {
     // 先尝试从API加载配置
     const response = await fetch('/api/v1/heatmap/dashboard/config')
     const result = await response.json()
     if (result.success && result.data) {
-      config.value = {
-        mapId: result.data.map_id.toString(),
-        displayMode: normalizeDisplayMode(result.data.display_mode),
-        maxAreas: result.data.max_areas,
-        refreshInterval: result.data.refresh_interval,
-        ...result.data.config
-      }
+      applyDashboardConfig(result.data)
     } else {
       // 回退到本地存储
       const savedConfig = localStorage.getItem('dashboard_heatmap_config')
       if (savedConfig) {
-        config.value = JSON.parse(savedConfig)
+        const parsed = JSON.parse(savedConfig)
+        applyDashboardConfig({
+          map_id: parsed.mapId,
+          display_mode: parsed.displayMode,
+          max_areas: parsed.maxAreas,
+          refresh_interval: parsed.refreshInterval,
+          config: parsed,
+        })
       }
     }
   } catch (error) {
@@ -348,7 +391,14 @@ const loadConfig = async () => {
     try {
       const savedConfig = localStorage.getItem('dashboard_heatmap_config')
       if (savedConfig) {
-        config.value = JSON.parse(savedConfig)
+        const parsed = JSON.parse(savedConfig)
+        applyDashboardConfig({
+          map_id: parsed.mapId,
+          display_mode: parsed.displayMode,
+          max_areas: parsed.maxAreas,
+          refresh_interval: parsed.refreshInterval,
+          config: parsed,
+        })
       }
     } catch (e) {
       // console.error('加载本地配置失败:', e)
@@ -415,6 +465,7 @@ const loadData = async () => {
     }
 
     lastUpdateTime.value = new Date()
+    invalidateFusionLayerCache()
   } catch (error) {
     // console.error('加载数据失败:', error)
     // 回退到本地数据加载
@@ -428,6 +479,7 @@ const loadData = async () => {
       updateAreaCounts()
       loadMapImage()
       lastUpdateTime.value = new Date()
+      invalidateFusionLayerCache()
     } catch (e) {
       // console.error('加载本地数据失败:', e)
     }
@@ -549,10 +601,219 @@ const drawMapCanvas = (canvasEl) => {
       (area) => area.points?.length && (area.shapeType || 'polygon') !== 'point' && area.points.length >= 3
     )
     const projectAreas = areas.value.filter((area) => area.shapeType === 'point' && area.points?.length)
+    const mapTransform = { x, y, scale }
 
-    polygonAreas.forEach((area) => drawAreaOnCanvas(ctx, area, { x, y, scale }))
-    projectAreas.forEach((area) => drawProjectOnCanvas(ctx, area, { x, y, scale }))
+    if (isFusionRenderMode.value) {
+      drawFusionHeatmapLayer(ctx, mapTransform)
+      if (fusionConfig.value.showBorders) {
+        polygonAreas.forEach((area) => drawAreaOutlineOnCanvas(ctx, area, mapTransform))
+      }
+      projectAreas.forEach((area, index) => drawProjectFusionMarker(ctx, area, mapTransform, index, projectAreas.length))
+    } else {
+      polygonAreas.forEach((area) => drawAreaOnCanvas(ctx, area, mapTransform))
+      projectAreas.forEach((area) => drawProjectPointOnCanvas(ctx, area, mapTransform))
+    }
+    drawMapLabels(ctx, mapTransform, width, height, polygonAreas, projectAreas)
   }
+}
+
+let fusionLayerCache = null
+let fusionLayerCacheKey = ''
+
+const invalidateFusionLayerCache = () => {
+  fusionLayerCache = null
+  fusionLayerCacheKey = ''
+}
+
+const estimateAreaRadius = (area) => {
+  if (!area.points?.length) return 40
+  const xs = area.points.map((point) => point.x)
+  const ys = area.points.map((point) => point.y)
+  const width = Math.max(...xs) - Math.min(...xs)
+  const height = Math.max(...ys) - Math.min(...ys)
+  return Math.max(36, Math.hypot(width, height) * 0.42)
+}
+
+const buildFusionCacheKey = () => {
+  const fc = fusionConfig.value
+  const areaSig = areas.value
+    .map((area) => `${area.id}:${getAreaCount(area)}:${area.points?.length || 0}`)
+    .join('|')
+  return [
+    mapImage.value?.width,
+    mapImage.value?.height,
+    maxCount.value,
+    fc.blur,
+    fc.opacity,
+    fc.intensityBoost,
+    fc.sharpLayer,
+    areaSig,
+  ].join(':')
+}
+
+const buildFusionColoredCanvas = () => {
+  if (!mapImage.value) return null
+
+  const cacheKey = buildFusionCacheKey()
+  if (fusionLayerCache && fusionLayerCacheKey === cacheKey) {
+    return fusionLayerCache
+  }
+
+  const sourceWidth = mapImage.value.width
+  const sourceHeight = mapImage.value.height
+  const maxSide = 960
+  const scaleDown = Math.min(1, maxSide / Math.max(sourceWidth, sourceHeight))
+  const workWidth = Math.max(1, Math.round(sourceWidth * scaleDown))
+  const workHeight = Math.max(1, Math.round(sourceHeight * scaleDown))
+  const blurRadius = Math.max(8, Math.round((fusionConfig.value.blur || DEFAULT_FUSION_CONFIG.blur) * scaleDown))
+
+  const colorCanvas = document.createElement('canvas')
+  colorCanvas.width = workWidth
+  colorCanvas.height = workHeight
+  const colorCtx = colorCanvas.getContext('2d')
+  if (!colorCtx) return null
+
+  const paintAreaColorGradient = (ctx, cx, cy, radius, ratio) => {
+    const { r, g, b } = getHeatmapRgbAtRatio(ratio)
+    const alpha = 0.62 + ratio * 0.38
+
+    ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha * 0.72})`
+    ctx.beginPath()
+    ctx.arc(cx, cy, Math.max(8, radius * 0.38), 0, Math.PI * 2)
+    ctx.fill()
+
+    const gradient = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius)
+    gradient.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${alpha})`)
+    gradient.addColorStop(0.42, `rgba(${r}, ${g}, ${b}, ${alpha * 0.72})`)
+    gradient.addColorStop(0.72, `rgba(${r}, ${g}, ${b}, ${alpha * 0.28})`)
+    gradient.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`)
+    ctx.fillStyle = gradient
+    ctx.fillRect(cx - radius, cy - radius, radius * 2, radius * 2)
+  }
+
+  const polygonAreas = areas.value.filter(
+    (area) => area.points?.length && (area.shapeType || 'polygon') !== 'point' && area.points.length >= 3
+  )
+
+  polygonAreas.forEach((area) => {
+    const ratio = getHeatmapRatio(getAreaCount(area), maxCount.value)
+    const center = calculateAreaCenter(area)
+    const radius = estimateAreaRadius(area) * scaleDown
+    const cx = center.x * scaleDown
+    const cy = center.y * scaleDown
+
+    colorCtx.save()
+    colorCtx.beginPath()
+    area.points.forEach((point, index) => {
+      const px = point.x * scaleDown
+      const py = point.y * scaleDown
+      if (index === 0) colorCtx.moveTo(px, py)
+      else colorCtx.lineTo(px, py)
+    })
+    colorCtx.closePath()
+    colorCtx.clip()
+    paintAreaColorGradient(colorCtx, cx, cy, radius, ratio)
+    colorCtx.restore()
+  })
+
+  const projectAreas = areas.value.filter((area) => area.shapeType === 'point' && area.points?.length)
+  const pointSpread = (fusionConfig.value.pointRadius || DEFAULT_FUSION_CONFIG.pointRadius) * scaleDown
+
+  projectAreas.forEach((area) => {
+    const ratio = getHeatmapRatio(getAreaCount(area), maxCount.value)
+    const px = area.points[0].x * scaleDown
+    const py = area.points[0].y * scaleDown
+    const radius = Math.max(36, pointSpread * (0.72 + ratio * 0.78))
+    paintAreaColorGradient(colorCtx, px, py, radius, ratio)
+  })
+
+  const blurredCanvas = document.createElement('canvas')
+  blurredCanvas.width = workWidth
+  blurredCanvas.height = workHeight
+  const blurredCtx = blurredCanvas.getContext('2d')
+  if (!blurredCtx) return null
+  blurredCtx.filter = `blur(${blurRadius}px)`
+  blurredCtx.drawImage(colorCanvas, 0, 0)
+  blurredCtx.filter = 'none'
+
+  const sharpLayer = fusionConfig.value.sharpLayer ?? DEFAULT_FUSION_CONFIG.sharpLayer ?? 0.42
+  if (sharpLayer > 0) {
+    blurredCtx.globalAlpha = sharpLayer
+    blurredCtx.drawImage(colorCanvas, 0, 0)
+    blurredCtx.globalAlpha = 1
+  }
+
+  const sourceData = blurredCtx.getImageData(0, 0, workWidth, workHeight)
+  const coloredCanvas = document.createElement('canvas')
+  coloredCanvas.width = workWidth
+  coloredCanvas.height = workHeight
+  const coloredCtx = coloredCanvas.getContext('2d')
+  if (!coloredCtx) return null
+
+  const outputData = coloredCtx.createImageData(workWidth, workHeight)
+  const opacity = fusionConfig.value.opacity ?? DEFAULT_FUSION_CONFIG.opacity
+  const intensityBoost = fusionConfig.value.intensityBoost ?? DEFAULT_FUSION_CONFIG.intensityBoost ?? 1.42
+
+  for (let i = 0; i < sourceData.data.length; i += 4) {
+    const srcAlpha = sourceData.data[i + 3] / 255
+    if (srcAlpha <= 0.008) continue
+    const boostedAlpha = Math.min(1, srcAlpha * intensityBoost + 0.12)
+    outputData.data[i] = sourceData.data[i]
+    outputData.data[i + 1] = sourceData.data[i + 1]
+    outputData.data[i + 2] = sourceData.data[i + 2]
+    outputData.data[i + 3] = Math.round(boostedAlpha * opacity * 255)
+  }
+  coloredCtx.putImageData(outputData, 0, 0)
+
+  if (scaleDown < 1) {
+    const fullCanvas = document.createElement('canvas')
+    fullCanvas.width = sourceWidth
+    fullCanvas.height = sourceHeight
+    const fullCtx = fullCanvas.getContext('2d')
+    if (!fullCtx) return coloredCanvas
+    fullCtx.imageSmoothingEnabled = true
+    fullCtx.drawImage(coloredCanvas, 0, 0, sourceWidth, sourceHeight)
+    fusionLayerCache = fullCanvas
+  } else {
+    fusionLayerCache = coloredCanvas
+  }
+
+  fusionLayerCacheKey = cacheKey
+  return fusionLayerCache
+}
+
+const drawFusionHeatmapLayer = (ctx, transform) => {
+  const fusionCanvas = buildFusionColoredCanvas()
+  if (!fusionCanvas || !mapImage.value) return
+
+  const { x: offsetX, y: offsetY, scale } = transform
+  const mapWidth = mapImage.value.width * scale
+  const mapHeight = mapImage.value.height * scale
+
+  ctx.save()
+  ctx.drawImage(fusionCanvas, offsetX, offsetY, mapWidth, mapHeight)
+  ctx.restore()
+}
+
+const drawAreaOutlineOnCanvas = (ctx, area, transform) => {
+  if (!area.points || area.points.length < 3) return
+
+  const { x: offsetX, y: offsetY, scale } = transform
+  const isHovered = hoveredArea.value && hoveredArea.value.id === area.id
+  const canvasPoints = area.points.map((point) => ({
+    x: point.x * scale + offsetX,
+    y: point.y * scale + offsetY,
+  }))
+
+  ctx.beginPath()
+  ctx.moveTo(canvasPoints[0].x, canvasPoints[0].y)
+  canvasPoints.forEach((point) => ctx.lineTo(point.x, point.y))
+  ctx.closePath()
+  ctx.strokeStyle = isHovered ? 'rgba(255, 255, 255, 0.85)' : 'rgba(255, 255, 255, 0.28)'
+  ctx.lineWidth = isHovered ? Math.max(2, scale * 2) : Math.max(1, scale * 1.2)
+  ctx.setLineDash(isHovered ? [] : [Math.max(4, scale * 4), Math.max(3, scale * 3)])
+  ctx.stroke()
+  ctx.setLineDash([])
 }
 
 const drawMapCanvasView = () => drawMapCanvas(mapCanvasRef.value)
@@ -621,11 +882,6 @@ const drawAreaOnCanvas = (ctx, area, transform) => {
   ctx.strokeStyle = strokeColor
   ctx.lineWidth = isHovered ? Math.max(2, scale * 2.5) : Math.max(1.5, scale * 2)
   ctx.stroke()
-
-  const center = calculateAreaCenter(area)
-  const centerX = center.x * scale + offsetX
-  const centerY = center.y * scale + offsetY
-  drawDashboardLabel(ctx, centerX, centerY, area.name, formatFeatureCount(area), isHovered)
 }
 
 const formatFeatureCount = (area) => {
@@ -634,22 +890,26 @@ const formatFeatureCount = (area) => {
   return `${count} ${unit}`
 }
 
-const drawProjectOnCanvas = (ctx, area, transform) => {
+const drawProjectPointOnCanvas = (ctx, area, transform) => {
+  if (!area.points?.length) return
+
   const { x: offsetX, y: offsetY, scale } = transform
   const point = area.points[0]
   const cx = point.x * scale + offsetX
   const cy = point.y * scale + offsetY
-  const radius = Math.max(8, scale * 10)
   const isHovered = hoveredArea.value && hoveredArea.value.id === area.id
+  const ratio = getHeatmapRatio(getAreaCount(area), maxCount.value)
+  const { r, g, b } = getHeatmapRgbAtRatio(ratio)
+  const radius = Math.max(8, scale * 10)
 
   ctx.beginPath()
-  ctx.arc(cx, cy, radius + Math.max(4, scale * 5), 0, Math.PI * 2)
-  ctx.fillStyle = isHovered ? 'rgba(255, 138, 101, 0.3)' : 'rgba(255, 138, 101, 0.18)'
+  ctx.arc(cx, cy, radius + Math.max(5, scale * 5), 0, Math.PI * 2)
+  ctx.fillStyle = isHovered ? `rgba(${r}, ${g}, ${b}, 0.35)` : `rgba(${r}, ${g}, ${b}, 0.22)`
   ctx.fill()
 
   ctx.beginPath()
   ctx.arc(cx, cy, radius, 0, Math.PI * 2)
-  ctx.fillStyle = area.color || 'rgba(255, 138, 101, 0.95)'
+  ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${isHovered ? 0.98 : 0.92})`
   ctx.fill()
   ctx.strokeStyle = '#ffffff'
   ctx.lineWidth = Math.max(2, scale * 2.5)
@@ -659,11 +919,205 @@ const drawProjectOnCanvas = (ctx, area, transform) => {
   ctx.arc(cx, cy, radius * 0.35, 0, Math.PI * 2)
   ctx.fillStyle = '#ffffff'
   ctx.fill()
-
-  drawDashboardLabel(ctx, cx, cy + radius + Math.max(14, scale * 12), area.name, formatFeatureCount(area), isHovered, 'rgba(180, 83, 9, 0.9)')
 }
 
-const drawDashboardLabel = (ctx, x, y, title, subtitle, isHovered, bgColor = 'rgba(15, 23, 42, 0.86)') => {
+const drawProjectFusionMarker = (ctx, area, transform, pointIndex = 0, pointCount = 1) => {
+  if (!area.points?.length) return
+
+  const { x: offsetX, y: offsetY, scale } = transform
+  const point = area.points[0]
+  const cx = point.x * scale + offsetX
+  const cy = point.y * scale + offsetY
+  const isHovered = hoveredArea.value && hoveredArea.value.id === area.id
+  const ratio = getHeatmapRatio(getAreaCount(area), maxCount.value)
+  const { r, g, b } = getHeatmapRgbAtRatio(ratio)
+  const dotRadius = Math.max(7, scale * 9)
+
+  ctx.beginPath()
+  ctx.arc(cx, cy, dotRadius + Math.max(4, scale * 4), 0, Math.PI * 2)
+  ctx.fillStyle = isHovered ? `rgba(${r}, ${g}, ${b}, 0.38)` : `rgba(${r}, ${g}, ${b}, 0.26)`
+  ctx.fill()
+
+  ctx.beginPath()
+  ctx.arc(cx, cy, dotRadius, 0, Math.PI * 2)
+  ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${isHovered ? 1 : 0.94})`
+  ctx.fill()
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.95)'
+  ctx.lineWidth = Math.max(2, scale * 2.2)
+  ctx.stroke()
+
+  ctx.beginPath()
+  ctx.arc(cx, cy, Math.max(3, dotRadius * 0.32), 0, Math.PI * 2)
+  ctx.fillStyle = '#ffffff'
+  ctx.fill()
+}
+
+let labelLayoutBoxes = []
+const LABEL_LAYOUT_GAP = 6
+
+const resetLabelLayout = () => {
+  labelLayoutBoxes = []
+}
+
+const registerLabelBox = (box) => {
+  labelLayoutBoxes.push(box)
+}
+
+const labelBoxCollides = (box) => labelLayoutBoxes.some((placed) => (
+  !(box.right + LABEL_LAYOUT_GAP < placed.left
+    || box.left > placed.right + LABEL_LAYOUT_GAP
+    || box.bottom + LABEL_LAYOUT_GAP < placed.top
+    || box.top > placed.bottom + LABEL_LAYOUT_GAP)
+))
+
+const measureDashboardLabelBox = (ctx, title, subtitle, compact) => {
+  if (compact) {
+    const fontSize = 10
+    ctx.font = `bold ${fontSize}px "Microsoft YaHei", Arial`
+    const text = `${title} ${subtitle}`
+    return {
+      width: ctx.measureText(text).width + 12,
+      height: 20,
+      compact: true,
+    }
+  }
+
+  const fontSize = 12
+  ctx.font = `bold ${fontSize}px "Microsoft YaHei", Arial`
+  const titleWidth = ctx.measureText(title).width
+  ctx.font = `${fontSize - 1}px "Microsoft YaHei", Arial`
+  const subtitleWidth = ctx.measureText(subtitle).width
+  return {
+    width: Math.max(titleWidth, subtitleWidth) + 18,
+    height: 34,
+    compact: false,
+  }
+}
+
+const getAreaLabelAnchor = (area, transform) => {
+  const { x: offsetX, y: offsetY, scale } = transform
+  if (area.shapeType === 'point' && area.points?.length) {
+    const point = area.points[0]
+    const cx = point.x * scale + offsetX
+    const cy = point.y * scale + offsetY
+    const dotRadius = Math.max(7, scale * 9)
+    return { x: cx, y: cy + dotRadius + Math.max(12, scale * 8) }
+  }
+  const center = calculateAreaCenter(area)
+  return {
+    x: center.x * scale + offsetX,
+    y: center.y * scale + offsetY,
+  }
+}
+
+const resolveLabelPosition = (anchor, box, canvasWidth, canvasHeight) => {
+  const offsets = [
+    { dx: 0, dy: 0 },
+    { dx: 0, dy: -box.height - 10 },
+    { dx: box.width * 0.55, dy: -box.height * 0.35 },
+    { dx: -box.width * 0.55, dy: -box.height * 0.35 },
+    { dx: box.width * 0.55, dy: box.height * 0.35 },
+    { dx: -box.width * 0.55, dy: box.height * 0.35 },
+    { dx: 0, dy: box.height + 10 },
+  ]
+
+  for (const { dx, dy } of offsets) {
+    const x = anchor.x + dx
+    const y = anchor.y + dy
+    const left = x - box.width / 2
+    const top = y - box.height / 2
+    const candidate = {
+      left,
+      top,
+      right: left + box.width,
+      bottom: top + box.height,
+    }
+    if (left < 4 || top < 4 || candidate.right > canvasWidth - 4 || candidate.bottom > canvasHeight - 4) {
+      continue
+    }
+    if (!labelBoxCollides(candidate)) {
+      return { x, y, box: candidate }
+    }
+  }
+  return null
+}
+
+const getLabelCandidateAreas = (polygonAreas, projectAreas) => {
+  const allAreas = [...polygonAreas, ...projectAreas]
+  if (labelMode.value === 'off') return []
+  if (labelMode.value === 'all') return allAreas
+  if (labelMode.value === 'hover') {
+    return hoveredArea.value ? [hoveredArea.value] : []
+  }
+
+  const topIds = new Set(
+    [...allAreas]
+      .sort((a, b) => getAreaCount(b) - getAreaCount(a))
+      .slice(0, maxAreas.value)
+      .map((area) => String(area.id))
+  )
+  if (hoveredArea.value) {
+    topIds.add(String(hoveredArea.value.id))
+  }
+  return allAreas.filter((area) => topIds.has(String(area.id)))
+}
+
+const drawMapLabels = (ctx, transform, canvasWidth, canvasHeight, polygonAreas, projectAreas) => {
+  if (labelMode.value === 'off') return
+
+  resetLabelLayout()
+  const candidates = getLabelCandidateAreas(polygonAreas, projectAreas)
+    .sort((a, b) => {
+      const aHovered = hoveredArea.value?.id === a.id ? 1 : 0
+      const bHovered = hoveredArea.value?.id === b.id ? 1 : 0
+      if (aHovered !== bHovered) return bHovered - aHovered
+      return getAreaCount(b) - getAreaCount(a)
+    })
+
+  for (const area of candidates) {
+    const isHovered = hoveredArea.value?.id === area.id
+    const compact = labelMode.value === 'smart' && !isHovered
+    const anchor = getAreaLabelAnchor(area, transform)
+    const title = area.name
+    const subtitle = formatFeatureCount(area)
+    const box = measureDashboardLabelBox(ctx, title, subtitle, compact)
+    const resolved = resolveLabelPosition(anchor, box, canvasWidth, canvasHeight)
+    if (!resolved) continue
+
+    drawDashboardLabel(ctx, resolved.x, resolved.y, title, subtitle, isHovered, undefined, { compact })
+    registerLabelBox(resolved.box)
+  }
+}
+
+const drawDashboardLabel = (ctx, x, y, title, subtitle, isHovered, bgColor = 'rgba(15, 23, 42, 0.86)', options = {}) => {
+  const { compact = false } = options
+
+  if (compact) {
+    const fontSize = 10
+    const text = `${title} ${subtitle}`
+    ctx.font = `bold ${fontSize}px "Microsoft YaHei", Arial`
+    const textWidth = ctx.measureText(text).width
+    const width = textWidth + 12
+    const height = 20
+    const left = x - width / 2
+    const top = y - height / 2
+
+    ctx.fillStyle = isHovered ? 'rgba(255, 138, 101, 0.92)' : 'rgba(15, 23, 42, 0.78)'
+    ctx.beginPath()
+    if (typeof ctx.roundRect === 'function') {
+      ctx.roundRect(left, top, width, height, 4)
+    } else {
+      ctx.rect(left, top, width, height)
+    }
+    ctx.fill()
+
+    ctx.fillStyle = '#ffffff'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText(text, x, y)
+    return
+  }
+
   const fontSize = 12
   ctx.font = `bold ${fontSize}px "Microsoft YaHei", Arial`
   const titleWidth = ctx.measureText(title).width
@@ -711,7 +1165,22 @@ const stopAutoRefresh = () => {
 
 // 处理配置更新
 const handleConfigUpdate = (event) => {
-  config.value = event.detail
+  const detail = event.detail || {}
+  config.value = {
+    ...config.value,
+    ...detail,
+    renderStyle: normalizeHeatmapRenderStyle(detail.renderStyle || config.value.renderStyle),
+    labelMode: normalizeLabelMode(
+      detail.labelMode || config.value.labelMode,
+      detail.fusionConfig?.showLabels ?? config.value.fusionConfig?.showLabels,
+    ),
+    fusionConfig: {
+      ...DEFAULT_FUSION_CONFIG,
+      ...(config.value.fusionConfig || {}),
+      ...(detail.fusionConfig || {}),
+    },
+  }
+  invalidateFusionLayerCache()
   stopAutoRefresh()
   loadData()
   startAutoRefresh()
@@ -740,7 +1209,8 @@ const initResizeObserver = () => {
 // 工具函数
 const getAreaColor = (area) => {
   if (area.shapeType === 'point') {
-    return area.color || 'rgba(255, 138, 101, 0.95)'
+    const { r, g, b } = getHeatmapRgbAtRatio(getHeatmapRatio(getAreaCount(area), maxCount.value))
+    return `rgba(${r}, ${g}, ${b}, 0.88)`
   }
   return getHeatmapColor(getAreaCount(area), maxCount.value, 0.55)
 }
@@ -878,10 +1348,12 @@ const getAreaAtPoint = (event) => {
   for (const area of areas.value) {
     if (area.shapeType === 'point' && area.points?.length) {
       const p = area.points[0]
-      const radius = Math.max(12, transform.scale * 14) / transform.scale
+      const hitRadius = isFusionRenderMode.value
+        ? Math.max(22, transform.scale * 28)
+        : Math.max(14, transform.scale * 16)
       const dx = mapX - p.x
       const dy = mapY - p.y
-      if (dx * dx + dy * dy <= radius * radius) {
+      if (dx * dx + dy * dy <= hitRadius * hitRadius) {
         return area
       }
     }
@@ -997,18 +1469,38 @@ const goToManagement = () => {
 
 .map-ui-row-top {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-  align-items: start;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: center;
+  column-gap: 12px;
+  min-height: 52px;
+  flex-shrink: 0;
+}
+
+.map-ui-top-side {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  z-index: 1;
+}
+
+.map-ui-top-left {
+  justify-self: start;
+  max-width: 100%;
+}
+
+.map-ui-top-right {
+  justify-self: end;
 }
 
 .map-ui-row-bottom {
   align-items: flex-end;
   justify-content: space-between;
+  flex-shrink: 0;
+  min-height: 0;
 }
 
 .park-stats-panel--frame {
   position: static;
-  justify-self: start;
   min-width: 0;
   max-width: 100%;
   padding: 8px 10px;
@@ -1020,32 +1512,21 @@ const goToManagement = () => {
   font-size: 11px;
 }
 
+.park-stats-panel--frame .park-stats-grid {
+  gap: 10px;
+}
+
 .park-stats-panel--frame .park-stat-item .value {
   font-size: 14px;
 }
 
-.map-title-badge {
-  justify-self: center;
-  padding: 5px 14px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 600;
-  color: #ffd4b8;
-  background: rgba(11, 20, 36, 0.82);
-  border: 1px solid rgba(255, 138, 101, 0.35);
-  letter-spacing: 0.5px;
-  white-space: nowrap;
-  line-height: 1.4;
-}
-
-.map-ui-legend {
+.map-ui-frame .full-legend.full-color-legend.map-ui-legend {
   position: static;
-  justify-self: end;
   top: auto;
   right: auto;
   min-width: 92px;
   max-width: 120px;
-  padding: 8px;
+  padding: 8px 10px;
 }
 
 .map-ui-overview {
@@ -1054,23 +1535,29 @@ const goToManagement = () => {
   left: auto;
   flex: 1 1 auto;
   min-width: 0;
-  max-width: min(480px, 70%);
-  max-height: 92px;
+  max-width: min(520px, 72%);
+  max-height: 148px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.map-ui-overview .mini-legend-title {
+  flex: 0 0 auto;
 }
 
 .map-ui-overview .mini-legend-list {
-  max-height: 68px;
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .map-ui-hint {
   position: static;
   flex-shrink: 0;
   white-space: nowrap;
-}
-
-.map-ui-placeholder {
-  min-width: 0;
-  min-height: 1px;
 }
 
 .interactive-canvas {
@@ -1095,6 +1582,12 @@ const goToManagement = () => {
 .map-mode .full-color-legend,
 .map-mode .area-overview-legend {
   pointer-events: none;
+}
+
+.map-ui-frame .map-ui-overview.area-overview-legend,
+.map-ui-frame .full-color-legend.map-ui-legend,
+.map-ui-frame .park-stats-panel--frame {
+  pointer-events: auto;
 }
 
 .map-mode .area-overview-legend .mini-legend-list {

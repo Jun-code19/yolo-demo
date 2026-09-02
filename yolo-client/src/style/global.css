@@ -99,6 +99,27 @@ body .el-time-picker {
   z-index: 999999 !important;
 }
 
+.high-priority-dialog .el-time-picker {
+  z-index: 999999 !important;
+}
+
+.el-overlay.heatmap-display-config-overlay {
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+}
+
+.heatmap-display-config-dialog.el-dialog {
+  max-width: calc(100vw - 32px);
+}
+
+.heatmap-display-config-dialog .el-dialog__body {
+  max-height: min(72vh, calc(100vh - 180px));
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
 /* teleported 到 body 的下拉层需高于高优先级弹窗 */
 .el-select-dropdown.el-popper,
 .el-popper.el-select__popper {

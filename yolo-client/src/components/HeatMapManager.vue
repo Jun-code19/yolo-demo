@@ -20,7 +20,7 @@
         </el-button>
       </div>
       <div class="toolbar-right">
-        <el-select v-model="selectedMap" placeholder="选择地图" @change="loadMap">
+        <el-select v-model="selectedMap" class="map-select" placeholder="选择地图" @change="loadMap">
           <el-option
             v-for="map in mapList"
             :key="map.id"
@@ -228,9 +228,11 @@ import { crowdAnalysisApi } from '@/api/crowd_analysis'
 import { smartSchemeApi } from '@/api/smart_scheme'
 import {
   HEATMAP_LEGEND_GRADIENT,
-  computeMaxAreaCount,
+  computeMaxFeatureCount,
   getAreaCount,
   getHeatmapColor,
+  getHeatmapRatio,
+  getHeatmapRgbAtRatio,
   getHeatmapStrokeColor,
 } from '@/utils/heatmapColors'
 
@@ -311,7 +313,7 @@ const areaRules = {
 }
 
 // 计算属性
-const maxAreaCount = computed(() => computeMaxAreaCount(areas.value, 'polygon'))
+const maxAreaCount = computed(() => computeMaxFeatureCount(areas.value))
 
 const dialogTitle = computed(() => {
   const isPoint = areaForm.shapeType === 'point'
@@ -669,39 +671,48 @@ const drawProject = (area) => {
 
   const point = mapToCanvasCoords(area.points[0].x, area.points[0].y)
   const highlighted = isFeatureHighlighted(area)
-  const strokeColor = getFeatureStrokeColor(area.color || 'rgba(255, 138, 101, 0.95)')
-  const radius = highlighted ? 14 : 12
+  const ratio = getHeatmapRatio(getAreaCount(area), maxAreaCount.value)
+  const { r, g, b } = getHeatmapRgbAtRatio(ratio)
+  const baseRadius = highlighted ? 13 : 11
+  const glowRadius = baseRadius * (highlighted ? 3.4 : 2.8)
 
+  const outerGlow = ctx.createRadialGradient(point.x, point.y, 0, point.x, point.y, glowRadius)
+  outerGlow.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${highlighted ? 0.62 : 0.46})`)
+  outerGlow.addColorStop(0.35, `rgba(${r}, ${g}, ${b}, ${highlighted ? 0.24 : 0.16})`)
+  outerGlow.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`)
+  ctx.fillStyle = outerGlow
   ctx.beginPath()
-  ctx.arc(point.x, point.y, radius + 6, 0, Math.PI * 2)
-  ctx.fillStyle = highlighted ? 'rgba(255, 138, 101, 0.28)' : 'rgba(255, 138, 101, 0.18)'
+  ctx.arc(point.x, point.y, glowRadius, 0, Math.PI * 2)
+  ctx.fill()
+
+  const midGlow = ctx.createRadialGradient(point.x, point.y, 0, point.x, point.y, baseRadius * 0.95)
+  midGlow.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${highlighted ? 0.95 : 0.82})`)
+  midGlow.addColorStop(0.65, `rgba(${r}, ${g}, ${b}, ${highlighted ? 0.42 : 0.28})`)
+  midGlow.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`)
+  ctx.fillStyle = midGlow
+  ctx.beginPath()
+  ctx.arc(point.x, point.y, baseRadius * 0.95, 0, Math.PI * 2)
   ctx.fill()
 
   ctx.beginPath()
-  ctx.arc(point.x, point.y, radius + 3, 0, Math.PI * 2)
-  ctx.strokeStyle = strokeColor
-  ctx.lineWidth = highlighted ? 3 : 2
-  ctx.stroke()
-
-  ctx.beginPath()
-  ctx.arc(point.x, point.y, radius, 0, Math.PI * 2)
-  ctx.fillStyle = area.color || 'rgba(255, 138, 101, 0.95)'
+  ctx.arc(point.x, point.y, baseRadius * 0.55, 0, Math.PI * 2)
+  ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${highlighted ? 0.98 : 0.88})`
   ctx.fill()
   ctx.strokeStyle = '#ffffff'
-  ctx.lineWidth = 3
+  ctx.lineWidth = highlighted ? 2.5 : 2
   ctx.stroke()
 
   ctx.beginPath()
-  ctx.arc(point.x, point.y, radius * 0.38, 0, Math.PI * 2)
+  ctx.arc(point.x, point.y, baseRadius * 0.22, 0, Math.PI * 2)
   ctx.fillStyle = '#ffffff'
   ctx.fill()
 
   drawFeatureLabel(
     point.x,
-    point.y + radius + 22,
+    point.y + baseRadius + 10,
     area.name,
     formatFeatureCount(area),
-    'rgba(180, 83, 9, 0.92)'
+    `rgba(${Math.max(r - 18, 0)}, ${Math.max(g - 18, 0)}, ${Math.max(b - 18, 0)}, 0.92)`
   )
 }
 
@@ -1381,8 +1392,16 @@ watch(currentMap, (newMap) => {
 .toolbar-right {
   display: flex;
   align-items: center;
-  min-width: 150px;
+  flex: 1 1 auto;
+  justify-content: flex-end;
+  min-width: 0;
   gap: 8px;
+}
+
+.toolbar-right .map-select {
+  flex: 1 1 280px;
+  min-width: 280px;
+  max-width: 420px;
 }
 
 .map-container {

@@ -40,10 +40,22 @@
     </div>
 
     <!-- 配置展板显示对话框 -->
-    <el-dialog v-model="showDisplayConfig" title="配置展板显示" width="500px">
+    <Teleport to="body">
+      <el-dialog
+        v-model="showDisplayConfig"
+        title="配置展板显示"
+        width="560px"
+        align-center
+        append-to-body
+        destroy-on-close
+        lock-scroll
+        :close-on-click-modal="false"
+        modal-class="heatmap-display-config-overlay"
+        class="heatmap-display-config-dialog high-priority-dialog"
+      >
       <el-form :model="displayConfig" :rules="displayRules" ref="displayFormRef" label-width="100px">
         <el-form-item label="显示地图" prop="mapId">
-          <el-select v-model="displayConfig.mapId" placeholder="选择要在展板显示的地图">
+          <el-select v-model="displayConfig.mapId" placeholder="选择要在展板显示的地图" style="width: 100%">
             <el-option label="请选择地图" value="" disabled />
             <el-option
               v-for="map in availableMaps"
@@ -59,6 +71,23 @@
             <el-radio value="full">完整地图（底层全屏）</el-radio>
           </el-radio-group>
         </el-form-item>
+        <el-form-item label="渲染风格" prop="renderStyle">
+          <el-radio-group v-model="displayConfig.renderStyle">
+            <el-radio value="block">普通模式</el-radio>
+            <el-radio value="fusion">热力融合</el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <template v-if="displayConfig.renderStyle === 'fusion'">
+          <el-form-item label="融合模糊">
+            <el-slider v-model="displayConfig.fusionConfig.blur" :min="12" :max="80" :step="2" show-input />
+          </el-form-item>
+          <el-form-item label="融合透明度">
+            <el-slider v-model="displayConfig.fusionConfig.opacity" :min="0.5" :max="1" :step="0.01" show-input />
+          </el-form-item>
+          <el-form-item label="显示边界">
+            <el-switch v-model="displayConfig.fusionConfig.showBorders" />
+          </el-form-item>
+        </template>
         <el-form-item label="刷新间隔" prop="refreshInterval">
           <el-input-number 
             v-model="displayConfig.refreshInterval" 
@@ -74,6 +103,17 @@
             :min="1" 
             :max="20"
           />
+        </el-form-item>
+        <el-form-item label="地图标签">
+          <el-radio-group v-model="displayConfig.labelMode">
+            <el-radio value="smart">智能</el-radio>
+            <el-radio value="hover">仅悬停</el-radio>
+            <el-radio value="all">全部</el-radio>
+            <el-radio value="off">关闭</el-radio>
+          </el-radio-group>
+          <div style="margin-top: 6px; color: #909399; font-size: 12px; line-height: 1.5;">
+            智能模式仅显示人数 Top N（见显示区域数）与当前悬停项，并自动避让重叠
+          </div>
         </el-form-item>
         <el-divider content-position="left">园内人数</el-divider>
         <el-form-item label="启用显示">
@@ -101,17 +141,18 @@
           <el-button type="primary" @click="confirmDisplayConfig" :loading="saving">确定</el-button>
         </span>
       </template>
-    </el-dialog>
+      </el-dialog>
+    </Teleport>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { ArrowLeft, Select, Refresh } from '@element-plus/icons-vue'
 import HeatMapManager from '@/components/HeatMapManager.vue'
-import { dashboardMapApi, normalizeHeatmapDisplayMode } from '@/api/dashboard'
+import { dashboardMapApi, normalizeHeatmapDisplayMode, normalizeHeatmapRenderStyle, normalizeLabelMode, DEFAULT_FUSION_CONFIG } from '@/api/dashboard'
 import { smartSchemeApi } from '@/api/smart_scheme'
 
 const router = useRouter()
@@ -135,6 +176,9 @@ const defaultParkStats = () => ({
 const displayConfig = reactive({
   mapId: '',
   displayMode: 'mini',
+  renderStyle: 'block',
+  fusionConfig: { ...DEFAULT_FUSION_CONFIG },
+  labelMode: 'smart',
   refreshInterval: 30,
   maxAreas: 6,
   parkStats: defaultParkStats(),
@@ -216,6 +260,15 @@ const loadCurrentDisplayConfig = async () => {
       const config = response.data.data
       displayConfig.mapId = config.map_id ? config.map_id.toString() : ''
       displayConfig.displayMode = normalizeHeatmapDisplayMode(config.display_mode || 'mini')
+      displayConfig.renderStyle = normalizeHeatmapRenderStyle(config.config?.render_style)
+      displayConfig.fusionConfig = {
+        ...DEFAULT_FUSION_CONFIG,
+        ...(config.config?.fusion_config || {}),
+      }
+      displayConfig.labelMode = normalizeLabelMode(
+        config.config?.label_mode,
+        config.config?.fusion_config?.showLabels,
+      )
       displayConfig.refreshInterval = config.refresh_interval || 30
       displayConfig.maxAreas = config.max_areas || 6
       const park = config.config?.park_stats
@@ -273,6 +326,18 @@ const refreshData = async () => {
   }
 }
 
+const resetPageScroll = () => {
+  window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
+  document.documentElement.scrollTop = 0
+  document.body.scrollTop = 0
+  document.querySelector('.el-main')?.scrollTo?.({ top: 0, left: 0, behavior: 'instant' })
+}
+
+const openDisplayConfigDialog = () => {
+  showDisplayConfig.value = true
+  nextTick(resetPageScroll)
+}
+
 // 保存到展板
 const saveToDisplay = () => {
   if (!currentMapId.value) {
@@ -293,7 +358,7 @@ const saveToDisplay = () => {
   }
   
   displayConfig.mapId = currentMapId.value
-  showDisplayConfig.value = true
+  openDisplayConfigDialog()
 }
 
 // 确认展板配置
@@ -313,6 +378,9 @@ const confirmDisplayConfig = async () => {
       config: {
         lastUpdated: new Date().toISOString(),
         areas: currentAreas.value,
+        render_style: normalizeHeatmapRenderStyle(displayConfig.renderStyle),
+        label_mode: displayConfig.labelMode,
+        fusion_config: { ...displayConfig.fusionConfig },
         park_stats: {
           enabled: displayConfig.parkStats.enabled,
           title: displayConfig.parkStats.title?.trim() || '园内人数',
@@ -330,6 +398,9 @@ const confirmDisplayConfig = async () => {
         detail: {
           mapId: displayConfig.mapId,
           displayMode: displayConfig.displayMode,
+          renderStyle: displayConfig.renderStyle,
+          labelMode: displayConfig.labelMode,
+          fusionConfig: { ...displayConfig.fusionConfig },
           refreshInterval: displayConfig.refreshInterval,
           maxAreas: displayConfig.maxAreas,
           areas: currentAreas.value,
@@ -429,5 +500,25 @@ const getProjectPointsCount = () => {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+</style>
+
+<style>
+.el-overlay.heatmap-display-config-overlay {
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+}
+
+.heatmap-display-config-dialog.el-dialog {
+  max-width: calc(100vw - 32px);
+  margin: auto;
+}
+
+.heatmap-display-config-dialog .el-dialog__body {
+  max-height: min(72vh, calc(100vh - 180px));
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 </style> 

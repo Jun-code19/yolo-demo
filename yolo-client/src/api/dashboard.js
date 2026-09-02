@@ -47,6 +47,26 @@ export const DEFAULT_DASHBOARD_SCREEN_NAME = '园区 AI 视觉监测大屏'
 /** preview 已废弃，统一归并为 mini */
 export const normalizeHeatmapDisplayMode = (mode) => (mode === 'full' ? 'full' : 'mini')
 
+/** block=普通模式着色，fusion=伪热力融合 */
+export const normalizeHeatmapRenderStyle = (style) => (style === 'fusion' ? 'fusion' : 'block')
+
+/** off | smart(TopN+悬停) | hover | all */
+export const normalizeLabelMode = (mode, legacyShowLabels) => {
+  if (mode === 'off' || mode === 'smart' || mode === 'all' || mode === 'hover') return mode
+  if (legacyShowLabels === false) return 'off'
+  return 'smart'
+}
+
+export const DEFAULT_FUSION_CONFIG = {
+  blur: 32,
+  opacity: 0.95,
+  intensityBoost: 1.42,
+  sharpLayer: 0.42,
+  pointRadius: 80,
+  showLabels: true,
+  showBorders: false,
+}
+
 export const dashboardMapApi = {
   uploadDashboardMap: (data) => apiClient_v1.post('/heatmap/maps', data, {
     headers: {
