@@ -29,14 +29,20 @@ class RuleCondition(BaseModel):
     scenario_type: Optional[str] = Field(None, description="检测事件场景类型")
     scenario_id: Optional[str] = Field(None, description="检测事件场景 ID")
     analysis_type: Optional[str] = Field(None, description="检测事件分析类型")
+    match_mode: Optional[str] = Field(None, description="检测匹配: event / target / absence")
+    target_classes: Optional[List[str]] = Field(None, description="目标类别，如 person/car")
+    count_op: Optional[str] = Field(None, description="数量比较: gte/gt/eq/lt/lte")
+    count_value: Optional[int] = Field(None, description="数量阈值")
+    change_direction: Optional[str] = Field(None, description="人数变化: increase/decrease")
     scheme_id: Optional[str] = Field(None, description="事件订阅 scheme ID")
+    duration_sec: Optional[int] = Field(0, ge=0, le=86400, description="本条条件持续满足秒数，0=即时")
 
 
 class RuleDefinition(BaseModel):
     logic: str = Field(default="AND", description="AND / OR")
     same_device: bool = Field(default=True, description="多条件是否要求同一设备")
     window_sec: int = Field(default=300, ge=10, le=86400)
-    duration_sec: int = Field(default=0, ge=0, le=86400, description="条件需持续满足的秒数")
+    duration_sec: int = Field(default=0, ge=0, le=86400, description="[兼容] 规则级持续秒数，优先使用 conditions[].duration_sec")
     cooldown_sec: int = Field(default=60, ge=0, le=86400)
     conditions: List[RuleCondition] = Field(default_factory=list)
 

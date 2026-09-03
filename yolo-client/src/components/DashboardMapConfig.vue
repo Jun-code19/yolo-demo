@@ -97,7 +97,7 @@
     </el-card>
 
     <el-card class="integration-card">
-      <el-collapse v-model="integrationExpanded">
+      <el-collapse v-model="integrationExpanded" class="integration-collapse">
         <el-collapse-item name="integration">
           <template #title>
             <div class="integration-collapse-title">
@@ -110,19 +110,20 @@
       </el-collapse>
     </el-card>
 
-    <Teleport to="body">
-      <el-dialog
-        v-model="showDisplayConfig"
-        title="配置展板显示"
-        width="560px"
-        align-center
-        append-to-body
-        destroy-on-close
-        lock-scroll
-        :close-on-click-modal="false"
-        modal-class="heatmap-display-config-overlay"
-        class="heatmap-display-config-dialog high-priority-dialog"
-      >
+    <el-dialog
+      v-model="showDisplayConfig"
+      title="配置展板显示"
+      width="560px"
+      top="5vh"
+      align-center
+      append-to-body
+      destroy-on-close
+      lock-scroll
+      :close-on-click-modal="false"
+      :z-index="999999"
+      modal-class="heatmap-display-config-overlay"
+      class="heatmap-display-config-dialog high-priority-dialog"
+    >
       <el-form :model="displayConfig" :rules="displayRules" ref="displayFormRef" label-width="100px">
         <el-form-item label="大屏名称" prop="screenName">
           <el-input
@@ -214,8 +215,7 @@
           <el-button type="primary" @click="confirmDisplayConfig" :loading="saving">确定</el-button>
         </span>
       </template>
-      </el-dialog>
-    </Teleport>
+    </el-dialog>
   </div>
 </template>
 
@@ -435,18 +435,6 @@ const refreshData = async () => {
   }
 }
 
-const resetPageScroll = () => {
-  window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
-  document.documentElement.scrollTop = 0
-  document.body.scrollTop = 0
-  document.querySelector('.el-main')?.scrollTo?.({ top: 0, left: 0, behavior: 'instant' })
-}
-
-const openDisplayConfigDialog = () => {
-  showDisplayConfig.value = true
-  nextTick(resetPageScroll)
-}
-
 const saveToDisplay = () => {
   if (!currentMapId.value) {
     ElMessage.warning('请先选择地图')
@@ -465,7 +453,7 @@ const saveToDisplay = () => {
   }
 
   displayConfig.mapId = currentMapId.value
-  openDisplayConfigDialog()
+  showDisplayConfig.value = true
 }
 
 const confirmDisplayConfig = async () => {
@@ -602,21 +590,60 @@ const getBoundAreasCount = () => {
   padding: 0;
 }
 
+.management-content {
+  flex: 1 1 0;
+  min-height: 640px;
+  height: calc(100vh - 280px);
+}
+
+.integration-card {
+  flex-shrink: 0;
+}
+
 .integration-card :deep(.el-card__body) {
-  padding-top: 0;
+  padding: 0 20px 8px;
+}
+
+.integration-collapse {
+  border-top: none;
+}
+
+.integration-collapse :deep(.el-collapse-item__header) {
+  height: auto;
+  min-height: 52px;
+  line-height: 1.4;
+  padding: 12px 0;
+  border-bottom: none;
+  align-items: flex-start;
+}
+
+.integration-collapse :deep(.el-collapse-item__wrap) {
+  border-bottom: none;
+}
+
+.integration-collapse :deep(.el-collapse-item__content) {
   padding-bottom: 8px;
+}
+
+.integration-collapse :deep(.el-collapse-item__arrow) {
+  margin-top: 8px;
 }
 
 .integration-collapse-title {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
+  padding-right: 12px;
   line-height: 1.4;
 }
 
 .integration-collapse-title .panel-desc {
   margin-top: 0;
   font-weight: normal;
+}
+
+.integration-card :deep(.dashboard-integration-config) {
+  padding-top: 0;
 }
 
 .card-header {
@@ -650,16 +677,6 @@ const getBoundAreasCount = () => {
   display: flex;
   flex-shrink: 0;
   gap: 8px;
-}
-
-.management-content {
-  flex: 1 1 0;
-  min-height: 760px;
-  height: calc(100vh - 200px);
-}
-
-.integration-card :deep(.dashboard-integration-config) {
-  padding-top: 0;
 }
 
 .field-suffix {

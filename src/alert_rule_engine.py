@@ -18,6 +18,8 @@ from src.alert_rule_common import (
     DEFAULT_COOLDOWN_SEC,
     DEFAULT_EVAL_INTERVAL_SEC,
     DEFAULT_WINDOW_SEC,
+    COUNT_OPS,
+    DETECTION_MATCH_MODES,
     SUPPORTED_SOURCES,
     get_eval_interval_sec,
 )
@@ -123,18 +125,280 @@ def _labels_match_condition(event_labels: List[str], condition: Dict[str, Any]) 
     return _labels_match(event_labels, condition.get("label"))
 
 
+def _infer_scenario_type_from_meta(meta: Optional[Dict[str, Any]]) -> Optional[str]:
+    if not meta:
+        return None
+    explicit = meta.get("scenario_type")
+    if explicit:
+        return str(explicit)
+    analysis = meta.get("analysis_type") or meta.get("analysisType")
+    counting = meta.get("counting_type") or meta.get("countingType")
+    if analysis == "counting" or counting in ("occupancy", "flow"):
+        return "counting"
+    meta_event = str(meta.get("event_type") or "")
+    if meta_event.startswith("occupancy_"):
+        return "counting"
+    if meta_event.startswith(("line_cross", "area_")):
+        return "behavior"
+    return None
+
+
+def _meta_field_matches(meta: Optional[Dict[str, Any]], key: str, expected: Any) -> bool:
+    if expected is None or expected == "":
+        return True
+    if not meta:
+        meta = {}
+    actual = meta.get(key)
+    if key == "scenario_type" and (actual is None or actual == ""):
+        actual = _infer_scenario_type_from_meta(meta)
+    if key == "analysis_type" and (actual is None or actual == ""):
+        actual = meta.get("analysisType")
+    return str(actual) == str(expected)
+
+
 def _meta_matches(meta: Optional[Dict[str, Any]], condition: Dict[str, Any]) -> bool:
     if not meta:
         meta = {}
-    # event_type 由 detection_event 行级字段单独匹配；meta 内子事件类型走 label/labels
     for key in ("scenario_type", "scenario_id", "analysis_type"):
         expected = condition.get(key)
-        if expected is None:
+        if expected is None or expected == "":
             continue
-        actual = meta.get(key)
-        if str(actual) != str(expected):
+        if not _meta_field_matches(meta, key, expected):
             return False
     return True
+
+
+def _detection_row_type_matches(expected_type: Optional[str], actual_type: Optional[str]) -> bool:
+    if not expected_type:
+        return True
+    if not actual_type:
+        return False
+    expected = str(expected_type).strip().lower()
+    actual = str(actual_type).strip().lower()
+    if expected == actual:
+        return True
+    if expected == "detection":
+        return actual in {
+            "detection",
+            "object_detection",
+            "yolo_verify",
+            "yolo_analyze",
+            "yolo_then_verify",
+            "yolo_then_analyze",
+        }
+    return False
+
+
+def _detection_meta_event_matches(meta: Optional[Dict[str, Any]], condition: Dict[str, Any], event_labels: List[str]) -> bool:
+    expected = condition.get("label")
+    if not expected:
+        return True
+    meta = meta or {}
+    meta_event = meta.get("event_type")
+    candidates = []
+    if meta_event:
+        candidates.append(str(meta_event))
+    candidates.extend(event_labels or [])
+    return _labels_match_condition(candidates, condition)
+
+
+def _normalize_class_name(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip().lower()
+    return text or None
+
+
+def _class_name_matches(name: str, targets: Set[str]) -> bool:
+    normalized = _normalize_class_name(name)
+    if not normalized or not targets:
+        return False
+    if normalized in targets:
+        return True
+    aliases = {
+        "person": {"person", "people", "human", "pedestrian", "人"},
+        "car": {"car", "vehicle", "automobile", "truck", "bus", "车", "汽车"},
+    }
+    for target in targets:
+        alias_set = aliases.get(target, {target})
+        if normalized in alias_set:
+            return True
+        for alias in alias_set:
+            if alias in normalized or normalized in alias:
+                return True
+    return False
+
+
+def _extract_class_counts_from_event(event: NormalizedEvent) -> Dict[str, int]:
+    meta = event.payload.get("meta_data") or {}
+    raw_counts = meta.get("class_counts")
+    if isinstance(raw_counts, dict) and raw_counts:
+        return {str(k): int(v or 0) for k, v in raw_counts.items()}
+
+    counts: Dict[str, int] = {}
+    bbox = event.payload.get("bounding_box") or []
+    if not isinstance(bbox, list):
+        return counts
+    for det in bbox:
+        if not isinstance(det, dict):
+            continue
+        name = det.get("class_name") or det.get("class") or det.get("label")
+        if name is None and det.get("class_id") is not None:
+            name = str(det.get("class_id"))
+        if not name:
+            continue
+        key = str(name).strip()
+        counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
+def _count_for_target_classes(event: NormalizedEvent, target_classes: Optional[List[str]]) -> int:
+    meta = event.payload.get("meta_data") or {}
+    class_counts = _extract_class_counts_from_event(event)
+    if not target_classes:
+        if class_counts:
+            return sum(class_counts.values())
+        return int(meta.get("current_count") or 0)
+
+    targets = {_normalize_class_name(item) for item in target_classes if _normalize_class_name(item)}
+    if not targets:
+        return int(meta.get("current_count") or 0)
+
+    total = 0
+    for name, count in class_counts.items():
+        if _class_name_matches(name, targets):
+            total += int(count or 0)
+    return total
+
+
+def _compare_count_value(actual: int, op: Optional[str], expected: Optional[Any]) -> bool:
+    if expected is None or op is None:
+        return True
+    try:
+        target = int(expected)
+    except (TypeError, ValueError):
+        return False
+    operator = str(op).strip().lower()
+    if operator in (">=", "gte"):
+        return actual >= target
+    if operator in ("<=", "lte"):
+        return actual <= target
+    if operator in (">", "gt"):
+        return actual > target
+    if operator in ("<", "lt"):
+        return actual < target
+    if operator in ("=", "==", "eq"):
+        return actual == target
+    return False
+
+
+def _detection_match_mode(condition: Dict[str, Any]) -> str:
+    mode = str(condition.get("match_mode") or "event").strip().lower()
+    if mode not in DETECTION_MATCH_MODES:
+        return "event"
+    return mode
+
+
+def _detection_presence_matches(condition: Dict[str, Any], event: NormalizedEvent) -> bool:
+    probe = dict(condition)
+    probe["match_mode"] = "target"
+    if probe.get("count_op") in (None, "") and probe.get("count_value") in (None, ""):
+        probe["count_op"] = "gte"
+        probe["count_value"] = 1
+    return _detection_target_matches(probe, event)
+
+
+def _detection_target_matches(condition: Dict[str, Any], event: NormalizedEvent) -> bool:
+    if not _detection_row_type_matches(condition.get("event_type"), event.event_type):
+        return False
+    meta = event.payload.get("meta_data") or {}
+    if not _meta_matches(meta, condition):
+        return False
+
+    mode = _detection_match_mode(condition)
+    if mode == "absence":
+        return False
+
+    if mode == "target":
+        meta = event.payload.get("meta_data") or {}
+        change_dir = condition.get("change_direction")
+        if change_dir in ("increase", "decrease"):
+            expected = f"occupancy_change_{change_dir}"
+            return _normalize_label(meta.get("event_type")) == _normalize_label(expected)
+        count = _count_for_target_classes(event, condition.get("target_classes"))
+        if condition.get("count_op") in (None, "") and condition.get("count_value") in (None, ""):
+            return count >= 1
+        return _compare_count_value(count, condition.get("count_op"), condition.get("count_value"))
+
+    return _detection_meta_event_matches(meta, condition, event.labels)
+
+
+def _absence_condition_satisfied(
+    condition: Dict[str, Any],
+    scoped_events: List[NormalizedEvent],
+    condition_state: Dict[str, Any],
+    cond_key: str,
+    now: datetime,
+    duration_sec: float,
+) -> Tuple[bool, Dict[str, Any]]:
+    state = deepcopy(condition_state or {})
+    entry = dict(state.get(cond_key) or {})
+    duration_sec = float(duration_sec or 0)
+    if duration_sec <= 0:
+        entry["last_positive"] = None
+        entry["absence_since"] = None
+        state[cond_key] = entry
+        return False, state
+
+    positives = [
+        event for event in scoped_events
+        if _detection_presence_matches(condition, event)
+    ]
+    if positives:
+        last_positive = max(event.timestamp for event in positives)
+        entry["last_positive"] = last_positive.isoformat()
+        entry["absence_since"] = None
+        state[cond_key] = entry
+        return False, state
+
+    last_positive_raw = entry.get("last_positive")
+    if last_positive_raw:
+        last_positive = datetime.fromisoformat(last_positive_raw)
+        elapsed = (now - last_positive).total_seconds()
+        state[cond_key] = entry
+        return elapsed >= duration_sec, state
+
+    absence_since_raw = entry.get("absence_since")
+    if not absence_since_raw:
+        entry["absence_since"] = now.isoformat()
+        state[cond_key] = entry
+        return False, state
+
+    absence_since = datetime.fromisoformat(absence_since_raw)
+    state[cond_key] = entry
+    return (now - absence_since).total_seconds() >= duration_sec, state
+
+
+def _condition_duration_sec(condition: Dict[str, Any], definition: Dict[str, Any]) -> float:
+    if "duration_sec" in condition and condition.get("duration_sec") is not None:
+        try:
+            return max(0.0, float(condition.get("duration_sec")))
+        except (TypeError, ValueError):
+            pass
+    try:
+        return max(0.0, float(definition.get("duration_sec") or 0))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _max_rule_duration_sec(definition: Dict[str, Any]) -> float:
+    conditions = definition.get("conditions") or []
+    if not conditions:
+        try:
+            return max(0.0, float(definition.get("duration_sec") or 0))
+        except (TypeError, ValueError):
+            return 0.0
+    return max(_condition_duration_sec(cond, definition) for cond in conditions)
 
 
 def _fetch_vlm_findings(
@@ -203,6 +467,7 @@ def _fetch_detection_events(
                     "confidence": row.confidence,
                     "meta_data": meta,
                     "location": row.location,
+                    "bounding_box": row.bounding_box if isinstance(row.bounding_box, list) else [],
                 },
             )
         )
@@ -320,11 +585,10 @@ def _condition_matches(condition: Dict[str, Any], event: NormalizedEvent) -> boo
         return _labels_match_condition(event.labels, condition)
 
     if source == "detection_event":
-        expected_type = condition.get("event_type")
-        if expected_type and event.event_type != expected_type:
+        mode = _detection_match_mode(condition)
+        if mode == "absence":
             return False
-        meta = event.payload.get("meta_data") or {}
-        return _meta_matches(meta, condition) and _labels_match_condition(event.labels, condition)
+        return _detection_target_matches(condition, event)
 
     if source == "external_event":
         expected_type = condition.get("event_type")
@@ -348,13 +612,21 @@ def _filter_matches(
     condition: Dict[str, Any],
     events: List[NormalizedEvent],
     window_start: datetime,
+    logic: str = "AND",
+    event_cursor: Optional[datetime] = None,
 ) -> List[NormalizedEvent]:
-    matched = [
+    if str(logic or "AND").upper() == "OR":
+        cursor = event_cursor or datetime.min
+        return [
+            event
+            for event in events
+            if event.timestamp > cursor and _condition_matches(condition, event)
+        ]
+    return [
         event
         for event in events
         if event.timestamp >= window_start and _condition_matches(condition, event)
     ]
-    return matched
 
 
 def _group_device_ids(events: List[NormalizedEvent], same_device: bool) -> List[Optional[str]]:
@@ -420,6 +692,7 @@ def _evaluate_for_device(
     device_id: Optional[str],
     condition_state: Dict[str, Any],
     now: datetime,
+    event_cursor: Optional[datetime] = None,
 ) -> Tuple[bool, List[NormalizedEvent], Dict[str, Any]]:
     conditions = definition.get("conditions") or []
     if not conditions:
@@ -427,7 +700,6 @@ def _evaluate_for_device(
 
     logic = str(definition.get("logic") or "AND").upper()
     window_sec = float(definition.get("window_sec") or DEFAULT_WINDOW_SEC)
-    duration_sec = float(definition.get("duration_sec") or 0)
     window_start = now - timedelta(seconds=window_sec)
 
     scoped_events = events
@@ -435,12 +707,33 @@ def _evaluate_for_device(
         scoped_events = [event for event in events if event.device_id == device_id]
 
     per_condition_matches: List[List[NormalizedEvent]] = []
+    per_condition_ok: List[bool] = []
     new_state = deepcopy(condition_state or {})
 
     for index, condition in enumerate(conditions):
-        matched = _filter_matches(condition, scoped_events, window_start)
         cond_key = _condition_key(index, condition)
-        ok, new_state = _duration_satisfied(matched, duration_sec, new_state, cond_key, now)
+        cond_duration_sec = _condition_duration_sec(condition, definition)
+        if (
+            condition.get("source") == "detection_event"
+            and _detection_match_mode(condition) == "absence"
+        ):
+            ok, new_state = _absence_condition_satisfied(
+                condition,
+                scoped_events,
+                new_state,
+                cond_key,
+                now,
+                cond_duration_sec,
+            )
+            per_condition_ok.append(ok)
+            per_condition_matches.append([])
+            if not ok and logic == "AND":
+                return False, [], new_state
+            continue
+
+        matched = _filter_matches(condition, scoped_events, window_start, logic, event_cursor)
+        ok, new_state = _duration_satisfied(matched, cond_duration_sec, new_state, cond_key, now)
+        per_condition_ok.append(ok)
         if not ok:
             per_condition_matches.append([])
             if logic == "AND":
@@ -449,15 +742,18 @@ def _evaluate_for_device(
         per_condition_matches.append(matched)
 
     if logic == "OR":
-        any_hit = any(per_condition_matches)
+        any_hit = any(per_condition_ok)
         merged: List[NormalizedEvent] = []
+        seen: Set[str] = set()
         for group in per_condition_matches:
-            merged.extend(group)
+            for event in group:
+                if event.source_id in seen:
+                    continue
+                seen.add(event.source_id)
+                merged.append(event)
         return any_hit, merged, new_state
 
-    if len(per_condition_matches) != len(conditions):
-        return False, [], new_state
-    if not all(per_condition_matches):
+    if not all(per_condition_ok):
         return False, [], new_state
 
     merged: List[NormalizedEvent] = []
@@ -644,8 +940,8 @@ def evaluate_rules(db: Optional[Session] = None, push_enabled: bool = True) -> D
                     continue
 
                 window_sec = float(definition.get("window_sec") or DEFAULT_WINDOW_SEC)
-                duration_sec = float(definition.get("duration_sec") or 0)
-                lookback_sec = max(window_sec, duration_sec, get_eval_interval_sec() * 2, 120)
+                max_duration_sec = _max_rule_duration_sec(definition)
+                lookback_sec = max(window_sec, max_duration_sec, get_eval_interval_sec() * 2, 120)
                 since = now - timedelta(seconds=lookback_sec)
                 if state.watermark and state.watermark > since:
                     since = state.watermark - timedelta(seconds=lookback_sec)
@@ -659,6 +955,7 @@ def evaluate_rules(db: Optional[Session] = None, push_enabled: bool = True) -> D
                 same_device = bool(definition.get("same_device", True))
                 device_ids = _group_device_ids(events, same_device)
 
+                event_cursor = state.watermark
                 fired_any = False
                 for device_id in device_ids:
                     hit, matched, new_condition_state = _evaluate_for_device(
@@ -667,6 +964,7 @@ def evaluate_rules(db: Optional[Session] = None, push_enabled: bool = True) -> D
                         device_id,
                         state.condition_state or {},
                         now,
+                        event_cursor=event_cursor,
                     )
                     state.condition_state = new_condition_state
                     if not hit or not matched:

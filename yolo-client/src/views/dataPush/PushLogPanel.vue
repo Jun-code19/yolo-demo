@@ -93,7 +93,18 @@
       </div>
     </el-card>
 
-    <el-dialog v-model="detailVisible" title="推送记录详情" width="640px">
+    <el-dialog
+      v-model="detailVisible"
+      title="推送记录详情"
+      width="640px"
+      top="5vh"
+      align-center
+      append-to-body
+      destroy-on-close
+      :close-on-click-modal="false"
+      :z-index="999999"
+      class="high-priority-dialog push-log-detail-dialog"
+    >
       <el-descriptions v-if="selectedLog" :column="1" border>
         <el-descriptions-item label="时间">{{ formatTime(selectedLog.created_at) }}</el-descriptions-item>
         <el-descriptions-item label="推送">{{ selectedLog.push_name }} ({{ selectedLog.push_id }})</el-descriptions-item>
@@ -224,5 +235,13 @@ defineExpose({ loadLogs })
   font-size: 12px;
   white-space: pre-wrap;
   word-break: break-all;
+}
+</style>
+
+<style>
+.push-log-detail-dialog .el-dialog__body {
+  max-height: min(72vh, calc(100vh - 180px));
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 </style>

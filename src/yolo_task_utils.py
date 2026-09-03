@@ -149,10 +149,25 @@ def draw_segmentation_detections(
 
 
 def build_detection_meta(models_type: Optional[str], detections: List[Dict[str, Any]], target_class) -> Dict[str, Any]:
+    class_counts: Dict[str, int] = {}
+    for det in detections or []:
+        if not isinstance(det, dict):
+            continue
+        name = det.get("class_name") or det.get("class") or det.get("label")
+        if name is None and det.get("class_id") is not None:
+            name = str(det.get("class_id"))
+        if name is None:
+            continue
+        key = str(name).strip()
+        if not key:
+            continue
+        class_counts[key] = class_counts.get(key, 0) + 1
+
     meta = {
-        "current_count": len(detections),
+        "current_count": len(detections or []),
+        "class_counts": class_counts,
         "target_class": target_class,
-        "event_description": event_description_for_type(models_type, len(detections)),
+        "event_description": event_description_for_type(models_type, len(detections or [])),
     }
     if is_segmentation_type(models_type):
         meta["has_segmentation"] = any(d.get("has_mask") for d in detections)

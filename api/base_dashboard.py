@@ -817,11 +817,11 @@ def get_dashboard_board_data(db: Session = Depends(get_db)):
                 "sample_count": int(row.sample_count or 0) if row else 0,
             })
 
-        # 近 7 天三类事件趋势
-        external_rows = db.query(
-            func.date(ExternalEvent.timestamp).label("day"),
-            func.count(ExternalEvent.event_id).label("cnt"),
-        ).filter(ExternalEvent.timestamp >= trend_since).group_by(func.date(ExternalEvent.timestamp)).all()
+        # 近 7 天三类事件趋势（检测 / 规则告警 / 订阅）
+        alert_rule_rows = db.query(
+            func.date(CompositeAlert.fired_at).label("day"),
+            func.count(CompositeAlert.alert_id).label("cnt"),
+        ).filter(CompositeAlert.fired_at >= trend_since).group_by(func.date(CompositeAlert.fired_at)).all()
         detection_rows = db.query(
             func.date(DetectionEvent.created_at).label("day"),
             func.count(DetectionEvent.event_id).label("cnt"),
@@ -830,7 +830,7 @@ def get_dashboard_board_data(db: Session = Depends(get_db)):
             func.date(SmartEvent.timestamp).label("day"),
             func.count(SmartEvent.id).label("cnt"),
         ).filter(SmartEvent.timestamp >= trend_since).group_by(func.date(SmartEvent.timestamp)).all()
-        external_by_day = {row.day: row.cnt for row in external_rows}
+        alert_rule_by_day = {row.day: row.cnt for row in alert_rule_rows}
         detection_by_day = {row.day: row.cnt for row in detection_rows}
         smart_by_day = {row.day: row.cnt for row in smart_rows}
         historical_trend = []
@@ -839,7 +839,7 @@ def get_dashboard_board_data(db: Session = Depends(get_db)):
             historical_trend.append({
                 "date": day.isoformat(),
                 "detection_event_count": int(detection_by_day.get(day, 0)),
-                "external_event_count": int(external_by_day.get(day, 0)),
+                "alert_rule_count": int(alert_rule_by_day.get(day, 0)),
                 "smart_event_count": int(smart_by_day.get(day, 0)),
             })
 
@@ -1020,17 +1020,16 @@ def get_dashboard_board_data(db: Session = Depends(get_db)):
             for h in range(24)
         ]
 
-        # 外部事件引擎 Top
-        external_engine_rows = db.query(
-            ExternalEvent.engine_name,
-            func.count(ExternalEvent.event_id).label("cnt"),
-        ).filter(
-            ExternalEvent.engine_name.isnot(None),
-            ExternalEvent.engine_name != "",
-        ).group_by(ExternalEvent.engine_name).order_by(func.count(ExternalEvent.event_id).desc()).limit(6).all()
-        external_engine_stats = [
-            {"name": name or "未知引擎", "value": int(cnt or 0)}
-            for name, cnt in external_engine_rows
+        # 规则告警命中 Top（按规则名）
+        alert_rule_stat_rows = db.query(
+            AlertRule.name,
+            func.count(CompositeAlert.alert_id).label("cnt"),
+        ).join(
+            CompositeAlert, CompositeAlert.rule_id == AlertRule.rule_id
+        ).group_by(AlertRule.name).order_by(func.count(CompositeAlert.alert_id).desc()).limit(6).all()
+        alert_rule_stats = [
+            {"name": name or "未命名规则", "value": int(cnt or 0)}
+            for name, cnt in alert_rule_stat_rows
         ]
 
         # 复合告警最近记录
@@ -1171,21 +1170,8 @@ def get_dashboard_board_data(db: Session = Depends(get_db)):
             for name, cnt, ts, source in heatmap_rows
         ]
 
-        # 外部事件最近记录
-        external_recent_rows = db.query(ExternalEvent).order_by(
-            ExternalEvent.timestamp.desc()
-        ).limit(8).all()
-        recent_external_events = [
-            {
-                "id": ev.event_id,
-                "source": "external",
-                "title": ev.engine_name or str(ev.event_type or "外部事件"),
-                "device_name": ev.device_name or "",
-                "engine_name": ev.engine_name or "",
-                "timestamp": ev.timestamp.isoformat() if ev.timestamp else None,
-            }
-            for ev in external_recent_rows
-        ]
+        # 外部事件最近记录（展板已改用规则告警，保留空列表兼容旧前端）
+        recent_external_events = []
 
         # 监听服务状态摘要
         listener_status_rows = db.query(
@@ -1257,7 +1243,8 @@ def get_dashboard_board_data(db: Session = Depends(get_db)):
                 "crowd_distribution": crowd_distribution,
                 "event_status_distribution": event_status_distribution,
                 "hourly_distribution": hourly_distribution,
-                "external_engine_stats": external_engine_stats,
+                "external_engine_stats": alert_rule_stats,
+                "alert_rule_stats": alert_rule_stats,
                 "recent_composite_alerts": recent_composite_alerts,
                 "recent_vlm_alerts": recent_vlm_alerts,
                 "offline_devices": offline_devices,

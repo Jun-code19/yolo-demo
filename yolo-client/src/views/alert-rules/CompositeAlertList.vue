@@ -121,7 +121,18 @@
       </div>
     </el-card>
 
-    <el-drawer v-model="drawerVisible" title="命中详情" size="560px">
+    <el-dialog
+      v-model="drawerVisible"
+      title="命中详情"
+      width="560px"
+      top="5vh"
+      align-center
+      append-to-body
+      destroy-on-close
+      :close-on-click-modal="false"
+      :z-index="999999"
+      class="high-priority-dialog alert-hit-detail-dialog"
+    >
       <template v-if="currentAlert">
         <el-descriptions :column="1" border size="small">
           <el-descriptions-item label="标题">{{ currentAlert.title }}</el-descriptions-item>
@@ -179,7 +190,7 @@
         <h4 class="section-title">规则快照</h4>
         <pre class="json-block">{{ formatJson(currentAlert.definition_snapshot) }}</pre>
       </template>
-    </el-drawer>
+    </el-dialog>
   </div>
 </template>
 
@@ -421,5 +432,13 @@ onMounted(async () => {
   font-size: 12px;
   color: #909399;
   margin-top: 4px;
+}
+</style>
+
+<style>
+.alert-hit-detail-dialog .el-dialog__body {
+  max-height: min(72vh, calc(100vh - 180px));
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 </style>

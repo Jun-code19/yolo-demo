@@ -174,11 +174,6 @@
             overflow: hidden;
             box-shadow: 0 2px 12px 0 rgba(0,0,0,0.1);
         }
-        .screenshot img {
-            width: 100%;
-            height: auto;
-            display: block;
-        }
         .screenshot-caption {
             padding: 10px;
             background-color: #f5f7fa;
@@ -186,12 +181,80 @@
             font-size: 14px;
             text-align: center;
         }
+        .screenshot-body {
+            position: relative;
+            min-height: 220px;
+            background: #fafafa;
+        }
+        .screenshot-placeholder {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            min-height: 220px;
+            padding: 24px;
+            border: 2px dashed #dcdfe6;
+            color: #909399;
+            text-align: center;
+            box-sizing: border-box;
+        }
+        .screenshot-placeholder .placeholder-label {
+            font-size: 15px;
+            font-weight: 500;
+            color: #606266;
+        }
+        .screenshot-placeholder code {
+            font-size: 13px;
+            color: #409EFF;
+            background: #ecf5ff;
+            padding: 4px 10px;
+            border-radius: 4px;
+        }
+        .screenshot-body img {
+            position: relative;
+            z-index: 1;
+            width: 100%;
+            height: auto;
+            display: none;
+            background: #fff;
+        }
+        .screenshot-body img.is-loaded {
+            display: block;
+        }
+        .screenshot-body img.is-missing {
+            display: none;
+        }
+        .screenshot-body:has(img.is-loaded) .screenshot-placeholder {
+            display: none;
+        }
+        .menu-map {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 12px 0;
+            font-size: 14px;
+        }
+        .menu-map th,
+        .menu-map td {
+            border: 1px solid #ebeef5;
+            padding: 8px 12px;
+            text-align: left;
+            vertical-align: top;
+        }
+        .menu-map th {
+            background: #f5f7fa;
+            color: #303133;
+        }
+        .menu-map .menu-group {
+            color: #909399;
+            font-size: 13px;
+        }
     </style>
 </head>
 <body>
     <div class="fixed-header">
         <h1>智能视频分析系统使用说明</h1>
-        <p>本系统提供视频监控、目标检测、人群分析等功能，帮助您更好地管理和分析视频数据。</p>
+        <p>本系统提供视频监控、AI 检测、规则告警、数据大屏等功能，帮助您完成从接入到告警推送的完整闭环。</p>
     </div>
 
     <div class="toc">
@@ -199,97 +262,118 @@
         <ul class="toc-list">
             <li class="toc-item">
                 <a href="#overview" class="toc-link">1. 系统概述</a>
+                <ul class="toc-sub-list">
+                    <li class="toc-sub-item"><a href="#menu-guide" class="toc-sub-link">1.1 菜单导航</a></li>
+                </ul>
             </li>
             <li class="toc-item">
-                <a href="#device-management" class="toc-link">2. 设备管理</a>
-                <ul class="toc-sub-list">
-                    <li class="toc-sub-item"><a href="#add-device" class="toc-sub-link">2.1 添加设备</a></li>
-                    <li class="toc-sub-item"><a href="#edit-device" class="toc-sub-link">2.2 编辑设备</a></li>
-                    <li class="toc-sub-item"><a href="#delete-device" class="toc-sub-link">2.3 删除设备</a></li>
-                    <li class="toc-sub-item"><a href="#device-status" class="toc-sub-link">2.4 设备状态监控</a></li>
-                </ul>
+                <a href="#home" class="toc-link">2. 首页</a>
             </li>
             <li class="toc-item">
                 <a href="#detection" class="toc-link">3. 目标检测</a>
                 <ul class="toc-sub-list">
                     <li class="toc-sub-item"><a href="#realtime-detection" class="toc-sub-link">3.1 实时检测</a></li>
-                    <li class="toc-sub-item"><a href="#video-detection" class="toc-sub-link">3.2 视频检测</a></li>
-                    <li class="toc-sub-item"><a href="#image-detection" class="toc-sub-link">3.3 图片检测</a></li>
-                    <li class="toc-sub-item"><a href="#detection-config" class="toc-sub-link">3.4 检测配置</a></li>
-                    <li class="toc-sub-item"><a href="#detection-events" class="toc-sub-link">3.5 检测事件</a></li>
+                    <li class="toc-sub-item"><a href="#detection-config" class="toc-sub-link">3.2 检测配置</a></li>
+                    <li class="toc-sub-item"><a href="#detection-events" class="toc-sub-link">3.3 检测事件</a></li>
                 </ul>
             </li>
             <li class="toc-item">
-                <a href="#model-management" class="toc-link">4. 模型管理</a>
+                <a href="#crowd-analysis" class="toc-link">4. 人群分析</a>
                 <ul class="toc-sub-list">
-                    <li class="toc-sub-item"><a href="#upload-model" class="toc-sub-link">4.1 上传模型</a></li>
-                    <li class="toc-sub-item"><a href="#model-list" class="toc-sub-link">4.2 模型列表</a></li>
-                    <li class="toc-sub-item"><a href="#model-config" class="toc-sub-link">4.3 模型配置</a></li>
+                    <li class="toc-sub-item"><a href="#create-task" class="toc-sub-link">4.1 创建分析任务</a></li>
+                    <li class="toc-sub-item"><a href="#view-results" class="toc-sub-link">4.2 查看分析结果</a></li>
                 </ul>
             </li>
             <li class="toc-item">
-                <a href="#crowd-analysis" class="toc-link">5. 人群分析</a>
+                <a href="#vlm-inspection" class="toc-link">5. VLM 巡检</a>
                 <ul class="toc-sub-list">
-                    <li class="toc-sub-item"><a href="#create-task" class="toc-sub-link">5.1 创建分析任务</a></li>
-                    <li class="toc-sub-item"><a href="#view-results" class="toc-sub-link">5.2 查看分析结果</a></li>
+                    <li class="toc-sub-item"><a href="#vlm-task" class="toc-sub-link">5.1 巡检任务</a></li>
+                    <li class="toc-sub-item"><a href="#vlm-findings" class="toc-sub-link">5.2 巡检结果</a></li>
                 </ul>
             </li>
             <li class="toc-item">
-                <a href="#smart-scheme" class="toc-link">6. 事件订阅</a>
+                <a href="#alert-rules" class="toc-link">6. 规则引擎</a>
                 <ul class="toc-sub-list">
-                    <li class="toc-sub-item"><a href="#smart-scheme-management" class="toc-sub-link">6.1 事件订阅管理</a></li>
-                    <li class="toc-sub-item"><a href="#smart-scheme-create" class="toc-sub-link">6.2 新建事件订阅</a></li>
-                    <li class="toc-sub-item"><a href="#smart-scheme-list" class="toc-sub-link">6.3 订阅事件列表</a></li>
-                    <li class="toc-sub-item"><a href="#smart-scheme-detail" class="toc-sub-link">6.4 订阅事件详情</a></li>
+                    <li class="toc-sub-item"><a href="#alert-rule-create" class="toc-sub-link">6.1 规则列表</a></li>
+                    <li class="toc-sub-item"><a href="#alert-rule-conditions" class="toc-sub-link">6.2 触发条件</a></li>
+                    <li class="toc-sub-item"><a href="#alert-rule-hits" class="toc-sub-link">6.3 命中记录</a></li>
                 </ul>
             </li>
             <li class="toc-item">
-                <a href="#data-push" class="toc-link">7. 数据推送</a>
+                <a href="#device-management" class="toc-link">7. 视频设备</a>
                 <ul class="toc-sub-list">
-                    <li class="toc-sub-item"><a href="#push-config" class="toc-sub-link">7.1 管理推送</a></li>
-                    <li class="toc-sub-item"><a href="#push-management" class="toc-sub-link">7.2 配置推送</a></li>
-                    <li class="toc-sub-item"><a href="#data-listeners" class="toc-sub-link">7.3 数据监听</a></li>
-                    <li class="toc-sub-item"><a href="#data-listeners-list" class="toc-sub-link">7.4 数据监听列表</a></li>
+                    <li class="toc-sub-item"><a href="#add-device" class="toc-sub-link">7.1 添加设备</a></li>
+                    <li class="toc-sub-item"><a href="#edit-device" class="toc-sub-link">7.2 编辑设备</a></li>
+                    <li class="toc-sub-item"><a href="#delete-device" class="toc-sub-link">7.3 删除设备</a></li>
+                    <li class="toc-sub-item"><a href="#device-status" class="toc-sub-link">7.4 设备状态</a></li>
                 </ul>
             </li>
             <li class="toc-item">
-                <a href="#edge-servers" class="toc-link">8. 边缘服务</a>
+                <a href="#model-management" class="toc-link">8. 模型管理</a>
                 <ul class="toc-sub-list">
-                    <li class="toc-sub-item"><a href="#edge-management" class="toc-sub-link">8.1 边缘服务管理</a></li>
-                    <li class="toc-sub-item"><a href="#edge-monitoring" class="toc-sub-link">8.2 边缘服务监控</a></li>
+                    <li class="toc-sub-item"><a href="#local-models" class="toc-sub-link">8.1 本地模型</a></li>
+                    <li class="toc-sub-item"><a href="#image-detection" class="toc-sub-link">8.2 图片验证</a></li>
+                    <li class="toc-sub-item"><a href="#video-detection" class="toc-sub-link">8.3 视频验证</a></li>
+                    <li class="toc-sub-item"><a href="#vlm-models" class="toc-sub-link">8.4 VLM 大模型</a></li>
                 </ul>
             </li>
             <li class="toc-item">
-                <a href="#heatmap-management" class="toc-link">9. 热力图管理</a>
+                <a href="#data-push" class="toc-link">9. 推送配置</a>
                 <ul class="toc-sub-list">
-                    <li class="toc-sub-item"><a href="#heatmap-creation" class="toc-sub-link">9.1 创建热力图</a></li>
-                    <li class="toc-sub-item"><a href="#heatmap-configuration" class="toc-sub-link">9.2 热力图配置</a></li>
-                    <li class="toc-sub-item"><a href="#heatmap-dashboard" class="toc-sub-link">9.3 数据大屏</a></li>
+                    <li class="toc-sub-item"><a href="#push-management" class="toc-sub-link">9.1 推送配置</a></li>
+                    <li class="toc-sub-item"><a href="#push-logs" class="toc-sub-link">9.2 推送记录</a></li>
                 </ul>
             </li>
             <li class="toc-item">
-                <a href="#system-management" class="toc-link">10. 系统管理</a>
+                <a href="#external-events" class="toc-link">10. 监听/订阅</a>
                 <ul class="toc-sub-list">
-                    <li class="toc-sub-item"><a href="#system-status" class="toc-sub-link">10.1 系统状态</a></li>
-                    <li class="toc-sub-item"><a href="#system-logs" class="toc-sub-link">10.2 系统日志</a></li>
+                    <li class="toc-sub-item"><a href="#data-listeners" class="toc-sub-link">10.1 事件监听</a></li>
+                    <li class="toc-sub-item"><a href="#smart-scheme" class="toc-sub-link">10.2 事件订阅</a></li>
                 </ul>
             </li>
             <li class="toc-item">
-                <a href="#faq" class="toc-link">11. 常见问题</a>
+                <a href="#edge-servers" class="toc-link">11. 边缘节点</a>
                 <ul class="toc-sub-list">
-                    <li class="toc-sub-item"><a href="#device-issues" class="toc-sub-link">11.1 设备连接问题</a></li>
-                    <li class="toc-sub-item"><a href="#detection-issues" class="toc-sub-link">11.2 检测问题</a></li>
-                    <li class="toc-sub-item"><a href="#push-issues" class="toc-sub-link">11.3 数据推送问题</a></li>
-                    <li class="toc-sub-item"><a href="#heatmap-issues" class="toc-sub-link">11.4 热力图问题</a></li>
-                    <li class="toc-sub-item"><a href="#performance-issues" class="toc-sub-link">11.5 性能问题</a></li>
-                    <li class="toc-sub-item"><a href="#system-issues" class="toc-sub-link">11.6 系统问题</a></li>
+                    <li class="toc-sub-item"><a href="#edge-management" class="toc-sub-link">11.1 节点管理</a></li>
+                    <li class="toc-sub-item"><a href="#edge-monitoring" class="toc-sub-link">11.2 节点监控</a></li>
                 </ul>
             </li>
             <li class="toc-item">
-                <a href="#appendix" class="toc-link">12. 附录</a>
+                <a href="#heatmap-management" class="toc-link">12. 数据大屏与地图</a>
                 <ul class="toc-sub-list">
-                    <li class="toc-sub-item"><a href="#glossary" class="toc-sub-link">12.1 词汇表</a></li>
-                    <li class="toc-sub-item"><a href="#document-info" class="toc-sub-link">12.2 文档信息</a></li>
+                    <li class="toc-sub-item"><a href="#heatmap-dashboard" class="toc-sub-link">12.1 数据大屏</a></li>
+                    <li class="toc-sub-item"><a href="#heatmap-creation" class="toc-sub-link">12.2 地图与区域</a></li>
+                    <li class="toc-sub-item"><a href="#heatmap-configuration" class="toc-sub-link">12.3 保存到展板</a></li>
+                    <li class="toc-sub-item"><a href="#dashboard-integration" class="toc-sub-link">12.4 展板外部接口</a></li>
+                </ul>
+            </li>
+            <li class="toc-item">
+                <a href="#system-management" class="toc-link">13. 系统管理</a>
+                <ul class="toc-sub-list">
+                    <li class="toc-sub-item"><a href="#system-status" class="toc-sub-link">13.1 系统状态</a></li>
+                    <li class="toc-sub-item"><a href="#system-logs" class="toc-sub-link">13.2 系统日志</a></li>
+                    <li class="toc-sub-item"><a href="#detection-logs" class="toc-sub-link">13.3 检测日志</a></li>
+                    <li class="toc-sub-item"><a href="#map-config-tab" class="toc-sub-link">13.4 地图配置</a></li>
+                    <li class="toc-sub-item"><a href="#device-monitor-tab" class="toc-sub-link">13.5 设备监控</a></li>
+                </ul>
+            </li>
+            <li class="toc-item">
+                <a href="#faq" class="toc-link">14. 常见问题</a>
+                <ul class="toc-sub-list">
+                    <li class="toc-sub-item"><a href="#device-issues" class="toc-sub-link">14.1 设备连接问题</a></li>
+                    <li class="toc-sub-item"><a href="#detection-issues" class="toc-sub-link">14.2 检测问题</a></li>
+                    <li class="toc-sub-item"><a href="#alert-rule-issues" class="toc-sub-link">14.3 规则引擎问题</a></li>
+                    <li class="toc-sub-item"><a href="#push-issues" class="toc-sub-link">14.4 数据推送问题</a></li>
+                    <li class="toc-sub-item"><a href="#heatmap-issues" class="toc-sub-link">14.5 热力图问题</a></li>
+                    <li class="toc-sub-item"><a href="#performance-issues" class="toc-sub-link">14.6 性能问题</a></li>
+                    <li class="toc-sub-item"><a href="#system-issues" class="toc-sub-link">14.7 系统问题</a></li>
+                </ul>
+            </li>
+            <li class="toc-item">
+                <a href="#appendix" class="toc-link">15. 附录</a>
+                <ul class="toc-sub-list">
+                    <li class="toc-sub-item"><a href="#glossary" class="toc-sub-link">15.1 词汇表</a></li>
+                    <li class="toc-sub-item"><a href="#document-info" class="toc-sub-link">15.2 文档信息</a></li>
                 </ul>
             </li>
         </ul>
@@ -299,20 +383,62 @@
         <h2>1. 系统概述</h2>
         <p>智能视频分析系统是一个集视频监控、目标检测、人群分析于一体的综合管理平台。系统采用先进的AI算法，支持多种设备类型和检测模式，为用户提供全方位的视频监控解决方案。</p>
         <div class="screenshot">
-            <img src="./images/help/overview.png" alt="系统首页">
+            <div class="screenshot-body">
+                <div class="screenshot-placeholder">
+                    <span class="placeholder-label">待补充截图</span>
+                    <code>images/help/overview.png</code>
+                </div>
+                <img src="./images/help/overview.png" alt="系统首页">
+            </div>
             <div class="screenshot-caption">图1.1 系统首页</div>
         </div>
         <div class="note">
             <strong>核心功能模块：</strong>
             <ul>
-                <li><strong>设备管理：</strong>支持摄像头、NVR、边缘服务器等多种设备，实时监控设备状态</li>
-                <li><strong>目标检测：</strong>提供实时检测、视频检测和图片检测，支持多种AI模型</li>
-                <li><strong>人群分析：</strong>人群密度统计、行为分析、热力图可视化</li>
-                <li><strong>数据推送：</strong>支持HTTP/HTTPS、TCP、MQTT等多种数据推送方式</li>
-                <li><strong>边缘服务器：</strong>分布式边缘计算，支持本地和云端协同处理</li>
-                <li><strong>数据大屏：</strong>实时数据可视化展示，支持多维度统计分析</li>
-                <li><strong>系统监控：</strong>系统运行状态监控、日志管理、性能分析</li>
+                <li><strong>首页：</strong>设备、事件、性能等概览统计</li>
+                <li><strong>目标检测：</strong>实时检测、检测配置、检测事件</li>
+                <li><strong>人群分析 / VLM 巡检 / 规则引擎：</strong>区域统计、大模型巡检、复合告警</li>
+                <li><strong>视频设备 / 模型管理：</strong>摄像头接入、YOLO 本地模型与 VLM 大模型</li>
+                <li><strong>推送配置 / 监听·订阅：</strong>对外推送、外部事件接入</li>
+                <li><strong>边缘节点 / 系统管理：</strong>分布式节点、日志、地图配置、设备探活</li>
+                <li><strong>数据大屏：</strong>顶部栏入口，展示 KPI、热力图、规则告警与外部接口数据</li>
             </ul>
+        </div>
+
+        <div id="menu-guide">
+            <h3>1.1 菜单导航</h3>
+            <p>左侧菜单与顶部栏功能如下（与系统当前版本一致）：</p>
+            <table class="menu-map">
+                <thead>
+                    <tr><th>位置</th><th>菜单项</th><th>说明</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>侧栏</td><td>首页</td><td>综合统计与快捷入口</td></tr>
+                    <tr><td>侧栏 ▸</td><td>目标检测</td><td class="menu-group">实时检测 · 检测配置 · 检测事件</td></tr>
+                    <tr><td>侧栏</td><td>人群分析</td><td>区域人数分析任务</td></tr>
+                    <tr><td>侧栏</td><td>VLM 巡检</td><td>大模型定时截图分析</td></tr>
+                    <tr><td>侧栏</td><td>规则引擎</td><td class="menu-group">规则列表 · 命中记录</td></tr>
+                    <tr><td>侧栏</td><td>视频设备</td><td>摄像头 / NVR 等设备管理</td></tr>
+                    <tr><td>侧栏 ▸</td><td>模型管理</td><td class="menu-group">本地模型（含图片/视频验证）· VLM 大模型</td></tr>
+                    <tr><td>侧栏</td><td>推送配置</td><td class="menu-group">推送配置 · 推送记录</td></tr>
+                    <tr><td>侧栏 ▸</td><td>监听/订阅</td><td class="menu-group">事件监听（监听管理/监听事件）· 事件订阅（订阅管理/订阅事件）</td></tr>
+                    <tr><td>侧栏</td><td>边缘节点</td><td>边缘计算节点管理</td></tr>
+                    <tr><td>侧栏</td><td>系统管理</td><td class="menu-group">系统状态 · 系统日志 · 检测日志 · 地图配置 · 设备监控</td></tr>
+                    <tr><td>顶栏</td><td>数据大屏</td><td>新窗口打开 <code>/dashboard</code></td></tr>
+                    <tr><td>顶栏</td><td>帮助</td><td>打开本说明页</td></tr>
+                    <tr><td>顶栏</td><td>个人中心</td><td>账号信息与退出登录</td></tr>
+                </tbody>
+            </table>
+            <div class="screenshot">
+                <div class="screenshot-body">
+                    <div class="screenshot-placeholder">
+                        <span class="placeholder-label">待补充截图</span>
+                        <code>images/help/menu-guide.png</code>
+                    </div>
+                    <img src="./images/help/menu-guide.png" alt="侧栏与顶栏菜单">
+                </div>
+                <div class="screenshot-caption">图1.2 侧栏与顶栏菜单</div>
+            </div>
         </div>
         <div class="success">
             <strong>系统特点：</strong>
@@ -326,129 +452,37 @@
         </div>
     </div>
 
-    <div id="device-management" class="section">
-        <h2>2. 设备管理</h2>
-        <p>设备管理模块支持多种类型的视频设备接入，包括网络摄像头、硬盘录像机(NVR)、边缘服务器等。系统提供设备的全生命周期管理功能。</p>
-        
-        <div class="note">
-            <strong>支持的设备类型：</strong>
-            <ul>
-                <li><strong>网络摄像头：</strong>支持RTSP、HTTP、ONVIF协议</li>
-                <li><strong>硬盘录像机(NVR)：</strong>支持多通道视频流管理</li>
-                <li><strong>边缘服务器：</strong>支持分布式计算节点</li>
-                <li><strong>存储节点：</strong>用于视频数据存储和回放</li>
-            </ul>
+    <div id="home" class="section">
+        <h2>2. 首页</h2>
+        <div class="screenshot">
+            <div class="screenshot-body">
+                <div class="screenshot-placeholder">
+                    <span class="placeholder-label">待补充截图</span>
+                    <code>images/help/home.png</code>
+                </div>
+                <img src="./images/help/home.png" alt="首页概览">
+            </div>
+            <div class="screenshot-caption">图2.1 首页概览</div>
         </div>
-        <div class="note">
-            <strong>ONVIF协议说明：</strong>
-            <ul>
-                <li>ONVIF（开放网络视频接口论坛）协议允许不同厂商的网络视频产品进行互操作。通过ONVIF协议，系统可以更方便地发现、连接和管理兼容的设备，简化设备集成过程。</li>
-            </ul>
-        </div>
-
-        <div id="add-device">
-            <h3>2.1 添加设备</h3>
-            <div class="step">导航到"设备管理"页面</div>
-            <div class="step">点击页面右上角的"添加设备"按钮</div>
-            <div class="screenshot">
-                <img src="./images/help/add-device.png" alt="添加设备按钮">
-                <div class="screenshot-caption">图2.1 添加设备按钮位置</div>
-            </div>
-            <div class="step">在弹出的表单中填写设备基本信息：
-                <ul>
-                    <li><strong>设备ID：</strong>唯一标识符，建议使用有意义的命名规则</li>
-                    <li><strong>设备名称：</strong>便于识别的友好名称</li>
-                    <li><strong>设备类型：</strong>选择对应的设备类型</li>
-                    <li><strong>IP地址：</strong>设备的网络地址</li>
-                    <li><strong>端口：</strong>服务端口号</li>
-                    <li><strong>用户名/密码：</strong>设备访问凭据</li>
-                </ul>
-            </div>
-            <div class="note">
-                <strong>设备IP/端口查找提示：</strong>
-                <ul>
-                    <li>当您不清楚设备的IP地址和端口时，可以查阅设备说明书、使用设备厂商提供的管理工具，或在局域网内使用专业的IP扫描工具进行查找。确保设备与系统在同一网络环境下。</li>
-                </ul>
-            </div>
-            <div class="screenshot">
-                <img src="./images/help/device-form.png" alt="设备信息表单">
-                <div class="screenshot-caption">图2.2 设备信息表单</div>
-            </div>
-            <div class="step">对于NVR设备，还需要配置：
-                <ul>
-                    <li><strong>通道号：</strong>指定要接入的摄像头通道</li>
-                    <li><strong>码流类型：</strong>主码流或子码流</li>
-                    <li><strong>录像计划：</strong>设置录像时间段</li>
-                </ul>
-            </div>
-            <div class="note">
-                <strong>码流类型说明：</strong>
-                <ul>
-                    <li><strong>主码流：</strong>分辨率高、画质清晰，适用于视频存储、回放及需要高清画质的场景。但会占用更多带宽和存储空间。</li>
-                    <li><strong>子码流：</strong>分辨率较低、画质一般，适用于实时预览、远程监控及对带宽要求较低的场景。可以节省带宽和存储资源。</li>
-                </ul>
-            </div>
-            <div class="step">点击"测试连接"按钮验证设备连接状态</div>
-            <div class="step">确认无误后点击"确认"按钮完成添加</div>
-            <div class="success">
-                <strong>提示：</strong>添加设备后，系统会自动检测设备状态并显示在设备列表中。
-            </div>
-        </div>
-
-        <div id="edit-device">
-            <h3>2.2 编辑设备</h3>
-            <div class="step">在设备列表中找到需要编辑的设备</div>
-            <div class="step">点击设备行末尾的"编辑"按钮</div>
-            <div class="step">在编辑表单中修改设备信息</div>
-            <div class="step">可以修改的信息包括：设备名称、IP地址、端口、凭据等</div>
-            <div class="step">点击"测试连接"验证修改后的配置</div>
-            <div class="step">点击"确认"按钮保存修改</div>
-            <div class="note">
-                <strong>注意：</strong>修改设备配置可能会影响正在进行的检测任务，建议在业务低峰期进行。
-            </div>
-        </div>
-
-        <div id="delete-device">
-            <h3>2.3 删除设备</h3>
-            <div class="step">在设备列表中找到需要删除的设备</div>
-            <div class="step">点击设备行末尾的"删除"按钮</div>
-            <div class="step">在确认对话框中仔细阅读删除提示</div>
-            <div class="step">输入"确认删除"文本确认操作</div>
-            <div class="step">点击"确认删除"按钮完成删除</div>
-            <div class="warning">
-                <strong>重要警告：</strong>删除设备将会：
-                <ul>
-                    <li>删除与该设备相关的所有检测配置</li>
-                    <li>删除设备的所有历史事件记录</li>
-                    <li>停止该设备上正在运行的检测任务</li>
-                    <li>清除设备相关的统计数据</li>
-                </ul>
-                此操作不可逆，请谨慎操作！
-            </div>
-        </div>
-
-        <div id="device-status">
-            <h3>2.4 设备状态监控</h3>
-            <div class="step">设备列表中会实时显示每个设备的状态：
-                <ul>
-                    <li><strong>在线（绿色）：</strong>设备正常连接，可以正常使用</li>
-                    <li><strong>离线（红色）：</strong>设备连接断开，需要检查网络或设备状态</li>
-                    <li><strong>异常（黄色）：</strong>设备连接不稳定或配置有误</li>
-                    <li><strong>未知（灰色）：</strong>设备状态检测中</li>
-                </ul>
-            </div>
-            <div class="step">点击设备状态图标可以查看详细的连接信息</div>
-            <div class="step">系统会定期自动检测设备状态，也可以手动刷新</div>
-        </div>
+        <div class="step">登录后默认进入「首页」，展示设备在线情况、检测/订阅事件统计、平均置信度等概览</div>
+        <div class="step">可快速了解系统运行状态，并跳转至各功能模块</div>
+        <div class="note">数据大屏不在侧栏菜单中，请使用右上角「数据大屏」按钮打开。</div>
     </div>
 
     <div id="detection" class="section">
         <h2>3. 目标检测</h2>
+        <p>侧栏「目标检测」子菜单：实时检测、检测配置、检测事件。离线图片/视频验证在「模型管理 → 本地模型」页签内。</p>
         <div id="realtime-detection">
             <h3>3.1 实时检测</h3>
-            <div class="step">进入"实时检测"页面</div>
+            <div class="step">侧栏「目标检测 → 实时检测」</div>
             <div class="screenshot">
-                <img src="./images/help/realtime-detection.png" alt="实时检测页面">
+                <div class="screenshot-body">
+                    <div class="screenshot-placeholder">
+                        <span class="placeholder-label">待补充截图</span>
+                        <code>images/help/realtime-detection.png</code>
+                    </div>
+                    <img src="./images/help/realtime-detection.png" alt="实时检测页面">
+                </div>
                 <div class="screenshot-caption">图3.1 实时检测页面</div>
             </div>
             <div class="step">选择要检测的设备</div>
@@ -459,36 +493,18 @@
             </div>
         </div>
 
-        <div id="video-detection">
-            <h3>3.2 视频检测</h3>
-            <div class="step">进入"视频检测"页面</div>
-            <div class="screenshot">
-                <img src="./images/help/video-detection.png" alt="视频检测页面">
-                <div class="screenshot-caption">图3.2 视频检测页面</div>
-            </div>
-            <div class="step">选择要检测的视频文件</div>
-            <div class="step">选择检测模型</div>
-            <div class="step">点击"开始检测"按钮</div>
-        </div>
-
-        <div id="image-detection">
-            <h3>3.3 图片检测</h3>
-            <div class="step">进入"图片检测"页面</div>
-            <div class="screenshot">
-                <img src="./images/help/image-detection.png" alt="图片检测页面">
-                <div class="screenshot-caption">图3.3 图片检测页面</div>
-            </div>
-            <div class="step">选择要检测的图片文件</div>
-            <div class="step">选择检测模型</div>
-            <div class="step">点击"开始检测"按钮</div>
-        </div>
-
         <div id="detection-config">
-            <h3>3.4 检测配置</h3>
-            <div class="step">进入"检测配置"页面</div>
+            <h3>3.2 检测配置</h3>
+            <div class="step">侧栏「目标检测 → 检测配置」</div>
             <div class="screenshot">
-                <img src="./images/help/detection-config.png" alt="检测配置页面">
-                <div class="screenshot-caption">图3.4 检测配置页面</div>
+                <div class="screenshot-body">
+                    <div class="screenshot-placeholder">
+                        <span class="placeholder-label">待补充截图</span>
+                        <code>images/help/detection-config.png</code>
+                    </div>
+                    <img src="./images/help/detection-config.png" alt="检测配置页面">
+                </div>
+                <div class="screenshot-caption">图3.2 检测配置页面</div>
             </div>
             <div class="step">选择要配置的设备</div>
             <div class="step">设置检测参数：
@@ -516,11 +532,17 @@
         </div>
 
         <div id="detection-events">
-            <h3>3.5 检测事件</h3>
-            <div class="step">进入"检测事件"页面</div>
+            <h3>3.3 检测事件</h3>
+            <div class="step">侧栏「目标检测 → 检测事件」</div>
             <div class="screenshot">
-                <img src="./images/help/detection-events.png" alt="检测事件页面">
-                <div class="screenshot-caption">图3.5 检测事件页面</div>
+                <div class="screenshot-body">
+                    <div class="screenshot-placeholder">
+                        <span class="placeholder-label">待补充截图</span>
+                        <code>images/help/detection-events.png</code>
+                    </div>
+                    <img src="./images/help/detection-events.png" alt="检测事件页面">
+                </div>
+                <div class="screenshot-caption">图3.3 检测事件页面</div>
             </div>
             <div class="step">可以查看所有检测到的事件</div>
             <div class="step">支持按设备、时间、事件类型等筛选</div>
@@ -529,86 +551,24 @@
         </div>
     </div>
 
-    <div id="model-management" class="section">
-        <h2>4. 模型管理</h2>
-        <div id="upload-model">
-            <h3>4.1 上传模型</h3>
-            <div class="step">进入"模型管理"页面</div>
-            <div class="screenshot">
-                <img src="./images/help/upload-model.png" alt="上传模型页面">
-                <div class="screenshot-caption">图4.1 上传模型页面</div>
-            </div>
-            <div class="step">点击"上传模型"按钮</div>
-            <div class="step">选择模型文件（支持.pt、.onnx、.pth、.weights格式）</div>
-            <div class="step">填写模型信息：
-                <ul>
-                    <li>模型名称</li>
-                    <li>模型类型</li>
-                    <li>描述信息</li>
-                    <li>参数配置</li>
-                </ul>
-            </div>
-            <div class="step">点击"确认"按钮上传模型</div>
-            <div class="note">
-                <strong>模型类型说明：</strong>
-                <ul>
-                    <li>系统目前主要支持YOLO系列模型（如YOLOv5, YOLOv8等），以及ONNX、PyTorch（.pt, .pth）和Darknet（.weights）等常见格式的模型。YOLO系列模型以其在速度和精度上的良好平衡而闻名，适用于实时目标检测场景。选择合适的模型类型能够优化检测性能。</li>
-                </ul>
-            </div>
-
-        <div id="model-list">
-            <h3>4.2 模型列表</h3>
-            <div class="step">在模型列表中查看所有已上传的模型</div>
-            <div class="screenshot">
-                <img src="./images/help/model-list.png" alt="模型列表页面">
-                <div class="screenshot-caption">图4.2 模型列表页面</div>
-            </div>
-            <div class="step">可以查看模型详细信息：
-                <ul>
-                    <li>模型名称和类型</li>
-                    <li>上传时间和大小</li>
-                    <li>使用状态</li>
-                    <li>支持的检测类别</li>
-                </ul>
-            </div>
-            <div class="step">支持启用/禁用模型</div>
-            <div class="step">可以删除不需要的模型</div>
-        </div>
-
-        <div id="model-config">
-            <h3>4.3 模型配置</h3>
-            <div class="step">选择要配置的模型</div>
-            <div class="step">设置模型参数：
-                <ul>
-                    <li>检测阈值</li>
-                    <li>目标类别</li>
-                    <li>推理参数</li>
-                </ul>
-            </div>
-            <div class="note">
-                <strong>模型参数配置说明：</strong>
-                <ul>
-                    <li><strong>检测阈值 (Confidence Threshold)：</strong>与检测置信度阈值类似，用于过滤低置信度的检测结果。值越高，误报越少，但可能漏报。</li>
-                    <li><strong>NMS阈值 (Non-Maximum Suppression Threshold)：</strong>用于消除重复的检测框。当多个检测框重叠程度超过NMS阈值时，系统会保留置信度最高的那个，并移除其他重叠框。合理的NMS阈值可以有效减少冗余检测。</li>
-                    <li><strong>推理参数：</strong>包括模型推理的批量大小（Batch Size）、输入图像尺寸（Input Size）等。调整这些参数可以影响模型的推理速度和显存占用。</li>
-                </ul>
-            </div>
-            <div class="step">点击"保存"按钮完成配置</div>
-        </div>
-    </div>
-
     <div id="crowd-analysis" class="section">
-        <h2>5. 人群分析</h2>
+        <h2>4. 人群分析</h2>
         <div id="create-task">
-            <h3>5.1 创建分析任务</h3>
-            <div class="step">进入"人群分析"页面</div>
+            <h3>4.1 创建分析任务</h3>
+            <div class="step">侧栏「人群分析」</div>
             <div class="screenshot">
-                <img src="./images/help/crowd-analysis.png" alt="人群分析页面">
-            <div class="screenshot-caption">图5.1 人群分析页面</div>
-        </div>
-        <div class="step">点击"新建任务"按钮</div>
-        <div class="step">选择要分析的设备</div>
-        <div class="step">设置分析参数，包括检测类别、时间间隔等</div>
+                <div class="screenshot-body">
+                    <div class="screenshot-placeholder">
+                        <span class="placeholder-label">待补充截图</span>
+                        <code>images/help/crowd-analysis.png</code>
+                    </div>
+                    <img src="./images/help/crowd-analysis.png" alt="人群分析页面">
+                </div>
+                <div class="screenshot-caption">图4.1 人群分析页面</div>
+            </div>
+            <div class="step">点击"新建任务"按钮</div>
+            <div class="step">选择要分析的设备</div>
+            <div class="step">设置分析参数，包括检测类别、时间间隔等</div>
             <div class="step">点击"确认"按钮创建任务</div>
         </div>
         <div class="note">
@@ -620,11 +580,17 @@
         </div>
 
         <div id="view-results">
-            <h3>5.2 查看分析结果</h3>
+            <h3>4.2 查看分析结果</h3>
             <div class="step">在任务列表中找到要查看的任务</div>
             <div class="screenshot">
-                <img src="./images/help/view-results.png" alt="查看分析结果页面">
-                <div class="screenshot-caption">图5.2 查看分析结果页面</div>
+                <div class="screenshot-body">
+                    <div class="screenshot-placeholder">
+                        <span class="placeholder-label">待补充截图</span>
+                        <code>images/help/view-results.png</code>
+                    </div>
+                    <img src="./images/help/view-results.png" alt="查看分析结果页面">
+                </div>
+                <div class="screenshot-caption">图4.2 查看分析结果页面</div>
             </div>
             <div class="step">点击"查看结果"按钮</div>
             <div class="step">查看分析结果，包括人数统计、趋势图等</div>
@@ -643,166 +609,333 @@
         </div>
     </div>
 
-    <div id="smart-scheme" class="section">
-        <h2>6. 事件订阅</h2>
-        <div id="smart-scheme-management">
-            <h3>6.1 事件订阅管理</h3>
-            <div class="step">进入"事件订阅管理"页面</div>
+    <div id="vlm-inspection" class="section">
+        <h2>5. VLM 巡检</h2>
+        <p>VLM 巡检使用视觉大模型对摄像头定时截图分析，识别火情、违规等场景，结果可用于规则引擎与数据推送。</p>
+
+        <div id="vlm-task">
+            <h3>5.1 巡检任务</h3>
+            <div class="step">进入左侧菜单「VLM 巡检」</div>
             <div class="screenshot">
-                <img src="./images/help/smart-scheme-management.png" alt="事件订阅管理页面">
-                <div class="screenshot-caption">图6.1 事件订阅管理页面</div>
+                <div class="screenshot-body">
+                    <div class="screenshot-placeholder">
+                        <span class="placeholder-label">待补充截图</span>
+                        <code>images/help/vlm-inspection-task.png</code>
+                    </div>
+                    <img src="./images/help/vlm-inspection-task.png" alt="VLM 巡检任务">
+                </div>
+                <div class="screenshot-caption">图5.1 VLM 巡检任务</div>
             </div>
-            <div class="step">在事件订阅列表中可以查看所有事件订阅</div>
-            <div class="step">支持启用/禁用事件订阅</div>
-            <div class="step">可以编辑或删除事件订阅</div>
-            
+            <div class="step">点击「新建任务」，配置摄像头、Cron 调度、VLM 模型与提示词</div>
+            <div class="step">在任务中设置 <strong>告警标签（alert_labels）</strong>，供规则引擎按标签匹配</div>
+            <div class="step">启用任务后，系统按调度自动截图并调用大模型分析</div>
+            <div class="note">
+                <strong>提示：</strong>规则引擎中选择「VLM 巡检」条件时，需指定巡检任务；标签可多选，任一命中即可。
+            </div>
         </div>
-        <div id="smart-scheme-create">
-            <h3>6.2 新建事件订阅</h3>
-            <div class="step">点击"新建事件订阅"按钮</div>
+
+        <div id="vlm-findings">
+            <h3>5.2 巡检结果</h3>
             <div class="screenshot">
-                <img src="./images/help/smart-scheme-create.png" alt="新建事件订阅页面">
-                <div class="screenshot-caption">图6.2 新建事件订阅页面</div>
+                <div class="screenshot-body">
+                    <div class="screenshot-placeholder">
+                        <span class="placeholder-label">待补充截图</span>
+                        <code>images/help/vlm-inspection-findings.png</code>
+                    </div>
+                    <img src="./images/help/vlm-inspection-findings.png" alt="VLM 巡检结果">
+                </div>
+                <div class="screenshot-caption">图5.2 VLM 巡检结果</div>
             </div>
-            <div class="step">选择要订阅的监听摄像头</div>
-            <div class="step">设置事件订阅参数，包括订阅的事件类型、报警间隔时间、推送标签、备注信息等</div>
-            <div class="step">点击"确认"按钮创建事件订阅</div>
-        </div>
-        <div class="note">
-            <strong>事件类型举例：</strong>
-            <ul>
-                <li>系统支持订阅多种事件类型，例如：**区域入侵、越界检测、人员徘徊、异常行为、人数超限**等。用户可以根据实际监控需求选择不同的事件类型进行订阅。</li>
-            </ul>
-        </div>
-        <div class="note">
-            <strong>推送标签用途：</strong>
-            <ul>
-                <li>**推送标签**：可以用于对事件进行分类或标记，方便后续的数据检索、过滤和与其他系统（如消息推送服务、数据分析平台）进行集成。例如，可以根据标签将不同类型的事件推送到不同的接收端或进行差异化处理。</li>
-                <li>**备注信息**：提供额外的文字说明，方便用户理解和管理事件订阅。</li>
-            </ul>
-        </div>
-        <div id="smart-scheme-list">
-            <h3>6.3 订阅事件列表</h3>
-            <div class="step">在订阅事件列表中可以查看所有订阅事件</div>
-            <div class="screenshot">
-                <img src="./images/help/smart-scheme-list.png" alt="订阅事件列表页面">
-                <div class="screenshot-caption">图6.3 订阅事件列表页面</div>
-            </div>
-            <div class="step">可以查看订阅事件的详细信息</div>
-            <div class="step">可以编辑或删除订阅事件</div>
-        </div>
-        <div id="smart-scheme-detail">
-            <h3>6.4 订阅事件详情</h3>
-            <div class="step">在订阅事件详情中可以查看订阅事件详情</div>
-            <div class="screenshot">
-                <img src="./images/help/smart-scheme-detail.png" alt="订阅事件详情页面">
-                <div class="screenshot-caption">图6.4 订阅事件详情页面</div>
-            </div>
-            <div class="step">可以查看订阅事件的详细信息</div>
+            <div class="step">在任务详情页查看历史截图与分析结论</div>
+            <div class="step">仅 <strong>needs_alert = true</strong> 的结果会进入规则评估（可在规则条件中勾选「仅告警」）</div>
+            <div class="step">巡检发现会作为 VLM 事件源参与复合规则匹配</div>
         </div>
     </div>
-    
-    <div id="data-push" class="section">
-        <h2>7. 数据推送</h2>
-        <div id="push-config">
-            <h3>7.1 管理推送</h3>
-            <div class="step">进入"数据推送"页面</div>
-            <div class="screenshot">
-                <img src="./images/help/data-push.png" alt="数据推送页面">
-            <div class="screenshot-caption">图7.1 数据推送页面</div>
-        </div>
-        <div class="step">在推送列表中可以查看所有推送配置</div>
-        <div class="step">支持启用/禁用推送</div>
-        <div class="step">可以编辑或删除推送配置</div>
-       
 
-        <div id="push-management">
-            <h3>7.2 配置推送</h3>
-            <div class="step">点击"新建推送"按钮</div>
+    <div id="alert-rules" class="section">
+        <h2>6. 规则引擎</h2>
+        <p>侧栏「规则引擎」含「规则列表」「命中记录」两个页签。由 <strong>detect-server</strong> 周期性评估，命中后落库并按推送标签向外推送。</p>
+
+        <div id="alert-rule-create">
+            <h3>6.1 规则列表</h3>
+            <div class="step">「规则列表」页签 → 点击「新建规则」</div>
             <div class="screenshot">
-                <img src="./images/help/push-management.png" alt="配置推送页面">
-                <div class="screenshot-caption">图7.2 配置推送页面</div>
+                <div class="screenshot-body">
+                    <div class="screenshot-placeholder">
+                        <span class="placeholder-label">待补充截图</span>
+                        <code>images/help/alert-rule-list.png</code>
+                    </div>
+                    <img src="./images/help/alert-rule-list.png" alt="规则列表">
+                </div>
+                <div class="screenshot-caption">图6.1 规则列表</div>
             </div>
-            <div class="step">选择推送方式（HTTP/HTTPS/TCP/MQTT）</div>
-            <div class="step">填写推送配置信息</div>
-                <div class="step">点击"确认"按钮保存配置</div>
-            </div>
-        </div>
-        <div class="note">
-            <strong>数据格式示例：</strong>
-            <ul>
-                <li>系统推送的数据通常为JSON格式，包含以下关键信息：
-                    <pre><code>{
-    "deviceId": "BC04A20FACA3083",
-    "cameraInfo": "唐古拉入口:10.55.202.115",
-    "recordTime": "2025-09-22T10:27:17.214777+08:00",
-    "exitedCount": 2,
-    "passedCount": 1,
-    "enteredCount": 3,
-    "stayingCount": 0,
-    "event_description": "区域内人数=0, 今日进入=3, 今日离开=2, 今日通过=1"
-}</code></pre>
-                </li>
-            </ul>
-        </div>
-        <div id="data-listeners">
-            <h3>7.3 数据监听器</h3>
-            <div class="step">进入"数据监听器"页面</div>
-            <div class="screenshot">
-                <img src="./images/help/data-listeners.png" alt="数据监听器页面">
-                <div class="screenshot-caption">图7.3 数据监听器页面</div>
-            </div>
-            <div class="step">配置数据监听器来接收外部系统的数据：
+            <div class="step">填写名称、优先级、推送标签（与推送配置的 tags 对应）</div>
+            <div class="step">基本设置 · <strong>设备</strong>：留空表示监听全部设备；指定后仅拉取该设备事件</div>
+            <div class="step">匹配逻辑：
                 <ul>
-                    <li><strong>HTTP监听器：</strong>接收HTTP POST请求数据</li>
-                    <li><strong>TCP监听器：</strong>监听TCP端口接收数据</li>
-                    <li><strong>MQTT监听器：</strong>订阅MQTT主题接收数据</li>
+                    <li><strong>全部满足（AND）</strong>：窗口内所有条件都命中才告警</li>
+                    <li><strong>任一满足（OR）</strong>：无需时间窗口，任一条件有新命中即告警</li>
+                    <li><strong>同设备</strong>：开启时多条件须在同一摄像头；关闭可跨摄像头组合</li>
+                    <li><strong>窗口 / 冷却</strong>：AND 模式扫描最近 N 秒；冷却为命中后 N 秒内不重复告警</li>
                 </ul>
             </div>
-            <div class="step">设置数据映射规则，将外部数据格式转换为系统标准格式</div>
-            <div class="step">配置数据过滤和处理规则</div>
         </div>
 
-        <div class="note">
-            <strong>数据映射与过滤规则作用：</strong>
-            <ul>
-                <li><strong>数据映射规则：</strong>允许用户将系统内部的标准数据格式转换成外部系统所需的特定格式。这对于系统与第三方平台（如企业内部系统、报警平台）进行无缝集成至关重要，确保数据能够被正确解析和利用。</li>
-                <li><strong>数据过滤和处理规则：</strong>使用户能够根据业务需求，对接收到的数据进行筛选（如只处理特定事件类型）、清洗和转换。例如，可以过滤掉不重要的事件，或者对数据进行聚合计算，以减少不必要的数据传输和存储。</li>
-            </ul>
-        </div>
-        <div class="note">
-            <strong>推送方式说明：</strong>
-            <ul>
-                <li><strong>HTTP/HTTPS：</strong>支持自定义请求头和方法，适用于Web服务集成</li>
-                <li><strong>TCP：</strong>支持设置主机和端口，适用于低延迟数据传输</li>
-                <li><strong>MQTT：</strong>支持设置代理服务器、主题等，适用于物联网场景</li>
-                <li><strong>数据监听器：</strong>支持接收外部系统数据，实现双向数据交换</li>
-            </ul>
-        </div>
-        
-        <div id="data-listeners-list">
-            <h3>7.4 数据监听列表</h3>
-            <div class="step">进入"数据监听列表"页面</div>
+        <div id="alert-rule-conditions">
+            <h3>6.2 触发条件</h3>
             <div class="screenshot">
-                <img src="./images/help/data-listeners-list.png" alt="数据监听列表页面">
-                <div class="screenshot-caption">图7.4 数据监听列表页面</div>
+                <div class="screenshot-body">
+                    <div class="screenshot-placeholder">
+                        <span class="placeholder-label">待补充截图</span>
+                        <code>images/help/alert-rule-conditions.png</code>
+                    </div>
+                    <img src="./images/help/alert-rule-conditions.png" alt="规则触发条件">
+                </div>
+                <div class="screenshot-caption">图6.2 规则触发条件</div>
+            </div>
+            <div class="step">支持四类事件源：</div>
+            <div class="note">
+                <ul>
+                    <li><strong>VLM 巡检</strong>：选任务 + 告警标签，可勾选「仅告警」</li>
+                    <li><strong>检测事件</strong>：三种匹配方式
+                        <ul>
+                            <li><strong>子事件类型</strong>：人数增减、越线、离岗等智能分析子事件，即时命中</li>
+                            <li><strong>目标类别/数量</strong>：按检测框类别与数量（≥、= 等），可设「持续 N 秒」</li>
+                            <li><strong>持续不在 (NOT)</strong>：目标持续不在达到 N 秒后告警</li>
+                        </ul>
+                    </li>
+                    <li><strong>外部监听事件</strong>：来自数据监听器的外部平台事件</li>
+                    <li><strong>事件订阅</strong>：绑定订阅方案与事件类型</li>
+                </ul>
+            </div>
+            <div class="warning">
+                <strong>注意：</strong>「持续」仅对检测事件的「目标类别/数量」和「持续不在」有效；VLM、监听、订阅、子事件类型均为即时命中，无需设置持续。
             </div>
         </div>
-        <div class="step">可以查看数据监听器的详细信息</div>
-        <div class="step">可以编辑或删除数据监听器</div>
-        <div class="step">可以查看数据监听器的详细信息</div>
+
+        <div id="alert-rule-hits">
+            <h3>6.3 命中记录</h3>
+            <div class="screenshot">
+                <div class="screenshot-body">
+                    <div class="screenshot-placeholder">
+                        <span class="placeholder-label">待补充截图</span>
+                        <code>images/help/alert-rule-hits.png</code>
+                    </div>
+                    <img src="./images/help/alert-rule-hits.png" alt="规则命中记录">
+                </div>
+                <div class="screenshot-caption">图6.3 规则命中记录</div>
+            </div>
+            <div class="step">「命中记录」页签查看复合告警</div>
+            <div class="step">可查看匹配事件快照、涉及设备、规则定义快照</div>
+            <div class="step">支持确认 / 忽略处理；数据大屏的「规则告警」统计与此同源</div>
+            <div class="note">
+                <strong>排查不命中：</strong>确认 detect-server 已启动；检测类子事件需 scenario_type / label 与上报一致；人数增减等需智能分析任务正常运行。
+            </div>
+        </div>
+    </div>
+
+    <div id="device-management" class="section">
+        <h2>7. 视频设备</h2>
+        <p>侧栏「视频设备」用于管理摄像头、NVR 等接入设备，是检测、巡检、订阅等功能的基础。</p>
+        <div class="note">
+            <strong>支持的设备类型：</strong>网络摄像头（RTSP/HTTP/ONVIF）、NVR 多通道、边缘节点等。
+        </div>
+
+        <div id="add-device">
+            <h3>7.1 添加设备</h3>
+            <div class="step">侧栏「视频设备」，点击「添加设备」</div>
+            <div class="screenshot">
+                <div class="screenshot-body">
+                    <div class="screenshot-placeholder">
+                        <span class="placeholder-label">待补充截图</span>
+                        <code>images/help/device-list.png</code>
+                    </div>
+                    <img src="./images/help/device-list.png" alt="视频设备列表">
+                </div>
+                <div class="screenshot-caption">图7.1 视频设备列表</div>
+            </div>
+            <div class="step">填写设备 ID、名称、类型、IP、端口、用户名/密码等</div>
+            <div class="step">NVR 需配置通道号与码流类型（主码流/子码流）</div>
+            <div class="step">点击「测试连接」验证后保存</div>
+        </div>
+
+        <div id="edit-device">
+            <h3>7.2 编辑设备</h3>
+            <div class="step">在列表中点击「编辑」，修改配置后测试连接并保存</div>
+            <div class="note">修改设备可能影响正在运行的检测任务，建议低峰期操作。</div>
+        </div>
+
+        <div id="delete-device">
+            <h3>7.3 删除设备</h3>
+            <div class="step">点击「删除」并确认；将同时清除相关检测配置与历史事件，不可恢复</div>
+        </div>
+
+        <div id="device-status">
+            <h3>7.4 设备状态</h3>
+            <div class="step">列表显示在线/离线/异常状态；可在「系统管理 → 设备监控」配置探活策略</div>
+        </div>
+    </div>
+
+    <div id="model-management" class="section">
+        <h2>8. 模型管理</h2>
+        <p>侧栏「模型管理」分为 <strong>本地模型</strong>（含图片/视频验证页签）与 <strong>VLM 大模型</strong> 两个入口。</p>
+        <div id="local-models">
+            <h3>8.1 本地模型</h3>
+            <div class="screenshot">
+                <div class="screenshot-body">
+                    <div class="screenshot-placeholder">
+                        <span class="placeholder-label">待补充截图</span>
+                        <code>images/help/local-models.png</code>
+                    </div>
+                    <img src="./images/help/local-models.png" alt="本地模型">
+                </div>
+                <div class="screenshot-caption">图8.1 本地模型</div>
+            </div>
+            <div class="step">侧栏「模型管理 → 本地模型」→「本地模型」页签：上传、启用/禁用 YOLO 等检测模型</div>
+            <div class="step">支持 .pt、.onnx、.pth、.weights 等格式</div>
+        </div>
+
+        <div id="image-detection">
+            <h3>8.2 图片验证</h3>
+            <div class="screenshot">
+                <div class="screenshot-body">
+                    <div class="screenshot-placeholder">
+                        <span class="placeholder-label">待补充截图</span>
+                        <code>images/help/image-detection.png</code>
+                    </div>
+                    <img src="./images/help/image-detection.png" alt="图片验证">
+                </div>
+                <div class="screenshot-caption">图8.2 图片验证</div>
+            </div>
+            <div class="step">同一页面切换到「图片验证」页签，上传图片进行离线检测验证</div>
+        </div>
+
+        <div id="video-detection">
+            <h3>8.3 视频验证</h3>
+            <div class="screenshot">
+                <div class="screenshot-body">
+                    <div class="screenshot-placeholder">
+                        <span class="placeholder-label">待补充截图</span>
+                        <code>images/help/video-detection.png</code>
+                    </div>
+                    <img src="./images/help/video-detection.png" alt="视频验证">
+                </div>
+                <div class="screenshot-caption">图8.3 视频验证</div>
+            </div>
+            <div class="step">切换到「视频验证」页签，选择视频文件进行离线检测</div>
+        </div>
+
+        <div id="vlm-models">
+            <h3>8.4 VLM 大模型</h3>
+            <div class="screenshot">
+                <div class="screenshot-body">
+                    <div class="screenshot-placeholder">
+                        <span class="placeholder-label">待补充截图</span>
+                        <code>images/help/vlm-models.png</code>
+                    </div>
+                    <img src="./images/help/vlm-models.png" alt="VLM 大模型">
+                </div>
+                <div class="screenshot-caption">图8.4 VLM 大模型</div>
+            </div>
+            <div class="step">侧栏「模型管理 → VLM 大模型」：配置巡检所用视觉大模型与 API</div>
+            <div class="note">VLM 大模型用于「VLM 巡检」任务，与 YOLO 本地模型用途不同。</div>
+        </div>
+    </div>
+
+    <div id="data-push" class="section">
+        <h2>9. 推送配置</h2>
+        <p>侧栏「推送配置」含「推送配置」「推送记录」两个页签。规则引擎命中后，按规则的 <strong>推送标签</strong> 匹配此处配置并向外发送。</p>
+        <div id="push-management">
+            <h3>9.1 推送配置</h3>
+            <div class="screenshot">
+                <div class="screenshot-body">
+                    <div class="screenshot-placeholder">
+                        <span class="placeholder-label">待补充截图</span>
+                        <code>images/help/push-config.png</code>
+                    </div>
+                    <img src="./images/help/push-config.png" alt="推送配置">
+                </div>
+                <div class="screenshot-caption">图9.1 推送配置</div>
+            </div>
+            <div class="step">「推送配置」页签 → 新建/编辑 HTTP、TCP、MQTT 等推送目标</div>
+            <div class="step">配置 tags 与规则引擎的 push_tags 对应</div>
+        </div>
+        <div id="push-logs">
+            <h3>9.2 推送记录</h3>
+            <div class="screenshot">
+                <div class="screenshot-body">
+                    <div class="screenshot-placeholder">
+                        <span class="placeholder-label">待补充截图</span>
+                        <code>images/help/push-logs.png</code>
+                    </div>
+                    <img src="./images/help/push-logs.png" alt="推送记录">
+                </div>
+                <div class="screenshot-caption">图9.2 推送记录</div>
+            </div>
+            <div class="step">「推送记录」页签查看每次推送的成功/失败、目标与数据摘要</div>
+        </div>
+        <div class="note">
+            <strong>推送方式：</strong>HTTP/HTTPS、TCP、MQTT；详见各配置项说明。
+        </div>
+    </div>
+
+    <div id="external-events" class="section">
+        <h2>10. 监听/订阅</h2>
+        <p>侧栏「监听/订阅」子菜单，事件均可接入规则引擎。</p>
+
+        <div id="data-listeners">
+            <h3>10.1 事件监听</h3>
+            <div class="step">侧栏「监听/订阅 → 事件监听」</div>
+            <div class="screenshot">
+                <div class="screenshot-body">
+                    <div class="screenshot-placeholder">
+                        <span class="placeholder-label">待补充截图</span>
+                        <code>images/help/data-listeners.png</code>
+                    </div>
+                    <img src="./images/help/data-listeners.png" alt="事件监听">
+                </div>
+                <div class="screenshot-caption">图10.1 事件监听</div>
+            </div>
+            <div class="step">「监听管理」页签：配置 HTTP/TCP/MQTT 监听器，接收外部平台数据</div>
+            <div class="step">「监听事件」页签：查看已接收的外部事件列表</div>
+        </div>
+
+        <div id="smart-scheme">
+            <h3>10.2 事件订阅</h3>
+            <div class="step">侧栏「监听/订阅 → 事件订阅」</div>
+            <div class="screenshot">
+                <div class="screenshot-body">
+                    <div class="screenshot-placeholder">
+                        <span class="placeholder-label">待补充截图</span>
+                        <code>images/help/smart-scheme.png</code>
+                    </div>
+                    <img src="./images/help/smart-scheme.png" alt="事件订阅">
+                </div>
+                <div class="screenshot-caption">图10.2 事件订阅</div>
+            </div>
+            <div class="step">「订阅管理」页签：为摄像头配置智能分析订阅（人数统计、行为分析等）</div>
+            <div class="step">新建订阅时选择摄像机、监听端口、订阅事件类型与推送标签</div>
+            <div class="step">「订阅事件」页签：查看订阅产生的事件，可绑定地图区域或规则条件</div>
+            <div class="note">人数统计类订阅可绑定到地图区域，用于数据大屏热力图与园内人数汇总。</div>
+        </div>
     </div>
 
     <div id="edge-servers" class="section">
-        <h2>8. 边缘服务器</h2>
-        <p>边缘服务器管理模块用于管理分布式部署的边缘计算节点，支持边缘设备的注册、监控和管理。</p>
+        <h2>11. 边缘节点</h2>
+        <p>侧栏「边缘节点」管理分布式边缘计算节点。</p>
         
         <div id="edge-management">
-            <h3>8.1 边缘服务器管理</h3>
-            <div class="step">进入"边缘服务器"页面查看所有边缘节点</div>
+            <h3>11.1 节点管理</h3>
+            <div class="step">侧栏「边缘节点」查看已注册节点</div>
             <div class="screenshot">
-                <img src="./images/help/edge-management.png" alt="边缘服务器管理页面">
-                <div class="screenshot-caption">图8.1 边缘服务器管理页面</div>
+                <div class="screenshot-body">
+                    <div class="screenshot-placeholder">
+                        <span class="placeholder-label">待补充截图</span>
+                        <code>images/help/edge-management.png</code>
+                    </div>
+                    <img src="./images/help/edge-management.png" alt="边缘节点管理">
+                </div>
+                <div class="screenshot-caption">图11.1 边缘节点管理</div>
             </div>
             <div class="step">边缘服务器会自动注册到中央管理系统</div>
             <div class="step">可以查看边缘服务器的详细信息：
@@ -831,11 +964,17 @@
         </div>
 
         <div id="edge-monitoring">
-            <h3>8.2 边缘服务器监控</h3>
+            <h3>11.2 节点监控</h3>
             <div class="step">实时监控边缘服务器的运行状态</div>
             <div class="screenshot">
-                <img src="./images/help/edge-monitoring.png" alt="边缘服务器监控页面">
-                <div class="screenshot-caption">图8.2 边缘服务器监控页面</div>
+                <div class="screenshot-body">
+                    <div class="screenshot-placeholder">
+                        <span class="placeholder-label">待补充截图</span>
+                        <code>images/help/edge-monitoring.png</code>
+                    </div>
+                    <img src="./images/help/edge-monitoring.png" alt="边缘节点监控">
+                </div>
+                <div class="screenshot-caption">图11.2 边缘节点监控</div>
             </div>
             <div class="step">查看系统资源使用情况：
                 <ul>
@@ -860,121 +999,106 @@
     </div>
 
     <div id="heatmap-management" class="section">
-        <h2>9. 热力图管理</h2>
-        <p>热力图管理模块提供人群分布可视化功能，支持创建自定义热力图、配置监控区域、绑定数据源等。</p>
+        <h2>12. 数据大屏与地图</h2>
+        <p>数据大屏从顶栏「数据大屏」按钮打开；地图编辑在「系统管理 → 地图配置」。</p>
         
-        <div id="heatmap-creation">
-            <h3>9.1 创建热力图</h3>
-            <div class="step">进入"热力图管理"页面</div>
+        <div id="heatmap-dashboard">
+            <h3>12.1 数据大屏</h3>
             <div class="screenshot">
-                <img src="./images/help/heatmap-creation.png" alt="创建热力图页面">
-                <div class="screenshot-caption">图9.1 创建热力图页面</div>
+                <div class="screenshot-body">
+                    <div class="screenshot-placeholder">
+                        <span class="placeholder-label">待补充截图</span>
+                        <code>images/help/dashboard.png</code>
+                    </div>
+                    <img src="./images/help/dashboard.png" alt="数据大屏">
+                </div>
+                <div class="screenshot-caption">图12.1 数据大屏</div>
             </div>
-            <div class="step">点击"新建热力图"按钮</div>
-            <div class="step">上传地图背景图片（支持JPG、PNG格式）</div>
-            <div class="step">设置热力图基本信息：
-                <ul>
-                    <li><strong>地图名称：</strong>便于识别的名称</li>
-                    <li><strong>描述信息：</strong>地图用途说明</li>
-                    <li><strong>地图尺寸：</strong>实际物理尺寸</li>
-                </ul>
+            <div class="step">右上角「数据大屏」按钮，新窗口打开 <code>/dashboard</code></div>
+            <div class="step">主要模块：KPI 概览、人数热力图、历史趋势（含规则告警）、告警动态、排队/天气（需配置外部接口）</div>
+        </div>
+
+        <div id="heatmap-creation">
+            <h3>12.2 地图与区域</h3>
+            <div class="screenshot">
+                <div class="screenshot-body">
+                    <div class="screenshot-placeholder">
+                        <span class="placeholder-label">待补充截图</span>
+                        <code>images/help/map-config.png</code>
+                    </div>
+                    <img src="./images/help/map-config.png" alt="地图与区域配置">
+                </div>
+                <div class="screenshot-caption">图12.2 地图与区域配置</div>
             </div>
-            <div class="note">
-                <strong>地图尺寸意义：</strong>
-                <ul>
-                    <li>"地图尺寸：实际物理尺寸"用于校准热力图的比例尺，确保热力图上的区域划分、人员密度计算与实际场景的物理尺寸相符，从而提供更精确的分析结果。例如，如果地图背景图代表一个10米x10米的区域，您应在此处填写对应的物理尺寸。</li>
-                </ul>
-            </div>
-            <div class="step">保存热力图配置</div>
+            <div class="step">「系统管理 → 地图配置」：上传底图、绘制区域/项目点、绑定人数数据源</div>
+            <div class="step">可配置「园内人数统计」绑定多个订阅监控</div>
         </div>
 
         <div id="heatmap-configuration">
-            <h3>9.2 热力图配置</h3>
-            <div class="step">编辑热力图配置</div>
+            <h3>12.3 保存到展板</h3>
             <div class="screenshot">
-                <img src="./images/help/heatmap-edit.png" alt="编辑热力图配置">
-                <div class="screenshot-caption">图9.2 编辑热力图配置</div>
+                <div class="screenshot-body">
+                    <div class="screenshot-placeholder">
+                        <span class="placeholder-label">待补充截图</span>
+                        <code>images/help/heatmap-display-config.png</code>
+                    </div>
+                    <img src="./images/help/heatmap-display-config.png" alt="保存到展板">
+                </div>
+                <div class="screenshot-caption">图12.3 保存到展板</div>
             </div>
-            <div class="step">在热力图编辑界面绘制监控区域：
+            <div class="step">完成区域与绑定后，点击「保存到展板」</div>
+            <div class="step">在弹窗中配置：
                 <ul>
-                    <li>使用多边形工具绘制区域边界</li>
-                    <li>设置区域名称和属性</li>
-                    <li>配置区域颜色和样式</li>
+                    <li><strong>显示地图 / 显示模式</strong>：迷你（面板内）或完整（底层全屏）</li>
+                    <li><strong>渲染风格</strong>：普通模式或热力融合（可调模糊、透明度、边界）</li>
+                    <li><strong>地图标签</strong>：智能 / 仅悬停 / 全部 / 关闭（智能模式按 Top N 显示并避让重叠）</li>
+                    <li><strong>刷新间隔、显示区域数</strong>：控制大屏数据更新与标签数量</li>
                 </ul>
             </div>
             <div class="note">
-                <strong>绘制工具说明：</strong>
-                <ul>
-                    <li>在热力图编辑界面，您可以使用鼠标点击来添加多边形顶点，从而定义监控区域的边界。拖动现有顶点可以调整区域形状，点击选中顶点后按Delete键可以删除顶点。确保绘制的区域能够准确覆盖您需要进行人群分析的实际范围。</li>
-                </ul>
+                <strong>大屏名称</strong>可在地图配置页顶部单独修改，即时生效于数据大屏标题。
             </div>
-            <div class="step">为每个区域绑定数据源：
-                <ul>
-                    <li>选择对应的人群分析任务</li>
-                    <li>设置数据更新间隔</li>
-                    <li>配置预警阈值</li>
-                </ul>
-            </div>
-            <div class="step">设置显示选项：
-                <ul>
-                    <li>人数显示格式</li>
-                    <li>密度计算方式</li>
-                    <li>颜色映射规则</li>
-                </ul>
-            </div>
-            <div class="step">预览和测试热力图效果</div>
         </div>
 
-        <div id="heatmap-dashboard">
-            <h3>9.3 数据大屏</h3>
-            <div class="step">进入"数据大屏"页面查看实时数据可视化</div>
+        <div id="dashboard-integration">
+            <h3>12.4 展板外部接口</h3>
             <div class="screenshot">
-                <img src="./images/help/heatmap-dashboard.png" alt="数据可视化页面">
-                <div class="screenshot-caption">图9.3 数据可视化页面</div>
+                <div class="screenshot-body">
+                    <div class="screenshot-placeholder">
+                        <span class="placeholder-label">待补充截图</span>
+                        <code>images/help/dashboard-integration.png</code>
+                    </div>
+                    <img src="./images/help/dashboard-integration.png" alt="展板外部接口">
+                </div>
+                <div class="screenshot-caption">图12.4 展板外部接口</div>
             </div>
-            <div class="step">大屏包含以下模块：
-                <ul>
-                    <li><strong>园区概况：</strong>显示任务数量、设备数量、事件统计等</li>
-                    <li><strong>人数热力图：</strong>实时显示各区域人员分布</li>
-                    <li><strong>检测告警数据：</strong>各类检测事件统计</li>
-                    <li><strong>游客分布：</strong>人员在各区域的分布情况</li>
-                    <li><strong>事件告警信息：</strong>最新的异常事件列表</li>
-                </ul>
-            </div>
-            <div class="step">支持大屏数据绑定管理：
-                <ul>
-                    <li>配置数据源映射</li>
-                    <li>设置自动刷新间隔</li>
-                    <li>自定义显示内容</li>
-                </ul>
-            </div>
-            <div class="step">热力图交互功能：
-                <ul>
-                    <li>鼠标悬停显示区域信息</li>
-                    <li>点击区域查看详细数据</li>
-                    <li>地图缩放和拖拽</li>
-                </ul>
-            </div>
+            <div class="step">在地图配置页底部折叠面板「展板外部接口」中配置（默认收起）</div>
+            <div class="step"><strong>排队时长</strong>：填写 WaitTime 接口地址、Bearer Token、缓存/超时（秒）；支持测试连接</div>
+            <div class="step"><strong>天气</strong>：配置心知天气 API 地址与 Key、默认经纬度；可获取当前位置或测试接口</div>
             <div class="note">
-                <strong>热力图功能特点：</strong>
-                <ul>
-                    <li>📊 实时数据：数据自动更新，反映当前状态</li>
-                    <li>🎨 可视化：直观的颜色映射，一目了然</li>
-                    <li>🖱️ 交互式：支持鼠标交互，查看详细信息</li>
-                    <li>⚙️ 可配置：灵活的配置选项，满足不同需求</li>
-                </ul>
+                密钥保存在服务端，大屏通过本平台 API 安全代理请求，不会暴露给浏览器。
+            </div>
+            <div class="warning">
+                若测试返回「Token 认证已通过，但外部接口内部错误(500)」，说明本平台配置正确，需排查外部 WaitTime 服务日志。
             </div>
         </div>
     </div>
 
     <div id="system-management" class="section">
-        <h2>10. 系统管理</h2>
+        <h2>13. 系统管理</h2>
+        <p>侧栏「系统管理」，含系统状态、系统日志、检测日志、地图配置、设备监控五个页签。</p>
         <div id="system-status">
-            <h3>10.1 系统状态</h3>
-            <div class="step">进入"系统管理"页面</div>
+            <h3>13.1 系统状态</h3>
+            <div class="step">侧栏「系统管理 → 系统状态」</div>
             <div class="screenshot">
-                <img src="./images/help/system-status.png" alt="系统状态页面">
-                <div class="screenshot-caption">图10.1 系统状态页面</div>
+                <div class="screenshot-body">
+                    <div class="screenshot-placeholder">
+                        <span class="placeholder-label">待补充截图</span>
+                        <code>images/help/system-status.png</code>
+                    </div>
+                    <img src="./images/help/system-status.png" alt="系统状态页面">
+                </div>
+                <div class="screenshot-caption">图13.1 系统状态</div>
             </div>
             <div class="step">查看系统运行状态：
                 <ul>
@@ -996,11 +1120,17 @@
         </div>
 
         <div id="system-logs">
-            <h3>10.2 系统日志</h3>
-            <div class="step">进入"系统日志"页面</div>
+            <h3>13.2 系统日志</h3>
+            <div class="step">「系统日志」页签：操作与运行日志，支持筛选与清理</div>
             <div class="screenshot">
-                <img src="./images/help/system-logs.png" alt="系统日志">
-                <div class="screenshot-caption">图10.2 系统日志</div>
+                <div class="screenshot-body">
+                    <div class="screenshot-placeholder">
+                        <span class="placeholder-label">待补充截图</span>
+                        <code>images/help/system-logs.png</code>
+                    </div>
+                    <img src="./images/help/system-logs.png" alt="系统日志">
+                </div>
+                <div class="screenshot-caption">图13.2 系统日志</div>
             </div>
             <div class="step">可以查看以下类型的日志：
                 <ul>
@@ -1018,21 +1148,65 @@
             </div>
             <div class="step">支持按时间、类型、用户等条件筛选</div>
             <div class="step">可以导出日志数据</div>
-            <div class="step">支持日志清理和归档</div>
+        </div>
+
+        <div id="detection-logs">
+            <h3>13.3 检测日志</h3>
+            <div class="screenshot">
+                <div class="screenshot-body">
+                    <div class="screenshot-placeholder">
+                        <span class="placeholder-label">待补充截图</span>
+                        <code>images/help/detection-logs.png</code>
+                    </div>
+                    <img src="./images/help/detection-logs.png" alt="检测日志">
+                </div>
+                <div class="screenshot-caption">图13.3 检测日志</div>
+            </div>
+            <div class="step">「检测日志」页签：查看检测任务运行日志，支持按时间筛选与清理</div>
+        </div>
+
+        <div id="map-config-tab">
+            <h3>13.4 地图配置</h3>
+            <div class="screenshot">
+                <div class="screenshot-body">
+                    <div class="screenshot-placeholder">
+                        <span class="placeholder-label">待补充截图</span>
+                        <code>images/help/map-config-tab.png</code>
+                    </div>
+                    <img src="./images/help/map-config-tab.png" alt="系统管理-地图配置">
+                </div>
+                <div class="screenshot-caption">图13.4 系统管理 · 地图配置</div>
+            </div>
+            <div class="step">「地图配置」页签：同 <a href="#heatmap-management">12. 数据大屏与地图</a> 中的地图编辑与展板保存</div>
+        </div>
+
+        <div id="device-monitor-tab">
+            <h3>13.5 设备监控</h3>
+            <div class="screenshot">
+                <div class="screenshot-body">
+                    <div class="screenshot-placeholder">
+                        <span class="placeholder-label">待补充截图</span>
+                        <code>images/help/device-monitor.png</code>
+                    </div>
+                    <img src="./images/help/device-monitor.png" alt="设备监控">
+                </div>
+                <div class="screenshot-caption">图13.5 设备监控</div>
+            </div>
+            <div class="step">「设备监控」页签：配置 RTSP/TCP/HTTP 探活；NVR 通道建议优先 RTSP</div>
         </div>
     </div>
 
     <div id="faq" class="section">
-        <h2>11. 常见问题</h2>
+        <h2>14. 常见问题</h2>
         <div id="device-issues">
-            <h3>11.1 设备连接问题</h3>
+            <h3>14.1 设备连接问题</h3>
             <div class="step">检查设备IP地址和端口是否正确</div>
             <div class="step">确认用户名和密码是否正确</div>
             <div class="step">检查网络连接是否正常</div>
             <div class="step">确认设备是否支持RTSP协议</div>
             <div class="step">查看设备连接日志获取详细错误信息</div>
             <div class="note">
-                <strong>参考：</strong>欲了解更多设备管理信息，请参阅<a href="#device-management">2. 设备管理</a>章节。
+                <strong>参考：</strong>详见 <a href="#device-management">7. 视频设备</a> 章节。
             </div>
             <div class="warning">
                 <strong>常见错误：</strong>
@@ -1045,7 +1219,7 @@
         </div>
 
         <div id="detection-issues">
-            <h3>11.2 检测问题</h3>
+            <h3>14.2 检测问题</h3>
             <div class="step">确认已选择正确的检测模型</div>
             <div class="step">检查视频流是否正常播放</div>
             <div class="step">调整检测参数（如灵敏度、置信度阈值）</div>
@@ -1066,8 +1240,20 @@
             </div>
         </div>
 
+        <div id="alert-rule-issues">
+            <h3>14.3 规则引擎问题</h3>
+            <div class="step">确认 <strong>base_detect_server.py</strong> 已启动（规则评估不在 data-server 运行）</div>
+            <div class="step">检查规则是否启用、推送标签是否与推送配置匹配</div>
+            <div class="step">检测子事件不命中：核对 scenario_type、label 与检测任务实际上报是否一致</div>
+            <div class="step">OR 规则：仅处理上次评估后的新事件；AND 规则：注意窗口秒数与各条件「持续」设置</div>
+            <div class="step">跨设备组合：需关闭「同设备」；单摄像头规则可指定基本设置中的设备</div>
+            <div class="note">
+                <strong>参考：</strong>详见 <a href="#alert-rules">6. 规则引擎</a> 章节。
+            </div>
+        </div>
+
         <div id="push-issues">
-            <h3>11.3 数据推送问题</h3>
+            <h3>14.4 数据推送问题</h3>
             <div class="step">检查推送配置是否正确</div>
             <div class="step">确认目标服务器是否可访问</div>
             <div class="step">验证推送格式和数据结构</div>
@@ -1075,24 +1261,24 @@
             <div class="step">查看推送日志分析失败原因</div>
             <div class="step">测试推送连接是否正常</div>
             <div class="note">
-                <strong>参考：</strong>欲了解更多数据推送信息，请参阅<a href="#data-push">7. 数据推送</a>章节。
+                <strong>参考：</strong>详见 <a href="#data-push">9. 推送配置</a> 章节。
             </div>
         </div>
 
         <div id="heatmap-issues">
-            <h3>11.4 热力图问题</h3>
+            <h3>14.5 热力图问题</h3>
             <div class="step">检查地图图片是否正确上传</div>
             <div class="step">确认区域绘制是否完整</div>
             <div class="step">验证数据源绑定是否正确</div>
             <div class="step">检查人群分析任务是否正常运行</div>
             <div class="step">确认数据更新频率设置</div>
             <div class="note">
-                <strong>参考：</strong>欲了解更多热力图管理信息，请参阅<a href="#heatmap-management">9. 热力图管理</a>章节。
+                <strong>参考：</strong>详见 <a href="#heatmap-management">12. 数据大屏与地图</a> 章节。
             </div>
         </div>
 
         <div id="performance-issues">
-            <h3>11.5 性能问题</h3>
+            <h3>14.6 性能问题</h3>
             <div class="step">监控系统资源使用情况：
                 <ul>
                     <li>CPU使用率过高：减少并发检测任务</li>
@@ -1110,12 +1296,12 @@
             </div>
             <div class="step">重启相关服务或系统</div>
             <div class="note">
-                <strong>参考：</strong>欲了解更多性能优化信息，请参阅<a href="#system-management">10. 系统管理</a>章节或<a href="#edge-servers">8. 边缘服务</a>章节。
+                <strong>参考：</strong>详见 <a href="#system-management">13. 系统管理</a> 或 <a href="#edge-servers">11. 边缘节点</a> 章节。
             </div>
         </div>
 
         <div id="system-issues">
-            <h3>11.6 系统问题</h3>
+            <h3>14.7 系统问题</h3>
             <div class="step">检查系统服务状态</div>
             <div class="step">查看系统错误日志</div>
             <div class="step">确认数据库连接正常</div>
@@ -1136,9 +1322,9 @@
     </div>
 
     <div id="appendix" class="section">
-        <h2>附录</h2>
+        <h2>15. 附录</h2>
         <div id="glossary">
-            <h3>词汇表</h3>
+            <h3>15.1 词汇表</h3>
             <dl>
                 <dt>NVR</dt>
                 <dd>网络硬盘录像机（Network Video Recorder），用于录制和存储IP摄像机视频流的设备。</dd>
@@ -1150,21 +1336,50 @@
                 <dd>You Only Look Once，一种流行的实时目标检测算法。</dd>
                 <dt>NMS</dt>
                 <dd>非极大值抑制（Non-Maximum Suppression），在目标检测中用于消除重复的检测框。</dd>
+                <dt>复合告警 / 规则引擎</dt>
+                <dd>将多源事件（VLM、检测、监听、订阅）按 AND/OR 逻辑组合评估，命中后生成告警记录并推送。</dd>
+                <dt>VLM 巡检</dt>
+                <dd>使用视觉大模型对摄像头定时截图分析，输出结构化标签与是否告警标志。</dd>
+                <dt>推送标签（push_tags）</dt>
+                <dd>规则与推送配置之间的关联键；规则命中时，匹配相同 tags 的推送配置才会收到消息。</dd>
                 <dt>MQTT</dt>
                 <dd>消息队列遥测传输（Message Queuing Telemetry Transport），一种轻量级的消息协议，适用于物联网设备。</dd>
                 <!-- 更多术语可以根据需要添加 -->
             </dl>
         </div>
         <div id="document-info">
-            <h3>文档信息</h3>
-            <p><strong>更新日期：</strong> 2025年9月22日</p>
-            <p><strong>适用系统版本：</strong> v1.0.0</p>
+            <h3>15.2 文档信息</h3>
+            <p><strong>更新日期：</strong> 2026年9月3日</p>
+            <p><strong>适用系统版本：</strong> v1.x（含规则引擎、VLM 巡检、地图配置合并版）</p>
+            <div class="note">
+                <strong>截图文件目录：</strong><code>yolo-client/public/images/help/</code>。将 PNG 截图按占位框内文件名放入即可自动显示，无需改 HTML。
+            </div>
         </div>
     </div>
 
     <script>
+        function markMissingScreenshot(img) {
+            if (!img || img.classList.contains('is-missing')) return;
+            img.classList.add('is-missing');
+        }
+
+        function initScreenshotPlaceholders() {
+            document.querySelectorAll('.screenshot-body img').forEach(img => {
+                const markLoaded = () => {
+                    if (img.naturalWidth) img.classList.add('is-loaded');
+                };
+                img.addEventListener('load', markLoaded);
+                img.addEventListener('error', () => markMissingScreenshot(img));
+                if (img.complete) {
+                    if (img.naturalWidth) markLoaded();
+                    else markMissingScreenshot(img);
+                }
+            });
+        }
+
         // 目录导航功能
         document.addEventListener('DOMContentLoaded', function() {
+            initScreenshotPlaceholders();
             const tocLinks = document.querySelectorAll('.toc-link, .toc-sub-link');
             const sections = document.querySelectorAll('.section');
 

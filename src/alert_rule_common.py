@@ -9,6 +9,9 @@ DEFAULT_COOLDOWN_SEC = 60
 
 SUPPORTED_SOURCES = {"vlm_finding", "detection_event", "external_event", "smart_event"}
 
+DETECTION_MATCH_MODES = {"event", "target", "absence"}
+COUNT_OPS = {"gte", "lte", "eq", "gt", "lt"}
+
 
 def get_eval_interval_sec() -> int:
     raw = os.getenv("ALERT_RULE_EVAL_INTERVAL_SEC", str(DEFAULT_EVAL_INTERVAL_SEC))

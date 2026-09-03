@@ -156,7 +156,7 @@
             <span>时间参数</span>
             <el-tooltip placement="top">
               <template #content>
-                窗口：事件须在此秒数内；持续：条件连续满足秒数；冷却：命中后再次触发间隔
+                窗口 / 冷却（秒）；持续时间在各触发条件上单独配置
               </template>
               <el-icon class="header-tip"><QuestionFilled /></el-icon>
             </el-tooltip>
@@ -164,7 +164,6 @@
           <template #default="{ row }">
             <span class="time-params">
               {{ row.definition?.window_sec || 300 }} /
-              {{ row.definition?.duration_sec || 0 }} /
               {{ row.definition?.cooldown_sec || 60 }}s
             </span>
           </template>

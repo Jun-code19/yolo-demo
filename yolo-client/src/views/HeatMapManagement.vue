@@ -40,19 +40,20 @@
     </div>
 
     <!-- 配置展板显示对话框 -->
-    <Teleport to="body">
-      <el-dialog
-        v-model="showDisplayConfig"
-        title="配置展板显示"
-        width="560px"
-        align-center
-        append-to-body
-        destroy-on-close
-        lock-scroll
-        :close-on-click-modal="false"
-        modal-class="heatmap-display-config-overlay"
-        class="heatmap-display-config-dialog high-priority-dialog"
-      >
+    <el-dialog
+      v-model="showDisplayConfig"
+      title="配置展板显示"
+      width="560px"
+      top="5vh"
+      align-center
+      append-to-body
+      destroy-on-close
+      lock-scroll
+      :close-on-click-modal="false"
+      :z-index="999999"
+      modal-class="heatmap-display-config-overlay"
+      class="heatmap-display-config-dialog high-priority-dialog"
+    >
       <el-form :model="displayConfig" :rules="displayRules" ref="displayFormRef" label-width="100px">
         <el-form-item label="显示地图" prop="mapId">
           <el-select v-model="displayConfig.mapId" placeholder="选择要在展板显示的地图" style="width: 100%">
@@ -141,13 +142,12 @@
           <el-button type="primary" @click="confirmDisplayConfig" :loading="saving">确定</el-button>
         </span>
       </template>
-      </el-dialog>
-    </Teleport>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, nextTick } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { ArrowLeft, Select, Refresh } from '@element-plus/icons-vue'
@@ -326,39 +326,26 @@ const refreshData = async () => {
   }
 }
 
-const resetPageScroll = () => {
-  window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
-  document.documentElement.scrollTop = 0
-  document.body.scrollTop = 0
-  document.querySelector('.el-main')?.scrollTo?.({ top: 0, left: 0, behavior: 'instant' })
-}
-
-const openDisplayConfigDialog = () => {
-  showDisplayConfig.value = true
-  nextTick(resetPageScroll)
-}
-
 // 保存到展板
 const saveToDisplay = () => {
   if (!currentMapId.value) {
     ElMessage.warning('请先选择地图')
     return
   }
-  
+
   if (currentAreas.value.length === 0) {
     ElMessage.warning('请先设置区域')
     return
   }
-  
-  // 检查是否有区域绑定了数据源
+
   const hasBinding = currentAreas.value.some(area => (area.sourceId || area.jobId) && (area.sourceId || area.jobId) !== '')
   if (!hasBinding) {
     ElMessage.warning('请至少为一个区域绑定数据源')
     return
   }
-  
+
   displayConfig.mapId = currentMapId.value
-  openDisplayConfigDialog()
+  showDisplayConfig.value = true
 }
 
 // 确认展板配置
@@ -502,23 +489,3 @@ const getProjectPointsCount = () => {
   gap: 8px;
 }
 </style>
-
-<style>
-.el-overlay.heatmap-display-config-overlay {
-  position: fixed !important;
-  inset: 0 !important;
-  width: 100vw !important;
-  height: 100vh !important;
-}
-
-.heatmap-display-config-dialog.el-dialog {
-  max-width: calc(100vw - 32px);
-  margin: auto;
-}
-
-.heatmap-display-config-dialog .el-dialog__body {
-  max-height: min(72vh, calc(100vh - 180px));
-  overflow-x: hidden;
-  overflow-y: auto;
-}
-</style> 

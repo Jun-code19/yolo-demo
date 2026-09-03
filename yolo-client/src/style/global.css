@@ -110,8 +110,14 @@ body .el-time-picker {
   height: 100vh !important;
 }
 
+body > .el-overlay:not(.el-message-box__overlay) {
+  position: fixed !important;
+  inset: 0 !important;
+}
+
 .heatmap-display-config-dialog.el-dialog {
   max-width: calc(100vw - 32px);
+  margin: auto;
 }
 
 .heatmap-display-config-dialog .el-dialog__body {

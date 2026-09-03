@@ -104,7 +104,7 @@ function buildKpiExtended(overview) {
     { key: 'vlm', value: o.vlm_alert_today || 0, label: '今日 VLM 告警', sub: `累计 ${o.vlm_alert_total || 0}` },
     { key: 'composite', value: o.composite_alert_today || 0, label: '今日复合告警', sub: `规则 ${o.alert_rule_enabled || 0} 条启用`, highlight: (o.composite_alert_today || 0) > 0 },
     { key: 'smart', value: o.smart_event_today || 0, label: '今日订阅事件', sub: `方案 ${o.smart_scheme_running || 0} 运行中` },
-    { key: 'external', value: o.external_event_total || 0, label: '外部事件', sub: `今日 ${o.external_event_today || 0} · 监听 ${o.listener_running_count || 0}` },
+    { key: 'alertRule', value: o.composite_alert_total || 0, label: '规则', sub: `今日 ${o.composite_alert_today || 0} · 启用 ${o.alert_rule_enabled || 0} 条`, highlight: (o.composite_alert_today || 0) > 0 },
     { key: 'push', value: o.push_success_today || 0, label: '今日推送成功', sub: `失败 ${o.push_failure_today || 0} · 配置 ${o.push_config_enabled || 0}`, highlight: (o.push_failure_today || 0) > 0 },
     { key: 'model', value: `${o.active_models || 0}/${o.total_models || 0}`, label: 'YOLO 模型', sub: `监听异常 ${o.listener_error || 0}`, highlight: (o.listener_error || 0) > 0 },
   ]
@@ -119,7 +119,7 @@ export function useDashboardData() {
     deviceRankScope: 'total',
     typeStats: [],
     deviceRanking: [],
-    externalEngineStats: [],
+    alertRuleStats: [],
     eventStatusStats: [],
     hourlyStats: [],
     behaviorStats: [],
@@ -188,7 +188,7 @@ export function useDashboardData() {
         value: item.today_count ?? 0,
       }))
 
-      data.externalEngineStats = (board.external_engine_stats || []).map((item) => ({
+      data.alertRuleStats = (board.alert_rule_stats || board.external_engine_stats || []).map((item) => ({
         name: item.name,
         value: item.value ?? 0,
       }))
@@ -211,7 +211,7 @@ export function useDashboardData() {
       const composite = (board.recent_composite_alerts || []).map((item) => ({
         id: `c-${item.id}`,
         source: 'composite',
-        sourceLabel: '复合',
+        sourceLabel: '规则',
         title: item.title,
         device: item.device_name,
         time: formatFeedTime(item.timestamp),
@@ -235,16 +235,7 @@ export function useDashboardData() {
         time: formatFeedTime(item.timestamp),
         ts: item.timestamp ? new Date(item.timestamp).getTime() : 0,
       }))
-      const external = (board.recent_external_events || []).map((item) => ({
-        id: `e-${item.id}`,
-        source: 'external',
-        sourceLabel: '外部',
-        title: item.title,
-        device: item.device_name || item.engine_name,
-        time: formatFeedTime(item.timestamp),
-        ts: item.timestamp ? new Date(item.timestamp).getTime() : 0,
-      }))
-      data.alertFeed = [...composite, ...vlm, ...smart, ...external]
+      data.alertFeed = [...composite, ...vlm, ...smart]
         .sort((a, b) => b.ts - a.ts)
         .slice(0, 16)
 
@@ -258,7 +249,7 @@ export function useDashboardData() {
       data.historicalStats = (board.historical_trend || []).map((item) => ({
         date: item.date,
         detection: item.detection_event_count || 0,
-        external: item.external_event_count || 0,
+        alertRule: item.alert_rule_count ?? item.external_event_count ?? 0,
         smart: item.smart_event_count || 0,
       }))
 

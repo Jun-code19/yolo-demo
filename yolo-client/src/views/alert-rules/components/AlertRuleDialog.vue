@@ -77,21 +77,20 @@
           </el-form-item>
         </div>
 
-        <div class="form-row-3 timing-row">
+        <div class="form-row-2 timing-row">
           <el-form-item label="窗口">
-            <el-input-number v-model="form.definition.window_sec" :min="10" :max="86400" controls-position="right" class="w-full" />
-          </el-form-item>
-          <el-form-item label="持续">
-            <el-input-number v-model="form.definition.duration_sec" :min="0" :max="86400" controls-position="right" class="w-full" />
+            <el-input-number
+              v-model="form.definition.window_sec"
+              :min="10"
+              :max="86400"
+              :disabled="form.definition.logic === 'OR'"
+              controls-position="right"
+              class="w-full"
+            />
           </el-form-item>
           <el-form-item label="冷却">
             <el-input-number v-model="form.definition.cooldown_sec" :min="0" :max="86400" controls-position="right" class="w-full" />
           </el-form-item>
-        </div>
-        <div class="timing-help">
-          <span>窗口</span> 扫描最近 N 秒事件，AND 时各条件须在此范围内；
-          <span>持续</span> 条件须连续满足秒数（0=即时）；
-          <span>冷却</span> 命中后 N 秒内不重复告警。
         </div>
 
         <el-divider content-position="left">
@@ -154,41 +153,64 @@
 
             <template v-else-if="cond.source === 'detection_event'">
               <el-select
-                v-model="cond.event_type"
-                clearable
-                filterable
-                placeholder="事件大类"
+                v-model="cond.match_mode"
+                placeholder="匹配方式"
                 class="cond-field"
                 popper-class="rule-select-popper"
+                @change="onDetectionMatchModeChange(cond)"
               >
-                <el-option v-for="opt in DETECTION_EVENT_TYPES" :key="opt.value" :label="opt.label" :value="opt.value" />
+                <el-option v-for="opt in DETECTION_MATCH_MODES" :key="opt.value" :label="opt.label" :value="opt.value" />
               </el-select>
-              <el-select
-                v-model="cond.scenario_type"
-                clearable
-                filterable
-                placeholder="场景类型"
-                class="cond-field"
-                popper-class="rule-select-popper"
-              >
-                <el-option v-for="opt in SCENARIO_TYPES" :key="opt.value" :label="opt.label" :value="opt.value" />
-              </el-select>
-              <el-select
-                v-model="cond.label"
-                clearable
-                filterable
-                allow-create
-                placeholder="子事件类型"
-                class="cond-field"
-                popper-class="rule-select-popper"
-              >
-                <el-option
-                  v-for="opt in DETECTION_META_EVENT_TYPES"
-                  :key="opt.value"
-                  :label="opt.label"
-                  :value="opt.value"
-                />
-              </el-select>
+              <template v-if="cond.match_mode === 'target' || cond.match_mode === 'absence'">
+                <el-select
+                  v-model="cond.target_classes"
+                  multiple
+                  collapse-tags
+                  collapse-tags-tooltip
+                  clearable
+                  filterable
+                  allow-create
+                  placeholder="目标类别"
+                  class="cond-field"
+                  popper-class="rule-select-popper"
+                >
+                  <el-option v-for="opt in TARGET_CLASS_PRESETS" :key="opt.value" :label="opt.label" :value="opt.value" />
+                </el-select>
+                <template v-if="cond.match_mode === 'target'">
+                  <el-select v-model="cond.count_op" placeholder="数量" class="cond-field cond-field-sm" popper-class="rule-select-popper">
+                    <el-option v-for="opt in COUNT_OPS" :key="opt.value" :label="opt.label" :value="opt.value" />
+                  </el-select>
+                  <el-input-number v-model="cond.count_value" :min="0" :max="9999" controls-position="right" class="cond-field cond-field-sm" />
+                </template>
+              </template>
+              <template v-else>
+                <el-select
+                  v-model="cond.scenario_type"
+                  clearable
+                  filterable
+                  placeholder="场景类型"
+                  class="cond-field"
+                  popper-class="rule-select-popper"
+                >
+                  <el-option v-for="opt in SCENARIO_TYPES" :key="opt.value" :label="opt.label" :value="opt.value" />
+                </el-select>
+                <el-select
+                  v-model="cond.label"
+                  clearable
+                  filterable
+                  allow-create
+                  placeholder="子事件类型"
+                  class="cond-field"
+                  popper-class="rule-select-popper"
+                >
+                  <el-option
+                    v-for="opt in DETECTION_META_EVENT_TYPES"
+                    :key="opt.value"
+                    :label="opt.label"
+                    :value="opt.value"
+                  />
+                </el-select>
+              </template>
             </template>
 
             <template v-else-if="cond.source === 'external_event'">
@@ -240,6 +262,17 @@
               </el-select>
             </template>
 
+            <template v-if="shouldShowConditionDuration(cond)">
+              <span class="cond-duration-label">持续</span>
+              <el-input-number
+                v-model="cond.duration_sec"
+                :min="0"
+                :max="86400"
+                controls-position="right"
+                class="cond-field cond-field-sm"
+              />
+            </template>
+
             <el-button
               type="danger"
               link
@@ -249,9 +282,6 @@
             >
               删除
             </el-button>
-          </div>
-          <div v-if="cond.source === 'vlm_finding' && cond.job_id && !getVlmLabelOptions(cond.job_id).length" class="cond-hint">
-            该任务未配置告警标签，可在 VLM 巡检任务中设置 alert_labels，或手动输入标签（多选时任一命中即可）。
           </div>
         </div>
       </el-form>
@@ -269,13 +299,16 @@ import { ref, reactive } from 'vue'
 import { ElMessage } from 'element-plus'
 import alertRuleApi, {
   SOURCE_OPTIONS,
-  DETECTION_EVENT_TYPES,
   DETECTION_META_EVENT_TYPES,
+  DETECTION_MATCH_MODES,
+  COUNT_OPS,
+  TARGET_CLASS_PRESETS,
   SCENARIO_TYPES,
   EXTERNAL_EVENT_TYPES,
   SMART_EVENT_TYPES,
   defaultCondition,
   defaultDefinition,
+  conditionSupportsDuration,
   normalizeListResponse
 } from '@/api/alert_rule'
 import deviceApi from '@/api/device'
@@ -349,16 +382,33 @@ const onVlmLabelsChange = (cond) => {
   cond.label = ''
 }
 
+const shouldShowConditionDuration = (cond) => conditionSupportsDuration(cond)
+
 const resetConditionFields = (cond) => {
-  cond.label = ''
-  cond.labels = []
-  cond.event_type = ''
-  cond.job_id = ''
-  cond.needs_alert_only = cond.source === 'vlm_finding'
-  cond.scenario_type = ''
-  cond.scenario_id = ''
-  cond.analysis_type = ''
-  cond.scheme_id = ''
+  const source = cond.source
+  const defaults = defaultCondition()
+  Object.assign(cond, {
+    ...defaults,
+    source,
+    needs_alert_only: source === 'vlm_finding',
+  })
+}
+
+const onDetectionMatchModeChange = (cond) => {
+  if (cond.match_mode === 'target' || cond.match_mode === 'absence') {
+    cond.label = ''
+    cond.scenario_type = ''
+    cond.event_type = ''
+    if (!Array.isArray(cond.target_classes)) cond.target_classes = []
+    if (!cond.count_op) cond.count_op = 'gte'
+    if (cond.count_value == null) cond.count_value = 1
+  } else {
+    cond.target_classes = []
+    cond.count_op = 'gte'
+    cond.count_value = 1
+    cond.event_type = ''
+    cond.duration_sec = 0
+  }
 }
 
 const addCondition = () => {
@@ -442,7 +492,12 @@ const openEdit = async (row) => {
       const merged = {
         ...defaultCondition(),
         ...item,
-        needs_alert_only: item.needs_alert_only !== false
+        needs_alert_only: item.source === 'vlm_finding' ? item.needs_alert_only !== false : false,
+        target_classes: Array.isArray(item.target_classes) ? [...item.target_classes] : [],
+        match_mode: item.match_mode || (item.label ? 'event' : 'target'),
+        count_op: item.count_op || 'gte',
+        count_value: item.count_value ?? 1,
+        duration_sec: item.duration_sec ?? row.definition?.duration_sec ?? 0,
       }
       if ((!merged.labels || !merged.labels.length) && merged.label) {
         merged.labels = [merged.label]
@@ -458,7 +513,11 @@ const openEdit = async (row) => {
 }
 
 const cleanCondition = (cond) => {
-  const payload = { source: cond.source }
+  const supportsDuration = conditionSupportsDuration(cond)
+  const payload = {
+    source: cond.source,
+    duration_sec: supportsDuration ? (Number(cond.duration_sec) || 0) : 0,
+  }
   if (cond.source === 'vlm_finding') {
     if (cond.job_id) payload.job_id = cond.job_id
     payload.needs_alert_only = cond.needs_alert_only !== false
@@ -468,11 +527,21 @@ const cleanCondition = (cond) => {
       payload.label = cond.label
     }
   } else if (cond.source === 'detection_event') {
-    if (cond.event_type) payload.event_type = cond.event_type
+    payload.match_mode = cond.match_mode || 'event'
     if (cond.scenario_type) payload.scenario_type = cond.scenario_type
     if (cond.scenario_id) payload.scenario_id = cond.scenario_id
     if (cond.analysis_type) payload.analysis_type = cond.analysis_type
-    if (cond.label) payload.label = cond.label
+    if (payload.match_mode === 'target' || payload.match_mode === 'absence') {
+      if (Array.isArray(cond.target_classes) && cond.target_classes.length) {
+        payload.target_classes = cond.target_classes.map(item => String(item).trim()).filter(Boolean)
+      }
+      if (payload.match_mode === 'target') {
+        if (cond.count_op) payload.count_op = cond.count_op
+        if (cond.count_value != null && cond.count_value !== '') payload.count_value = cond.count_value
+      }
+    } else if (cond.label) {
+      payload.label = cond.label
+    }
   } else if (cond.source === 'smart_event') {
     if (cond.scheme_id) payload.scheme_id = cond.scheme_id
     if (cond.event_type) payload.event_type = cond.event_type
@@ -561,21 +630,6 @@ defineExpose({ openCreate, openEdit })
   font-size: 12px;
 }
 
-.timing-help {
-  margin: -4px 0 8px;
-  padding: 8px 10px;
-  font-size: 12px;
-  line-height: 1.6;
-  color: #909399;
-  background: #f5f7fa;
-  border-radius: 4px;
-}
-
-.timing-help span {
-  color: #606266;
-  font-weight: 500;
-}
-
 .divider-btn {
   margin-left: 8px;
   vertical-align: baseline;
@@ -597,13 +651,6 @@ defineExpose({ openCreate, openEdit })
   padding: 8px 0;
 }
 
-.cond-hint {
-  margin: 0 0 8px 28px;
-  font-size: 12px;
-  color: #e6a23c;
-  line-height: 1.5;
-}
-
 .cond-idx {
   flex: 0 0 20px;
   font-size: 12px;
@@ -621,6 +668,12 @@ defineExpose({ openCreate, openEdit })
   min-width: 100px;
 }
 
+.cond-field-sm {
+  flex: 0 0 88px;
+  min-width: 72px;
+  max-width: 120px;
+}
+
 .cond-check {
   flex-shrink: 0;
   margin-right: 4px;
@@ -628,6 +681,12 @@ defineExpose({ openCreate, openEdit })
 
 .cond-del {
   margin-left: auto;
+  flex-shrink: 0;
+}
+
+.cond-duration-label {
+  font-size: 12px;
+  color: #606266;
   flex-shrink: 0;
 }
 

@@ -51,6 +51,25 @@ export const SCENARIO_TYPES = [
   { value: 'counting', label: '人数统计' }
 ]
 
+export const DETECTION_MATCH_MODES = [
+  { value: 'event', label: '子事件类型' },
+  { value: 'target', label: '目标类别/数量' },
+  { value: 'absence', label: '持续不在 (NOT)' }
+]
+
+export const COUNT_OPS = [
+  { value: 'gte', label: '≥' },
+  { value: 'gt', label: '>' },
+  { value: 'eq', label: '=' },
+  { value: 'lt', label: '<' },
+  { value: 'lte', label: '≤' }
+]
+
+export const TARGET_CLASS_PRESETS = [
+  { value: 'person', label: '人' },
+  { value: 'car', label: '车' }
+]
+
 /** 检测事件 meta.event_type 子类型（与 smart_scenarios / run_detection_task 对齐） */
 export const DETECTION_META_EVENT_TYPES = [
   { value: 'leave_post_alert', label: '离岗告警' },
@@ -87,6 +106,9 @@ const labelMap = (options) => Object.fromEntries(options.map(o => [o.value, o.la
 
 export const DETECTION_EVENT_TYPE_LABELS = labelMap(DETECTION_EVENT_TYPES)
 export const SCENARIO_TYPE_LABELS = labelMap(SCENARIO_TYPES)
+export const DETECTION_MATCH_MODE_LABELS = labelMap(DETECTION_MATCH_MODES)
+export const COUNT_OP_LABELS = labelMap(COUNT_OPS)
+export const TARGET_CLASS_LABELS = labelMap(TARGET_CLASS_PRESETS)
 export const DETECTION_META_EVENT_LABELS = labelMap(DETECTION_META_EVENT_TYPES)
 export const EXTERNAL_EVENT_TYPE_LABELS = labelMap(EXTERNAL_EVENT_TYPES)
 export const SMART_EVENT_TYPE_LABELS = labelMap(SMART_EVENT_TYPES)
@@ -110,12 +132,18 @@ export const defaultDefinition = () => ({
 })
 
 export const defaultCondition = () => ({
-  source: 'vlm_finding',
+  source: 'detection_event',
+  match_mode: 'target',
   label: '',
   labels: [],
   event_type: '',
+  target_classes: [],
+  count_op: 'gte',
+  count_value: 1,
+  change_direction: '',
+  duration_sec: 0,
   job_id: '',
-  needs_alert_only: true,
+  needs_alert_only: false,
   scenario_type: '',
   scenario_id: '',
   analysis_type: '',
@@ -129,6 +157,12 @@ export function getConditionLabels(cond) {
   }
   if (cond?.label) return [cond.label]
   return []
+}
+
+/** 是否在该条件上配置持续秒数（仅检测事件的目标类别/NOT） */
+export function conditionSupportsDuration(cond) {
+  return cond?.source === 'detection_event'
+    && (cond.match_mode === 'target' || cond.match_mode === 'absence')
 }
 
 /** 格式化单条触发条件（列表/详情展示） */
@@ -156,14 +190,25 @@ export function formatConditionText(cond, lookups = {}, options = {}) {
   }
 
   if (cond.source === 'detection_event') {
-    if (cond.event_type) {
-      parts.push(DETECTION_EVENT_TYPE_LABELS[cond.event_type] || cond.event_type)
+    const modeLabel = DETECTION_MATCH_MODE_LABELS[cond.match_mode] || cond.match_mode
+    if (modeLabel) parts.push(modeLabel)
+    if (cond.match_mode === 'target' || cond.match_mode === 'absence') {
+      const classes = (cond.target_classes || []).map(c => TARGET_CLASS_LABELS[c] || c).filter(Boolean)
+      if (classes.length) parts.push(`类别:${classes.join('/')}`)
+      if (cond.match_mode === 'target' && cond.count_op && cond.count_value != null && cond.count_value !== '') {
+        parts.push(`数量${COUNT_OP_LABELS[cond.count_op] || cond.count_op}${cond.count_value}`)
+      }
+      if (cond.match_mode === 'absence') parts.push('持续不在')
+    } else {
+      if (cond.scenario_type) {
+        parts.push(SCENARIO_TYPE_LABELS[cond.scenario_type] || cond.scenario_type)
+      }
+      if (cond.label) {
+        parts.push(DETECTION_META_EVENT_LABELS[cond.label] || cond.label)
+      }
     }
-    if (cond.scenario_type) {
-      parts.push(SCENARIO_TYPE_LABELS[cond.scenario_type] || cond.scenario_type)
-    }
-    if (cond.label) {
-      parts.push(DETECTION_META_EVENT_LABELS[cond.label] || cond.label)
+    if (conditionSupportsDuration(cond) && cond.duration_sec > 0) {
+      parts.push(`持续${cond.duration_sec}s`)
     }
     return parts.join(' · ')
   }
@@ -188,7 +233,8 @@ export function formatConditionText(cond, lookups = {}, options = {}) {
   }
 
   const extra = cond.label || cond.event_type || cond.scenario_type || ''
-  return extra ? `${sourceLabel}:${extra}` : sourceLabel
+  const base = extra ? `${sourceLabel}:${extra}` : sourceLabel
+  return base
 }
 
 /** 规则列表：多条触发条件 tooltip 全文 */

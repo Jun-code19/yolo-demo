@@ -523,7 +523,7 @@ const updateTrendChart = () => {
     backgroundColor: 'transparent',
     grid: { left: 42, right: 16, top: 28, bottom: 28 },
     legend: {
-      data: ['检测', '外部', '订阅'],
+      data: ['检测', '规则', '订阅'],
       textStyle: { color: CHART_THEME.text, fontSize: 11 },
       top: 0,
     },
@@ -547,7 +547,7 @@ const updateTrendChart = () => {
     },
     series: [
       { name: '检测', type: 'line', smooth: true, symbol: 'circle', symbolSize: 5, data: rows.map((r) => r.detection), itemStyle: { color: '#4a90e2' }, areaStyle: { color: 'rgba(74,144,226,0.15)' } },
-      { name: '外部', type: 'line', smooth: true, symbol: 'none', data: rows.map((r) => r.external), itemStyle: { color: '#ffbf00' } },
+      { name: '规则', type: 'line', smooth: true, symbol: 'none', data: rows.map((r) => r.alertRule), itemStyle: { color: '#ffbf00' } },
       { name: '订阅', type: 'line', smooth: true, symbol: 'none', data: rows.map((r) => r.smart), itemStyle: { color: '#ff8a65' } },
     ],
   }, true)
@@ -1361,10 +1361,9 @@ onUnmounted(() => {
   line-height: 1.4;
 }
 
-.feed-tag.composite { background: rgba(255,107,107,0.2); color: #ff9a9a; }
+.feed-tag.composite { background: rgba(255,191,0,0.2); color: #ffd666; }
 .feed-tag.vlm { background: rgba(103,194,58,0.2); color: #a8e06c; }
 .feed-tag.smart { background: rgba(74,144,226,0.2); color: #8ec5ff; }
-.feed-tag.external { background: rgba(255,191,0,0.2); color: #ffd666; }
 
 .panel-body-scroll {
   flex: 1 1 0;

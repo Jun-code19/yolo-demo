@@ -1,6 +1,6 @@
 <template>
-  <div class="dashboard-integration-config">
-    <el-form :model="integrationConfig" :label-width="compact ? '120px' : '140px'">
+  <div class="dashboard-integration-config" :class="{ 'is-compact': compact }">
+    <el-form :model="integrationConfig" :label-width="compact ? '120px' : '140px'" class="integration-form">
       <el-divider content-position="left">排队时长</el-divider>
       <el-form-item label="启用">
         <el-switch v-model="integrationConfig.wait_time_enabled" />
@@ -37,17 +37,38 @@
           <span>当前已保存：<code>{{ integrationConfig.wait_time_token_masked }}</code></span>
         </div>
       </el-form-item>
-      <el-form-item label="缓存时间">
-        <el-input-number v-model="integrationConfig.wait_time_cache_sec" :min="30" :max="600" :step="30" />
-        <span style="margin-left: 8px; color: #909399;">秒内复用结果，避免频繁请求打崩 WaitTime 服务</span>
-      </el-form-item>
-      <el-form-item label="请求超时">
-        <el-input-number v-model="integrationConfig.wait_time_timeout_sec" :min="10" :max="300" :step="5" />
-        <span style="margin-left: 8px; color: #909399;">秒（慢接口建议 60~120）</span>
+      <el-form-item label="缓存/超时">
+        <div class="timing-inline-row">
+          <div class="timing-inline-item">
+            <span class="timing-inline-name">缓存</span>
+            <el-input-number
+              v-model="integrationConfig.wait_time_cache_sec"
+              :min="30"
+              :max="600"
+              :step="30"
+              controls-position="right"
+            />
+            <span class="timing-inline-suffix">秒</span>
+          </div>
+          <div class="timing-inline-item">
+            <span class="timing-inline-name">超时</span>
+            <el-input-number
+              v-model="integrationConfig.wait_time_timeout_sec"
+              :min="10"
+              :max="300"
+              :step="5"
+              controls-position="right"
+            />
+            <span class="timing-inline-suffix">秒</span>
+          </div>
+        </div>
+        <div class="form-tip">缓存复用结果避免频繁请求；超时慢接口建议 60~120 秒</div>
       </el-form-item>
       <el-form-item>
         <el-button :loading="testingWaitTime" @click="testWaitTimeConnection">测试排队接口</el-button>
       </el-form-item>
+
+      <el-divider content-position="left">天气</el-divider>
       <el-form-item label="启用">
         <el-switch v-model="integrationConfig.weather_enabled" />
       </el-form-item>
@@ -341,6 +362,53 @@ defineExpose({
 <style scoped>
 .dashboard-integration-config {
   max-width: 760px;
+}
+
+.dashboard-integration-config.is-compact {
+  max-width: none;
+}
+
+.integration-form :deep(.el-form-item__content) {
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+
+.form-tip {
+  flex: 1 0 100%;
+  margin-top: 6px;
+  font-size: 12px;
+  color: #909399;
+  line-height: 1.5;
+}
+
+.timing-inline-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 20px;
+  width: 100%;
+}
+
+.timing-inline-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.timing-inline-name {
+  flex-shrink: 0;
+  font-size: 13px;
+  color: #606266;
+}
+
+.timing-inline-item :deep(.el-input-number) {
+  width: 120px;
+}
+
+.timing-inline-suffix {
+  flex-shrink: 0;
+  font-size: 13px;
+  color: #909399;
 }
 
 .location-actions {

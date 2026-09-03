@@ -1184,6 +1184,7 @@ class DetectionTask:
                 "counting_subtype": 'area_counting' if (event_info.get('counting_type') or self.area_coordinates.get('countingType')) == 'occupancy' else 'flow_counting',
                 "scenario_id": event_info.get('scenario_id'),
                 "scenario_name": event_info.get('scenario_name'),
+                "scenario_type": event_info.get('scenario_type') or 'counting',
                 "event_type": event_info['event_type'],
                 "event_description": self._get_event_description(event_info['event_type']),
                 "target_class": self.target_class,
