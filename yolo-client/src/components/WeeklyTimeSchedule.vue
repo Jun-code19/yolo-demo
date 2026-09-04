@@ -14,14 +14,14 @@
         :type="activePreset === 'day' ? 'primary' : 'default'"
         @click="applyPreset('day')"
       >
-        白天 (06:00-18:00)
+        白天 (08:00-20:00)
       </el-button>
       <el-button
         size="small"
         :type="activePreset === 'night' ? 'primary' : 'default'"
         @click="applyPreset('night')"
       >
-        夜晚 (18:00-06:00)
+        夜晚 (20:00-08:00)
       </el-button>
       <span class="toolbar-divider" />
       <el-button
@@ -123,6 +123,8 @@
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import {
   WEEK_DAYS,
+  DAY_PRESET,
+  NIGHT_DISPLAY_RANGES,
   cloneRanges,
   createDayPresetSchedule,
   createFullWeekSchedule,
@@ -175,20 +177,16 @@ const activePreset = computed(() => {
   const isSameOnAllDays = (matcher) => WEEK_DAYS.every(day => matcher(normalizeRanges(localSchedule[day.key], true)))
 
   if (isSameOnAllDays(ranges => ranges.length === 1
-    && ranges[0].startMin === 6 * 60
-    && ranges[0].endMin === 18 * 60)) {
+    && ranges[0].startMin === DAY_PRESET.startMin
+    && ranges[0].endMin === DAY_PRESET.endMin)) {
     return 'day'
   }
 
-  const nightRanges = [
-    { startMin: 0, endMin: 6 * 60 },
-    { startMin: 18 * 60, endMin: 24 * 60 }
-  ]
   if (isSameOnAllDays(ranges => ranges.length === 2
-    && ranges[0].startMin === nightRanges[0].startMin
-    && ranges[0].endMin === nightRanges[0].endMin
-    && ranges[1].startMin === nightRanges[1].startMin
-    && ranges[1].endMin === nightRanges[1].endMin)) {
+    && ranges[0].startMin === NIGHT_DISPLAY_RANGES[0].startMin
+    && ranges[0].endMin === NIGHT_DISPLAY_RANGES[0].endMin
+    && ranges[1].startMin === NIGHT_DISPLAY_RANGES[1].startMin
+    && ranges[1].endMin === NIGHT_DISPLAY_RANGES[1].endMin)) {
     return 'night'
   }
 

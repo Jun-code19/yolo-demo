@@ -953,19 +953,31 @@ const handleSaveGroupEdit = async () => {
   }
 }
 
+const getApiErrorMessage = (error, fallback = '操作失败') => {
+  const detail = error.response?.data?.detail
+  if (typeof detail === 'string' && detail.trim()) return detail
+  if (Array.isArray(detail) && detail.length) {
+    return detail.map(item => item.msg || item.message || String(item)).join('；')
+  }
+  return error.message || fallback
+}
+
 const handleDeleteGroup = (group) => {
   ElMessageBox.confirm(
-    `删除分组「${group.group_name}」？组内设备将移至未分组。`,
+    `删除分组「${group.group_name}」？组内设备将移至未分组；若存在按分组运行的检测/人群分析/VLM 巡检任务，将解除关联并停用。`,
     '删除确认',
     { type: 'warning' }
   ).then(async () => {
     try {
-      await deviceApi.deleteDeviceGroup(group.group_id)
-      ElMessage.success('分组已删除')
+      const res = await deviceApi.deleteDeviceGroup(group.group_id)
+      ElMessage.success(res.data?.message || '分组已删除')
       await loadDeviceGroups()
       reloadDevices()
+      if (selectedTreeKey.value === group.group_id) {
+        selectedTreeKey.value = '__all__'
+      }
     } catch (error) {
-      ElMessage.error(error.response?.data?.detail || '删除分组失败')
+      ElMessage.error(getApiErrorMessage(error, '删除分组失败'))
     }
   }).catch(() => {})
 }

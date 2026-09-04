@@ -65,10 +65,10 @@ def is_within_active_period(now: datetime, runtime: Optional[Dict[str, Any]]) ->
 
     if mode == "day_night":
         scope = runtime.get("day_night_scope") or "both"
-        day_start = runtime.get("day_start") or "06:00"
-        day_end = runtime.get("day_end") or "18:00"
-        night_start = runtime.get("night_start") or "18:00"
-        night_end = runtime.get("night_end") or "06:00"
+        day_start = runtime.get("day_start") or "08:00"
+        day_end = runtime.get("day_end") or "20:00"
+        night_start = runtime.get("night_start") or "20:00"
+        night_end = runtime.get("night_end") or "08:00"
         in_day = _is_minute_in_range(current_minute, day_start, day_end)
         in_night = _is_minute_in_range(current_minute, night_start, night_end)
         if scope == "day":

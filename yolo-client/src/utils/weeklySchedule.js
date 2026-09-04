@@ -9,14 +9,19 @@ export const WEEK_DAYS = [
 ]
 
 export const DAY_PRESET = {
-  startMin: 6 * 60,
-  endMin: 18 * 60
+  startMin: 8 * 60,
+  endMin: 20 * 60
 }
 
 export const NIGHT_PRESET = {
-  startMin: 18 * 60,
-  endMin: 6 * 60
+  startMin: 20 * 60,
+  endMin: 8 * 60
 }
+
+export const NIGHT_DISPLAY_RANGES = [
+  { startMin: 0, endMin: 8 * 60 },
+  { startMin: 20 * 60, endMin: 24 * 60 }
+]
 
 export const FULL_DAY_RANGE = { startMin: 0, endMin: 24 * 60 }
 
@@ -42,12 +47,8 @@ export function createDayPresetSchedule() {
 
 export function createNightPresetSchedule() {
   const schedule = {}
-  const nightRanges = [
-    { startMin: 0, endMin: 6 * 60 },
-    { startMin: 18 * 60, endMin: 24 * 60 }
-  ]
   WEEK_DAYS.forEach(day => {
-    schedule[day.key] = cloneRanges(nightRanges)
+    schedule[day.key] = cloneRanges(NIGHT_DISPLAY_RANGES)
   })
   return schedule
 }

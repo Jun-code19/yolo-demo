@@ -9,7 +9,15 @@ from sqlalchemy.orm import Session, joinedload
 
 from api.auth import get_current_user
 from api.logger import log_action
-from src.database import Device, DeviceGroup, User, get_db
+from src.database import (
+    CrowdAnalysisJob,
+    DetectionConfig,
+    Device,
+    DeviceGroup,
+    User,
+    VlmInspectionJob,
+    get_db,
+)
 
 router = APIRouter(prefix="/device-groups", tags=["设备分组"])
 
@@ -202,11 +210,29 @@ async def delete_device_group(
         raise HTTPException(status_code=404, detail="分组不存在")
 
     name = group.group_name
-    db.query(Device).filter(Device.group_id == group_id).update({Device.group_id: None})
+    # 解除所有外键引用，否则 PostgreSQL 会阻止删除分组
+    db.query(Device).filter(Device.group_id == group_id).update(
+        {Device.group_id: None}, synchronize_session=False
+    )
+    db.query(DetectionConfig).filter(DetectionConfig.group_id == group_id).update(
+        {DetectionConfig.group_id: None, DetectionConfig.enabled: False},
+        synchronize_session=False,
+    )
+    db.query(CrowdAnalysisJob).filter(CrowdAnalysisJob.group_id == group_id).update(
+        {CrowdAnalysisJob.group_id: None, CrowdAnalysisJob.is_active: False},
+        synchronize_session=False,
+    )
+    db.query(VlmInspectionJob).filter(VlmInspectionJob.group_id == group_id).update(
+        {VlmInspectionJob.group_id: None, VlmInspectionJob.is_active: False},
+        synchronize_session=False,
+    )
     db.delete(group)
     db.commit()
     log_action(db, current_user.user_id, "delete_device_group", group_id, f"删除设备组 {name}")
-    return {"status": "success", "message": "分组已删除，组内设备已移至未分组"}
+    return {
+        "status": "success",
+        "message": "分组已删除，组内设备已移至未分组；引用该分组的检测/分析/巡检任务已解除关联并停用",
+    }
 
 
 @router.post("/{group_id}/assign")
