@@ -154,6 +154,7 @@ class DetectionConfig(Base):
     model = relationship("DetectionModel", back_populates="detection_configs")
     # schedules = relationship("DetectionSchedule", back_populates="config", cascade="all, delete-orphan")
     events = relationship("DetectionEvent", back_populates="config", cascade="all, delete-orphan")
+    rules = relationship("DetectionRule", back_populates="config", cascade="all, delete-orphan", foreign_keys="DetectionRule.config_id")
 
 class DetectionEvent(Base):
     __tablename__ = "detection_event"
@@ -183,6 +184,25 @@ class DetectionEvent(Base):
     device = relationship("Device", back_populates="detection_events")
     config = relationship("DetectionConfig", back_populates="events")
     viewer = relationship("User", foreign_keys=[viewed_by])
+    person_gallery_items = relationship("PersonGalleryItem", back_populates="event", cascade="all, delete-orphan")
+
+
+class PersonGalleryItem(Base):
+    """人员搜索图库（POC：检测事件人体抠图 + 特征向量）"""
+    __tablename__ = "person_gallery"
+
+    gallery_id = Column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
+    event_id = Column(String(64), ForeignKey("detection_event.event_id"), nullable=True)
+    device_id = Column(String(64), ForeignKey("device.device_id"), nullable=False)
+    bbox_index = Column(Integer, default=0)
+    confidence = Column(Float)
+    crop_path = Column(Text, nullable=False)
+    bbox = Column(JSONB)
+    embedding = Column(JSONB)
+    created_at = Column(DateTime, default=datetime.now, index=True)
+
+    event = relationship("DetectionEvent", back_populates="person_gallery_items")
+    device = relationship("Device")
 
 class DetectionPerformance(Base):
     __tablename__ = "detection_performance"
@@ -286,7 +306,7 @@ class DetectionRule(Base):
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
-    config = relationship("DetectionConfig", foreign_keys=[config_id])
+    config = relationship("DetectionConfig", back_populates="rules", foreign_keys=[config_id])
     device = relationship("Device", foreign_keys=[device_id])
 
 class CrowdAnalysisJob(Base):

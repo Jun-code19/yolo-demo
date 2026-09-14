@@ -1,6 +1,6 @@
 <script setup>
 import { ref, reactive, onMounted, computed, onBeforeUnmount } from 'vue'
-import { HomeFilled, DataLine, VideoCamera, Fold, Expand, Picture, VideoPlay, Monitor, UserFilled, Connection, QuestionFilled, Tools, Cpu, Bell, SetUp, List, ChatDotRound } from '@element-plus/icons-vue'
+import { HomeFilled, DataLine, VideoCamera, Fold, Expand, Picture, VideoPlay, Monitor, UserFilled, Connection, QuestionFilled, Tools, Cpu, Bell, SetUp, List, ChatDotRound, Search } from '@element-plus/icons-vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import deviceApi from '@/api/device'
@@ -142,6 +142,13 @@ const openDashboard = () => {
               <Bell />
             </el-icon>
             <template #title>检测事件</template>
+          </el-menu-item>
+
+          <el-menu-item index="/detection/person-search">
+            <el-icon>
+              <Search />
+            </el-icon>
+            <template #title>人员搜索</template>
           </el-menu-item>
 
         </el-sub-menu>

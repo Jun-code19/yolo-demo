@@ -125,6 +125,15 @@ const routes = [
     }
   },
   {
+    path: '/detection/person-search',
+    name: 'PersonSearch',
+    component: () => import('../views/detection/PersonSearch.vue'),
+    meta: {
+      requiresAuth: true,
+      title: '人员搜索'
+    }
+  },
+  {
     path: '/detection/smart-config/:configId',
     name: 'SmartConfigSetting',
     component: () => import('../views/detection/SmartConfigSetting.vue'),
@@ -195,6 +204,12 @@ const routes = [
         name: 'VlmInspectionDetail',
         component: () => import('@/views/vlm-inspection/Detail.vue'),
         meta: { title: '巡检详情', requiresAuth: true }
+      },
+      {
+        path: 'prompt-templates',
+        name: 'VlmPromptTemplates',
+        component: () => import('@/views/vlm-inspection/PromptTemplates.vue'),
+        meta: { title: 'Prompt 模板库', requiresAuth: true }
       }
     ]
   },

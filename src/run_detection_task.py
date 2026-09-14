@@ -888,6 +888,13 @@ class DetectionTask:
             db.add(event)
             db.commit()
             logger.info(f"已保存检测事件: {event_id}")
+            try:
+                from src.person_search.runner import person_search_runner
+                person_search_runner.submit(
+                    frame, detections, event_id, self.device_id, current_time
+                )
+            except Exception as embed_exc:
+                logger.debug("人员图库异步入库跳过: %s", embed_exc)
             
         except Exception as e:
             logger.error(f"保存检测事件失败: {e}")

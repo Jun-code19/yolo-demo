@@ -37,6 +37,9 @@
               </el-option>
             </el-select>
             <p v-if="currentPromptDesc" class="field-hint">{{ currentPromptDesc }}</p>
+            <p class="field-hint">
+              <el-link type="primary" @click="goPromptTemplates">管理 Prompt 模板库</el-link>
+            </p>
           </el-form-item>
 
           <el-form-item label="告警标签">
@@ -337,7 +340,7 @@ const resetForm = () => {
 const loadOptions = async () => {
   const [modelsRes, promptsRes, devicesRes, groupsRes] = await Promise.all([
     vlmInspectionApi.getAvailableVlmModels(),
-    vlmInspectionApi.getPrompts(),
+    vlmInspectionApi.getPrompts({ scope: 'vlm_inspection' }),
     vlmInspectionApi.getAvailableDevices(),
     deviceApi.getDeviceGroups()
   ])
@@ -350,6 +353,11 @@ const loadOptions = async () => {
 const goModelManagement = () => {
   emit('update:modelValue', false)
   router.push('/models/vlm')
+}
+
+const goPromptTemplates = () => {
+  emit('update:modelValue', false)
+  router.push('/vlm-inspection/prompt-templates')
 }
 
 const loadJob = async () => {

@@ -62,6 +62,15 @@
   z-index: 999999 !important;
 }
 
+/* el-image 大图预览需高于所有 dialog 遮罩 */
+.el-image-viewer__wrapper {
+  z-index: 1000000 !important;
+}
+
+.el-image-viewer__mask {
+  cursor: zoom-out;
+}
+
 /* 强制覆盖所有Element Plus弹出层 - 最高优先级 */
 body .el-select-dropdown,
 body .el-popper,

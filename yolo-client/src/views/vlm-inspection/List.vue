@@ -3,6 +3,7 @@
     <div class="header">
       <h2>VLM 巡检任务</h2>
       <div class="header-actions">
+        <el-button @click="router.push('/vlm-inspection/prompt-templates')">Prompt 模板库</el-button>
         <el-button type="primary" @click="openCreateDialog">创建任务</el-button>
       </div>
     </div>

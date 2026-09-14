@@ -9,6 +9,12 @@ export default defineConfig({
     host: '0.0.0.0',
     port: 5173,
     proxy: {
+      // 人员搜索走 detect-server（需 torch/cv2）
+      '/api/v1/person-search': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+        secure: false
+      },
       // 数据服务API
       '/api/v1': {
         target: 'http://127.0.0.1:8001',

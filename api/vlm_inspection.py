@@ -18,9 +18,17 @@ from src.vlm_inspection_job_utils import (
     snapshot_group_devices,
 )
 from src.inference_pipeline.providers.qwen_vl import is_api_key_configured
-from src.inference_pipeline.payload_builder import load_prompt_registry
+from src.inference_pipeline.prompt_registry_store import (
+    create_custom_prompt,
+    delete_custom_prompt,
+    export_custom_registry,
+    get_prompt_template,
+    import_custom_registry,
+    list_prompt_templates,
+    update_custom_prompt,
+)
 from src.inference_pipeline.vlm_only_stage import run_vlm_only_inspection
-from api.auth import get_current_user, User
+from api.auth import get_current_user, check_admin_permission, User
 from api.logger import log_action
 
 logger = logging.getLogger(__name__)
@@ -509,20 +517,109 @@ async def get_vlm_credentials_status(model_id: str, db: Session = Depends(get_db
     return {"model_id": model_id, "api_key_configured": is_api_key_configured(model.parameters)}
 
 
+class PromptTemplateBody(BaseModel):
+    name: str
+    description: Optional[str] = ""
+    default_alert_labels: Optional[List[str]] = None
+    system: str
+    user_template: str
+    scopes: Optional[List[str]] = None
+
+
+class PromptTemplateCreate(PromptTemplateBody):
+    prompt_id: str
+
+
+class PromptImportBody(BaseModel):
+    merge: bool = True
+    templates: Dict[str, Dict]
+
+
 @router.get("/prompts")
-async def list_prompts():
-    registry = load_prompt_registry()
-    items = []
-    for prompt_id, meta in registry.items():
-        items.append(
-            {
-                "prompt_id": prompt_id,
-                "name": meta.get("name") or prompt_id,
-                "description": meta.get("description") or "",
-                "default_alert_labels": meta.get("default_alert_labels") or [],
-            }
+async def list_prompts(
+    scope: Optional[str] = None,
+    detail: bool = False,
+    _: User = Depends(get_current_user),
+):
+    """scope: vlm_inspection | detection_pipeline；detail 为 true 时返回 system/user_template。"""
+    return list_prompt_templates(scope=scope, include_detail=detail)
+
+
+@router.get("/prompts/custom/export")
+async def export_prompts_custom(_: User = Depends(check_admin_permission)):
+    return export_custom_registry()
+
+
+@router.post("/prompts/custom/import")
+async def import_prompts_custom(
+    body: PromptImportBody,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(check_admin_permission),
+):
+    try:
+        count = import_custom_registry(body.templates, merge=body.merge)
+        log_action(db, current_user.user_id, "import_prompt_templates", None, f"导入 {count} 条自定义模板")
+        return {"status": "success", "imported": count}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.get("/prompts/{prompt_id}")
+async def get_prompt(prompt_id: str, _: User = Depends(get_current_user)):
+    try:
+        return get_prompt_template(prompt_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Prompt 模板不存在")
+
+
+@router.post("/prompts")
+async def create_prompt(
+    payload: PromptTemplateCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(check_admin_permission),
+):
+    try:
+        item = create_custom_prompt(
+            payload.prompt_id.strip(),
+            payload.model_dump(exclude={"prompt_id"}),
         )
-    return items
+        log_action(db, current_user.user_id, "create_prompt_template", payload.prompt_id, "创建 Prompt 模板")
+        return item
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.put("/prompts/{prompt_id}")
+async def update_prompt(
+    prompt_id: str,
+    payload: PromptTemplateBody,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(check_admin_permission),
+):
+    try:
+        item = update_custom_prompt(prompt_id, payload.model_dump())
+        log_action(db, current_user.user_id, "update_prompt_template", prompt_id, "更新 Prompt 模板")
+        return item
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Prompt 模板不存在")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.delete("/prompts/{prompt_id}")
+async def remove_prompt(
+    prompt_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(check_admin_permission),
+):
+    try:
+        delete_custom_prompt(prompt_id)
+        log_action(db, current_user.user_id, "delete_prompt_template", prompt_id, "删除 Prompt 模板")
+        return {"status": "success"}
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Prompt 模板不存在")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @router.get("/available-vlm-models")

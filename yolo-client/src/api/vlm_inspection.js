@@ -63,8 +63,26 @@ export const vlmInspectionApi = {
   getAvailableVlmModels() {
     return apiClient.get('/available-vlm-models')
   },
-  getPrompts() {
-    return apiClient.get('/prompts')
+  getPrompts(params = {}) {
+    return apiClient.get('/prompts', { params })
+  },
+  getPrompt(promptId) {
+    return apiClient.get(`/prompts/${promptId}`)
+  },
+  createPrompt(data) {
+    return apiClient.post('/prompts', data)
+  },
+  updatePrompt(promptId, data) {
+    return apiClient.put(`/prompts/${promptId}`, data)
+  },
+  deletePrompt(promptId) {
+    return apiClient.delete(`/prompts/${promptId}`)
+  },
+  exportCustomPrompts() {
+    return apiClient.get('/prompts/custom/export')
+  },
+  importCustomPrompts(data) {
+    return apiClient.post('/prompts/custom/import', data)
   },
   bootstrapQwenModel(apiKey) {
     return apiClient.post('/bootstrap-qwen-model', apiKey ? { api_key: apiKey } : {})

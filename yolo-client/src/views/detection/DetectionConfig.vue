@@ -571,6 +571,9 @@
                         />
                       </el-select>
                       <p v-if="currentPipelinePromptDesc" class="field-hint">{{ currentPipelinePromptDesc }}</p>
+                      <p class="field-hint">
+                        <el-link type="primary" @click="router.push('/vlm-inspection/prompt-templates')">管理 Prompt 模板库</el-link>
+                      </p>
                     </el-form-item>
                   </div>
 
@@ -1541,7 +1544,7 @@ export default defineComponent({
       try {
         const [modelsRes, promptsRes] = await Promise.all([
           vlmInspectionApi.getAvailableVlmModels(),
-          vlmInspectionApi.getPrompts()
+          vlmInspectionApi.getPrompts({ scope: 'detection_pipeline' })
         ]);
         vlmModels.value = modelsRes.data || [];
         vlmPrompts.value = promptsRes.data || [];

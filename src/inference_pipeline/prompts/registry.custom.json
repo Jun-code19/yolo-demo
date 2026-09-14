@@ -1,0 +1,16 @@
+{
+  "fight_fall_v1": {
+    "name": "打架跌倒场景",
+    "description": "检测打架、跌倒等常见安全隐患",
+    "default_alert_labels": [
+      "fight",
+      "fall"
+    ],
+    "system": "你是视频监控安全巡检助手。只输出 JSON，不要 markdown。必须根据实际画面填写，禁止照抄 Prompt 示例中的 label 或数值。",
+    "user_template": "请分析这张监控截图，检查是否存在以下问题：{alert_labels}。\n\n规则：\n- 命中关注告警项时，必须在 findings 中写入对应 label，confidence 填 0.85~1.0\n- 未发现问题时 findings 必须为 []，needs_alert 为 false\n- 禁止照抄下方格式示例\n\n输出 JSON 格式（仅为结构说明，非答案）：\n{\n  \"findings\": [\n    {\"label\": \"<仅当命中关注项时填写>\", \"confidence\": 0.9, \"description\": \"<实际描述>\", \"severity\": \"info|low|medium|high|critical\"}\n  ],\n  \"summary\": \"<一句话总结；若命中可写「命中关注项：xxx」>\",\n  \"needs_alert\": false,\n  \"alert_labels\": []\n}",
+    "scopes": [
+      "vlm_inspection",
+      "detection_pipeline"
+    ]
+  }
+}

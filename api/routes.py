@@ -2,13 +2,14 @@ from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File,
 from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
-from src.database import get_db, Device, DeviceGroup, User, SysLog, DetectionModel, DetectionConfig, DetectionEvent, DetectionPerformance, SaveMode, EventStatus, DetectionFrequency, DetectionLog, CrowdAnalysisJob,CrowdAnalysisResult, DataPushConfig, DataPushLog, EdgeServer,ExternalEvent,ListenerConfig,SmartEvent, SmartScheme, VlmInspectionJob, VlmInspectionFinding, AlertRule, CompositeAlert
+from src.database import get_db, Device, DeviceGroup, User, SysLog, DetectionModel, DetectionConfig, DetectionEvent, DetectionPerformance, SaveMode, EventStatus, DetectionFrequency, DetectionLog, CrowdAnalysisJob,CrowdAnalysisResult, DataPushConfig, DataPushLog, EdgeServer,ExternalEvent,ListenerConfig,SmartEvent, SmartScheme, VlmInspectionJob, VlmInspectionFinding, AlertRule, CompositeAlert, DetectionRule
 from src.rtsp_url import build_rtsp_url, RTSP_URL_PRESETS
 from pydantic import BaseModel, Field, validator
 from fastapi.security import OAuth2PasswordRequestForm
 from api.auth import authenticate_user, create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES, get_current_user, check_admin_permission, get_password_hash, verify_password
 from api.logger import log_action
 from src.env_loader import load_env_file, get_detect_server_url
+from src.person_search.gallery_cleanup import delete_gallery_for_events
 
 load_env_file()
 from passlib.context import CryptContext
@@ -269,6 +270,42 @@ def update_device(device_id: str, device: DeviceUpdate, db: Session = Depends(ge
         db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
 
+def _delete_detection_config_with_relations(db: Session, config: DetectionConfig) -> None:
+    """删除检测配置及其关联数据（不提交事务）"""
+    config_id = config.config_id
+
+    detection_rules = db.query(DetectionRule).filter(DetectionRule.config_id == config_id).all()
+    for rule in detection_rules:
+        db.delete(rule)
+
+    data_push_configs = db.query(DataPushConfig).filter(DataPushConfig.config_id == config_id).all()
+    for push_config in data_push_configs:
+        db.delete(push_config)
+
+    detection_logs = db.query(DetectionLog).filter(DetectionLog.config_id == config_id).all()
+    for log in detection_logs:
+        db.delete(log)
+
+    performance_records = db.query(DetectionPerformance).filter(DetectionPerformance.config_id == config_id).all()
+    for perf in performance_records:
+        db.delete(perf)
+
+    events = db.query(DetectionEvent).filter(DetectionEvent.config_id == config_id).all()
+    if events:
+        delete_gallery_for_events([event.event_id for event in events], db=db)
+    for event in events:
+        try:
+            if event.thumbnail_path and os.path.exists(event.thumbnail_path):
+                os.remove(event.thumbnail_path)
+            if event.snippet_path and os.path.exists(event.snippet_path):
+                os.remove(event.snippet_path)
+        except OSError as e:
+            print(f"删除事件文件失败: {e}")
+        db.delete(event)
+
+    db.delete(config)
+
+
 def _delete_device_with_relations(db: Session, device: Device) -> None:
     """删除设备及其关联数据（不提交事务）"""
     device_id = device.device_id
@@ -276,32 +313,15 @@ def _delete_device_with_relations(db: Session, device: Device) -> None:
 
     configs = db.query(DetectionConfig).filter(DetectionConfig.device_id == device_id).all()
     for config in configs:
-        data_push_configs = db.query(DataPushConfig).filter(DataPushConfig.config_id == config.config_id).all()
-        for push_config in data_push_configs:
-            db.delete(push_config)
+        _delete_detection_config_with_relations(db, config)
 
-        detection_logs = db.query(DetectionLog).filter(DetectionLog.config_id == config.config_id).all()
-        for log in detection_logs:
-            db.delete(log)
-
-        performance_records = db.query(DetectionPerformance).filter(DetectionPerformance.config_id == config.config_id).all()
-        for perf in performance_records:
-            db.delete(perf)
-
-        events = db.query(DetectionEvent).filter(DetectionEvent.config_id == config.config_id).all()
-        for event in events:
-            try:
-                if event.thumbnail_path and os.path.exists(event.thumbnail_path):
-                    os.remove(event.thumbnail_path)
-                if event.snippet_path and os.path.exists(event.snippet_path):
-                    os.remove(event.snippet_path)
-            except OSError as e:
-                print(f"删除事件文件失败: {e}")
-            db.delete(event)
-
-        db.delete(config)
+    device_rules = db.query(DetectionRule).filter(DetectionRule.device_id == device_id).all()
+    for rule in device_rules:
+        db.delete(rule)
 
     device_events = db.query(DetectionEvent).filter(DetectionEvent.device_id == device_id).all()
+    if device_events:
+        delete_gallery_for_events([event.event_id for event in device_events], db=db)
     for event in device_events:
         try:
             if event.thumbnail_path and os.path.exists(event.thumbnail_path):
@@ -929,42 +949,8 @@ def delete_model(models_id: str, db: Session = Depends(get_db),
         # 检查是否有检测配置使用此模型
         configs_using_model = db.query(DetectionConfig).filter(DetectionConfig.models_id == models_id).all()
         if configs_using_model:
-            # 删除使用此模型的检测配置
             for config in configs_using_model:
-                # 删除配置相关的数据推送配置（可选关联）
-                data_push_configs = db.query(DataPushConfig).filter(DataPushConfig.config_id == config.config_id).all()
-                for push_config in data_push_configs:
-                    db.delete(push_config)
-                
-                # 删除配置相关的检测日志
-                detection_logs = db.query(DetectionLog).filter(DetectionLog.config_id == config.config_id).all()
-                for log in detection_logs:
-                    db.delete(log)
-                
-                # 删除配置相关的性能记录
-                performance_records = db.query(DetectionPerformance).filter(DetectionPerformance.config_id == config.config_id).all()
-                for perf in performance_records:
-                    db.delete(perf)
-                
-                # 删除配置相关的检测事件
-                events = db.query(DetectionEvent).filter(DetectionEvent.config_id == config.config_id).all()
-                for event in events:
-                    # 删除事件关联的图片文件
-                    try:
-                        if event.thumbnail_path and os.path.exists(event.thumbnail_path):
-                            os.remove(event.thumbnail_path)
-                        if event.snippet_path and os.path.exists(event.snippet_path):
-                            os.remove(event.snippet_path)
-                    except OSError as e:
-                        print(f"删除事件文件失败: {e}")
-                    
-                    db.delete(event)
-                
-                # 删除检测计划（DetectionSchedule - 通过级联删除自动处理）
-                # 注意：DetectionSchedule在数据库模型中配置了cascade="all, delete-orphan"，所以会自动删除
-                
-                # 删除检测配置
-                db.delete(config)
+                _delete_detection_config_with_relations(db, config)
         
         # 删除模型文件
         try:
@@ -1577,40 +1563,7 @@ async def delete_detection_config(
         raise HTTPException(status_code=404, detail="检测配置不存在")
     
     try:
-        # 删除相关的数据推送配置（可选关联）
-        data_push_configs = db.query(DataPushConfig).filter(DataPushConfig.config_id == config_id).all()
-        for push_config in data_push_configs:
-            db.delete(push_config)
-        
-        # 删除相关的检测日志
-        detection_logs = db.query(DetectionLog).filter(DetectionLog.config_id == config_id).all()
-        for log in detection_logs:
-            db.delete(log)
-        
-        # 删除相关的性能记录
-        performance_records = db.query(DetectionPerformance).filter(DetectionPerformance.config_id == config_id).all()
-        for perf in performance_records:
-            db.delete(perf)
-        
-        # 删除相关的检测事件
-        events = db.query(DetectionEvent).filter(DetectionEvent.config_id == config_id).all()
-        for event in events:
-            # 删除事件关联的图片文件
-            try:
-                if event.thumbnail_path and os.path.exists(event.thumbnail_path):
-                    os.remove(event.thumbnail_path)
-                if event.snippet_path and os.path.exists(event.snippet_path):
-                    os.remove(event.snippet_path)
-            except OSError as e:
-                print(f"删除事件文件失败: {e}")
-            
-            db.delete(event)
-        
-        # 删除检测计划（DetectionSchedule - 通过级联删除自动处理）
-        # 注意：DetectionSchedule在数据库模型中配置了cascade="all, delete-orphan"，所以会自动删除
-        
-        # 删除检测配置
-        db.delete(db_config)
+        _delete_detection_config_with_relations(db, db_config)
         db.commit()
         log_action(db, current_user.user_id, 'delete_detection_config', config_id, f"Deleted detection config {config_id}")
         return {"message": "检测配置已成功删除"}
@@ -1958,6 +1911,8 @@ async def batch_delete_detection_events(
         
         if not events:
             raise HTTPException(status_code=404, detail="未找到要删除的事件")
+
+        delete_gallery_for_events([event.event_id for event in events])
         
         deleted_count = 0
         all_files_deleted = []
@@ -2145,6 +2100,9 @@ async def delete_detection_event(
             except OSError as e:
                 files_failed.append(f"视频片段: {str(e)}")
         
+        # 删除人员图库关联记录
+        delete_gallery_for_events([event_id])
+
         # 删除数据库记录
         db.delete(db_event)
         db.commit()

@@ -926,6 +926,34 @@ async def lifespan(app: FastAPI):
         await detection_server.start_global_cleanup_task()
     except Exception as e:
         logger.error(f"启动全局清理任务失败: {e}")
+
+    # 9. 后台预热人员搜索索引与 ReID（仅 detect-server 有 torch/cv2）
+    try:
+        import threading
+
+        def _warm_person_search_index():
+            try:
+                from src.person_search.embedder import get_person_embedder
+                from src.person_search.service import _load_search_index
+
+                get_person_embedder()
+                db = SessionLocal()
+                try:
+                    since = datetime.now() - timedelta(days=7)
+                    _load_search_index(db, since=since, device_id=None, search_limit=5000)
+                    logger.info("人员搜索索引预热完成")
+                finally:
+                    db.close()
+            except Exception as exc:
+                logger.warning("人员搜索预热跳过: %s", exc)
+
+        threading.Thread(
+            target=_warm_person_search_index,
+            daemon=True,
+            name="person-search-warmup",
+        ).start()
+    except Exception as e:
+        logger.warning("人员搜索预热线程未启动: %s", e)
     
     yield
     
@@ -1312,6 +1340,10 @@ from api.smart_scheme_routes import router as smart_scheme_router
 from api.device_monitor_routes import router as device_monitor_routes_router
 app.include_router(smart_scheme_router, prefix="/api/v2")
 app.include_router(device_monitor_routes_router, prefix="/api/v2")
+
+# 人员搜索（ReID/torch/cv2）挂在 detect-server，路径仍为 /api/v1/person-search
+from api.person_search_routes import router as person_search_router
+app.include_router(person_search_router, prefix="/api/v1")
 
 # 主函数
 if __name__ == "__main__":

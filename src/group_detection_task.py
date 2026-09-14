@@ -368,6 +368,13 @@ class GroupDetectionTask:
             db.add(event)
             db.commit()
             logger.info("分组检测已保存事件: %s device=%s", event_id, device_id)
+            try:
+                from src.person_search.runner import person_search_runner
+                person_search_runner.submit(
+                    frame, detections, event_id, device_id, current_time
+                )
+            except Exception as embed_exc:
+                logger.debug("人员图库异步入库跳过: %s", embed_exc)
             self._push_group_detection_data(frame, detections, device_id)
         except Exception as exc:
             logger.error("分组检测保存事件失败: %s", exc)
