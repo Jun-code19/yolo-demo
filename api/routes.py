@@ -1664,6 +1664,211 @@ async def get_detection_events(
         "total": total_count
     }
 
+
+_DETECTION_EVENT_TYPE_LABELS = {
+    "object_detection": "目标检测",
+    "yolo_verify": "VLM 复检",
+    "yolo_analyze": "VLM 行为分析",
+    "smart_behavior": "智能行为",
+    "smart_person": "人员场景",
+    "smart_counting": "智能人数统计",
+    "segmentation": "图像分割",
+    "keypoint": "关键点检测",
+    "pose": "姿态估计",
+    "face": "人脸识别",
+    "other": "其他类型",
+}
+
+_DETECTION_EVENT_STATUS_LABELS = {
+    "new": "新事件",
+    "viewed": "已查看",
+    "flagged": "已标记",
+    "archived": "已归档",
+}
+
+
+def _build_detection_events_export_query(
+    db: Session,
+    *,
+    device_id: Optional[str] = None,
+    config_id: Optional[str] = None,
+    event_type: Optional[str] = None,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+    status: Optional[str] = None,
+    min_confidence: Optional[float] = None,
+    event_ids: Optional[List[str]] = None,
+):
+    query = db.query(DetectionEvent).outerjoin(
+        DetectionConfig, DetectionEvent.config_id == DetectionConfig.config_id
+    )
+    id_list = [x for x in (event_ids or []) if x]
+    if id_list:
+        query = query.filter(DetectionEvent.event_id.in_(id_list))
+        return query, id_list
+
+    if device_id:
+        query = query.filter(DetectionEvent.device_id == device_id)
+    if config_id:
+        query = query.filter(DetectionEvent.config_id == config_id)
+    if event_type:
+        query = query.filter(DetectionEvent.event_type == event_type)
+    if start_date:
+        query = query.filter(DetectionEvent.created_at >= start_date)
+    if end_date:
+        query = query.filter(DetectionEvent.created_at <= end_date)
+    if status:
+        try:
+            status_enum = getattr(EventStatus, status)
+            query = query.filter(DetectionEvent.status == status_enum)
+        except AttributeError:
+            raise HTTPException(status_code=400, detail="无效的状态值")
+    if min_confidence is not None:
+        query = query.filter(DetectionEvent.confidence >= min_confidence)
+    return query, []
+
+
+def _export_detection_events_excel(
+    db: Session,
+    current_user: User,
+    query,
+    id_list: List[str],
+    limit: int,
+):
+    events = query.order_by(desc(DetectionEvent.created_at)).limit(limit).all()
+    if not events:
+        raise HTTPException(status_code=404, detail="没有可导出的检测事件")
+
+    device_ids = {e.device_id for e in events if e.device_id}
+    device_name_map = {}
+    if device_ids:
+        for device in db.query(Device).filter(Device.device_id.in_(device_ids)).all():
+            device_name_map[device.device_id] = device.device_name
+
+    rows = []
+    for event in events:
+        status_raw = event.status.value if hasattr(event.status, "value") else event.status
+        save_mode = ""
+        if event.config is not None and event.config.save_mode is not None:
+            save_mode = (
+                event.config.save_mode.value
+                if hasattr(event.config.save_mode, "value")
+                else event.config.save_mode
+            )
+        meta = event.meta_data
+        if isinstance(meta, str):
+            try:
+                meta = json.loads(meta)
+            except (json.JSONDecodeError, TypeError):
+                meta = {}
+        if not isinstance(meta, dict):
+            meta = {}
+        description = meta.get("event_description") or ""
+        target_count = 0
+        targets = meta.get("detection_targets") or meta.get("targets") or []
+        if isinstance(targets, list):
+            target_count = len(targets)
+
+        rows.append({
+            "事件ID": event.event_id,
+            "设备ID": event.device_id or "",
+            "设备名称": device_name_map.get(event.device_id, ""),
+            "配置ID": event.config_id or "",
+            "事件类型": _DETECTION_EVENT_TYPE_LABELS.get(event.event_type, event.event_type or ""),
+            "置信度(%)": round(float(event.confidence or 0) * 100, 2),
+            "状态": _DETECTION_EVENT_STATUS_LABELS.get(status_raw, status_raw or ""),
+            "事件时间": event.timestamp.strftime("%Y-%m-%d %H:%M:%S") if event.timestamp else "",
+            "创建时间": event.created_at.strftime("%Y-%m-%d %H:%M:%S") if event.created_at else "",
+            "位置": event.location or "",
+            "保存模式": save_mode or "",
+            "目标数量": target_count,
+            "事件描述": description,
+            "查看者": event.viewed_by or "",
+            "查看时间": event.viewed_at.strftime("%Y-%m-%d %H:%M:%S") if event.viewed_at else "",
+            "备注": event.notes or "",
+        })
+
+    df = pd.DataFrame(rows)
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+        df.to_excel(writer, sheet_name="检测事件", index=False)
+        worksheet = writer.sheets["检测事件"]
+        for i, col in enumerate(df.columns):
+            column_len = max(df[col].astype(str).map(len).max(), len(str(col))) + 2
+            worksheet.set_column(i, i, min(column_len, 48))
+    output.seek(0)
+
+    scope = f"选中{len(id_list)}条" if id_list else f"筛选结果{len(rows)}条"
+    log_action(
+        db,
+        current_user.user_id,
+        "export_detection_events",
+        "system",
+        f"用户 {current_user.username} 导出检测事件，{scope}",
+    )
+    current_date = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": f"attachment; filename=detection_events_{current_date}.xlsx"
+        },
+    )
+
+
+@router.get("/detection/events/export", tags=["检测事件"])
+async def export_detection_events(
+    device_id: Optional[str] = None,
+    config_id: Optional[str] = None,
+    event_type: Optional[str] = None,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+    status: Optional[str] = None,
+    min_confidence: Optional[float] = None,
+    limit: int = Query(5000, ge=1, le=20000, description="最大导出行数"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """按筛选条件导出检测事件 Excel。"""
+    try:
+        query, id_list = _build_detection_events_export_query(
+            db,
+            device_id=device_id,
+            config_id=config_id,
+            event_type=event_type,
+            start_date=start_date,
+            end_date=end_date,
+            status=status,
+            min_confidence=min_confidence,
+        )
+        return _export_detection_events_excel(db, current_user, query, id_list, limit)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"导出检测事件失败: {str(e)}")
+
+
+@router.post("/detection/events/export", tags=["检测事件"])
+async def export_detection_events_by_ids(
+    request_data: Dict[str, Any],
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """按选中事件 ID 导出 Excel（避免大量 ID 超出 GET 长度限制）。"""
+    try:
+        event_ids = request_data.get("event_ids") or []
+        if not isinstance(event_ids, list) or not event_ids:
+            raise HTTPException(status_code=400, detail="请提供要导出的事件ID列表")
+        limit = int(request_data.get("limit") or len(event_ids))
+        limit = max(1, min(limit, 20000))
+        query, id_list = _build_detection_events_export_query(db, event_ids=event_ids)
+        return _export_detection_events_excel(db, current_user, query, id_list, limit)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"导出检测事件失败: {str(e)}")
+
+
 # 获取单个检测事件详情
 @router.get("/detection/events/{event_id}", response_model=DetectionEventResponse, tags=["检测事件"])
 async def get_detection_event(

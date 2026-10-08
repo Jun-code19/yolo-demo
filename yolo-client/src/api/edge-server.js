@@ -3,6 +3,8 @@ import { ElMessage } from 'element-plus';
 
 export const PLATFORM_TYPES = {
   maisi: { label: '迈思智能盒子', defaultPort: 80 },
+  // 裸机 nginx 入口为 80（反代本机 8080）；直连 serve_unified 时再改成 8080
+  edgebox: { label: 'Edge AI Box', defaultPort: 80 },
   nodered: { label: 'Node-RED', defaultPort: 1880 },
   custom: { label: '自定义节点', defaultPort: 80 },
 };
@@ -17,7 +19,11 @@ export function getDefaultPort(platformType) {
 
 export function buildBaseUrl(server) {
   const host = server.ip_address;
-  const port = server.port ?? getDefaultPort(server.platform_type);
+  const port = Number(server.port ?? getDefaultPort(server.platform_type));
+  // 标准 HTTP 80 不写端口，避免跳到 :80 的怪异地址
+  if (!port || port === 80) {
+    return `http://${host}`;
+  }
   return `http://${host}:${port}`;
 }
 
@@ -39,11 +45,18 @@ export function getHealthCheckUrl(server) {
   if (server.platform_type === 'maisi' || !server.platform_type) {
     return null;
   }
+  if (server.platform_type === 'edgebox') {
+    return `${buildBaseUrl(server)}/api/v1/system/status?detail=1`;
+  }
   return buildBaseUrl(server);
 }
 
 export function isMaisiPlatform(server) {
   return !server?.platform_type || server.platform_type === 'maisi';
+}
+
+export function isEdgeBoxPlatform(server) {
+  return server?.platform_type === 'edgebox';
 }
 
 // 边缘服务器API服务类（迈思智能盒子专用）
@@ -177,6 +190,31 @@ async function testGenericConnection(url) {
   }
 }
 
+/** 探活 Edge AI Box：解析无鉴权 /api/v1/system/status?detail=1 */
+async function probeEdgeBoxStatus(url) {
+  try {
+    let probeUrl = url;
+    try {
+      const u = new URL(url);
+      if (!u.searchParams.has('detail')) u.searchParams.set('detail', '1');
+      probeUrl = u.toString();
+    } catch (_) {
+      probeUrl = url.includes('?') ? `${url}&detail=1` : `${url}?detail=1`;
+    }
+    const response = await axios.get(probeUrl, { timeout: 12000, validateStatus: () => true });
+    if (response.status !== 200) {
+      return { success: false, status: response.status, error: `HTTP ${response.status}` };
+    }
+    const data = response.data;
+    if (!data || typeof data !== 'object' || !data.system) {
+      return { success: false, error: '无效的 status 响应（缺少 system 字段）' };
+    }
+    return { success: true, data };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
 // 后端API客户端
 const backendAPI = axios.create({
   baseURL: '/api/v1',
@@ -294,6 +332,9 @@ export default {
       const serverAPI = this.createServerAPI(server.ip_address, server.port);
       return serverAPI.testConnection();
     }
+    if (isEdgeBoxPlatform(server)) {
+      return probeEdgeBoxStatus(getHealthCheckUrl(server));
+    }
     const url = getHealthCheckUrl(server);
     return testGenericConnection(url);
   },
@@ -321,6 +362,36 @@ export default {
 
         await this.updateServerStatus(serverId, { status: 'offline' });
         return { success: false, status: 'offline', error: connectionResult.error };
+      }
+
+      if (isEdgeBoxPlatform(server)) {
+        const url = getHealthCheckUrl(server);
+        const probe = await probeEdgeBoxStatus(url);
+        if (probe.success) {
+          const payload = probe.data;
+          await this.updateServerStatus(serverId, {
+            status: 'online',
+            system_info: payload,
+            version_info: {
+              app_name: payload.system?.app_name,
+              app_version: payload.system?.app_version,
+              edge_inference: payload.system?.edge_inference,
+              hostname: payload.system?.hostname
+            },
+            device_info: {
+              npu: payload.npu || null,
+              detection: payload.detection || null,
+              models: payload.models || null
+            }
+          });
+          return { success: true, status: 'online', data: payload };
+        }
+        await this.updateServerStatus(serverId, { status: 'offline' });
+        return {
+          success: false,
+          status: 'offline',
+          error: probe.error || `HTTP ${probe.status}`
+        };
       }
 
       const url = getHealthCheckUrl(server);

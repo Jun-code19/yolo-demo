@@ -4,7 +4,7 @@
     <div class="page-header">
       <div class="header-left">
         <h2>边缘节点管理</h2>
-        <p class="header-desc">注册并监控迈思盒子、Node-RED 及其他边缘工作流节点</p>
+        <p class="header-desc">注册并监控 Edge AI Box、迈思盒子、Node-RED 及其他边缘节点</p>
       </div>
       <div class="header-actions">
         <el-button 
@@ -12,11 +12,11 @@
           size="default" 
           @click="refreshAllServers"
           :loading="loading"
-          icon="Refresh"
+          :icon="Refresh"
         >
           刷新状态
         </el-button>
-        <el-button type="primary" size="default" @click="showAddDialog" icon="Plus">
+        <el-button type="primary" size="default" @click="showAddDialog" :icon="Plus">
           添加节点
         </el-button>
       </div>
@@ -41,7 +41,6 @@
             <el-tag 
               :type="getStatusType(server.status)" 
               size="small"
-              :loading="server.status === 'checking'"
             >
               {{ getStatusText(server.status) }}
             </el-tag>
@@ -51,7 +50,7 @@
         <div class="server-info">
           <div class="info-item">
             <span class="label">地址:</span>
-            <span class="value">{{ server.ip_address }}:{{ server.port }}</span>
+            <span class="value">{{ formatServerHost(server) }}</span>
           </div>
           <div class="info-item" v-if="server.description">
             <span class="label">描述:</span>
@@ -181,18 +180,18 @@
         </el-form-item>
         <el-form-item label="端口" prop="port">
           <el-input-number v-model="form.port" :min="1" :max="65535" style="width: 100%" />
+          <div v-if="form.platform_type === 'edgebox'" class="form-hint">
+            裸机访问一般为 80（nginx）；若直连 serve_unified 则填 8080
+          </div>
         </el-form-item>
         <el-form-item v-if="form.platform_type !== 'maisi'" label="管理地址">
-          <el-input v-model="form.admin_url" placeholder="留空则使用 http://主机:端口" />
+          <el-input v-model="form.admin_url" :placeholder="adminUrlPlaceholder" />
         </el-form-item>
-        <el-form-item v-if="form.platform_type !== 'maisi'" label="Dashboard">
-          <el-input
-            v-model="form.dashboard_url"
-            :placeholder="form.platform_type === 'nodered' ? '留空则使用 http://主机:端口/ui' : '可选 Dashboard 地址'"
-          />
+        <el-form-item v-if="form.platform_type !== 'maisi' && form.platform_type !== 'edgebox'" label="Dashboard">
+          <el-input v-model="form.dashboard_url" :placeholder="dashboardUrlPlaceholder" />
         </el-form-item>
         <el-form-item v-if="form.platform_type !== 'maisi'" label="探活地址">
-          <el-input v-model="form.health_check_url" placeholder="留空则探测 http://主机:端口" />
+          <el-input v-model="form.health_check_url" :placeholder="healthCheckUrlPlaceholder" />
         </el-form-item>
         <el-form-item label="描述">
           <el-input 
@@ -266,6 +265,22 @@ const form = reactive({
 })
 
 const formRef = ref()
+
+const adminUrlPlaceholder = computed(() => (
+  form.platform_type === 'edgebox'
+    ? '留空则打开 http://主机（80 可省略端口）'
+    : '留空则使用 http://主机:端口'
+))
+const dashboardUrlPlaceholder = computed(() => (
+  form.platform_type === 'nodered'
+    ? '留空则使用 http://主机:端口/ui'
+    : '可选 Dashboard 地址'
+))
+const healthCheckUrlPlaceholder = computed(() => (
+  form.platform_type === 'edgebox'
+    ? '留空则探测 http://主机/api/v1/system/status?detail=1'
+    : '留空则探测 http://主机:端口'
+))
 
 // 表单验证规则
 const formRules = {
@@ -346,16 +361,6 @@ const getStatusText = (status) => {
 const formatTime = (timeStr) => {
   if (!timeStr) return '从未'
   return new Date(timeStr).toLocaleString()
-}
-
-const formatMemory = (memory) => {
-  if (!memory) return 'N/A'
-  if (typeof memory === 'object' && memory.total) {
-    const total = Math.round(memory.total / 1024 / 1024) // Convert to MB
-    const used = Math.round((memory.total - memory.available) / 1024 / 1024)
-    return `${used}/${total}MB`
-  }
-  return 'N/A'
 }
 
 const showAddDialog = () => {
@@ -470,6 +475,12 @@ const openServerDashboard = (server) => {
   })
 }
 
+const formatServerHost = (server) => {
+  const port = Number(server.port)
+  if (!port || port === 80) return server.ip_address
+  return `${server.ip_address}:${port}`
+}
+
 const openAdminUrl = (server) => {
   window.open(getAdminUrl(server), '_blank')
 }
@@ -539,6 +550,13 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.form-hint {
+  margin-top: 6px;
+  color: #909399;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .edge-servers-container {
   padding: 24px;
   background-color: #f5f7fa;

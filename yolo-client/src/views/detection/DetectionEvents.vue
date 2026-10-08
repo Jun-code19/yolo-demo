@@ -12,12 +12,25 @@
           </el-icon>
           刷新
         </el-button>
-        <el-button @click="exportEvents">
-          <el-icon>
-            <Download />
-          </el-icon>
-          导出
-        </el-button>
+        <el-dropdown class="export-dropdown" trigger="click" @command="handleExportCommand">
+          <el-button :loading="exporting">
+            <el-icon>
+              <Download />
+            </el-icon>
+            导出
+            <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+          </el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="selected" :disabled="selectedEvents.length === 0">
+                导出选中（{{ selectedEvents.length }}）
+              </el-dropdown-item>
+              <el-dropdown-item command="filtered" divided>
+                导出当前筛选结果
+              </el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
       </div>
     </div>
 
@@ -128,42 +141,46 @@
     </el-card>
     <el-card class="main-card">
       <!-- 批量操作工具栏 -->
-      <div class="batch-operations" v-if="selectedEvents.length > 0">
-        <!-- <el-space> -->
-        <span style="font-size: small;margin-right: 12px;">已选择 {{ selectedEvents.length }} 个事件</span>
-        <el-button type="primary" size="small" @click="batchUpdateStatus('viewed')">
-          <el-icon>
-            <View />
-          </el-icon>
-          批量标记已查看
-        </el-button>
-        <el-button type="warning" size="small" @click="batchUpdateStatus('flagged')">
-          <el-icon>
-            <Flag />
-          </el-icon>
-          批量标记重要
-        </el-button>
-        <el-button type="info" size="small" @click="batchUpdateStatus('archived')">
-          <el-icon>
-            <FolderOpened />
-          </el-icon>
-          批量归档
-        </el-button>
-        <el-button type="danger" size="small" @click="batchDeleteEvents">
-          <el-icon>
-            <Delete />
-          </el-icon>
-          批量删除
-        </el-button>
-        <el-button size="small" @click="clearSelection">
-          清除选择
-        </el-button>
-        <!-- </el-space> -->
-      </div>
+      <transition name="batch-bar">
+        <div class="batch-operations" v-if="selectedEvents.length > 0">
+          <div class="batch-left">
+            <el-tag type="primary" effect="light" round class="batch-count-tag">
+              已选 {{ selectedEvents.length }}
+            </el-tag>
+            <el-button link type="primary" @click="clearSelection">取消选择</el-button>
+          </div>
+          <div class="batch-actions">
+            <div class="batch-group">
+              <span class="batch-group-label">状态</span>
+              <el-button-group>
+                <el-button size="small" @click="batchUpdateStatus('viewed')">
+                  <el-icon><View /></el-icon>
+                  已查看
+                </el-button>
+                <el-button size="small" @click="batchUpdateStatus('flagged')">
+                  <el-icon><Flag /></el-icon>
+                  标记重要
+                </el-button>
+                <el-button size="small" @click="batchUpdateStatus('archived')">
+                  <el-icon><FolderOpened /></el-icon>
+                  归档
+                </el-button>
+              </el-button-group>
+            </div>
+            <el-divider direction="vertical" class="batch-divider" />
+            <div class="batch-group">
+              <el-button type="danger" size="small" plain @click="batchDeleteEvents">
+                <el-icon><Delete /></el-icon>
+                删除
+              </el-button>
+            </div>
+          </div>
+        </div>
+      </transition>
       <!-- 事件列表 -->
-      <el-table :data="eventList" :loading="loading" row-key="event_id" style="width: 100%"
+      <el-table ref="eventTableRef" :data="eventList" :loading="loading" row-key="event_id" style="width: 100%"
         @selection-change="handleSelectionChange">
-        <el-table-column type="selection" width="55" />
+        <el-table-column type="selection" width="55" reserve-selection />
         <el-table-column prop="device_id" label="设备" min-width="140">
           <template #default="{ row }">
             <div>
@@ -572,6 +589,8 @@ export default defineComponent({
   setup() {
     // 数据加载状态
     const loading = ref(false);
+    const exporting = ref(false);
+    const eventTableRef = ref(null);
 
     // 表格数据
     const eventList = ref([]);
@@ -590,7 +609,7 @@ export default defineComponent({
       { label: '其他类型', value: 'other' }
     ]);
 
-    // 批量操作相关
+    // 批量操作相关（跨页保留勾选）
     const selectedEvents = ref([]);
 
     // 分页
@@ -817,6 +836,7 @@ export default defineComponent({
 
     const handleSearch = () => {
       page.value = 1;
+      clearSelection();
       loadEvents();
     };
 
@@ -831,7 +851,52 @@ export default defineComponent({
       });
 
       page.value = 1;
+      clearSelection();
       loadEvents();
+    };
+
+    const buildFilterExportParams = () => {
+      const params = { limit: 5000 };
+      if (filterForm.device_id) params.device_id = filterForm.device_id;
+      if (filterForm.event_type) params.event_type = filterForm.event_type;
+      if (filterForm.status) params.status = filterForm.status;
+      if (filterForm.min_confidence) params.min_confidence = filterForm.min_confidence;
+      if (filterForm.dateRange && filterForm.dateRange.length === 2) {
+        const startDate = new Date(filterForm.dateRange[0]);
+        const endDate = new Date(filterForm.dateRange[1]);
+        startDate.setHours(0, 0, 0, 0);
+        startDate.setHours(startDate.getHours() - startDate.getTimezoneOffset() / 60);
+        endDate.setHours(23, 59, 59, 999);
+        endDate.setHours(endDate.getHours() - endDate.getTimezoneOffset() / 60);
+        params.start_date = startDate.toISOString();
+        params.end_date = endDate.toISOString();
+      }
+      return params;
+    };
+
+    const downloadExportBlob = (blob, filename) => {
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    };
+
+    const parseExportError = async (error) => {
+      const data = error?.response?.data;
+      if (data instanceof Blob) {
+        try {
+          const text = await data.text();
+          const json = JSON.parse(text);
+          return json.detail || json.message || text;
+        } catch (_e) {
+          return error.message || '导出失败';
+        }
+      }
+      return error?.response?.data?.detail || error.message || '导出失败';
     };
 
     // 切换页码
@@ -1032,9 +1097,43 @@ export default defineComponent({
       event.target.style.opacity = '0.5';
     };
 
-    // 导出事件
-    const exportEvents = () => {
-      ElMessage.info('导出功能开发中...');
+    const handleExportCommand = (command) => {
+      exportEvents(command);
+    };
+
+    // 导出事件：selected=选中项；filtered=当前筛选（默认）
+    const exportEvents = async (mode = 'filtered') => {
+      if (exporting.value) return;
+      try {
+        exporting.value = true;
+        let filenamePrefix = '检测事件_筛选';
+        let response;
+        if (mode === 'selected') {
+          if (selectedEvents.value.length === 0) {
+            ElMessage.warning('请先勾选要导出的事件');
+            return;
+          }
+          filenamePrefix = `检测事件_选中${selectedEvents.value.length}条`;
+          response = await detectionEventApi.exportEventsByIds(
+            selectedEvents.value.map((e) => e.event_id)
+          );
+        } else {
+          response = await detectionEventApi.exportEvents(buildFilterExportParams());
+        }
+        const blob = new Blob([response.data], {
+          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        });
+        const datePart = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+        downloadExportBlob(blob, `${filenamePrefix}_${datePart}.xlsx`);
+        ElMessage.success(mode === 'selected'
+          ? `已导出选中的 ${selectedEvents.value.length} 条事件`
+          : '筛选结果导出成功');
+      } catch (error) {
+        const message = await parseExportError(error);
+        ElMessage.error('导出失败: ' + message);
+      } finally {
+        exporting.value = false;
+      }
     };
 
     // 获取分析类型描述
@@ -1067,6 +1166,7 @@ export default defineComponent({
 
     const clearSelection = () => {
       selectedEvents.value = [];
+      eventTableRef.value?.clearSelection?.();
     };
 
     const batchUpdateStatus = async (status) => {
@@ -1169,6 +1269,8 @@ export default defineComponent({
 
     return {
       loading,
+      exporting,
+      eventTableRef,
       eventList,
       deviceList,
       eventTypes,
@@ -1201,6 +1303,7 @@ export default defineComponent({
       openImagePreview,
       handleImageError,
       exportEvents,
+      handleExportCommand,
       getAnalysisTypeDesc,
       getCountingTypeDesc,
       loadEvents,
@@ -1237,12 +1340,24 @@ export default defineComponent({
   justify-content: space-between;
   align-items: center;
   margin-bottom: 20px;
+  gap: 16px;
 }
 
 .header-content p {
   margin: 0;
   color: #666;
   font-size: 14px;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.export-dropdown {
+  margin-left: 0;
 }
 
 .filter-section {
@@ -1798,13 +1913,79 @@ export default defineComponent({
 }
 
 .batch-operations {
-  padding: 12px 16px;
-  background-color: #f0f9ff;
-  border: 1px solid #e1f5fe;
-  border-radius: 6px;
-  margin-bottom: 16px;
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  padding: 10px 14px;
+  margin-bottom: 14px;
   display: flex;
-  justify-content: center;
+  flex-wrap: wrap;
+  gap: 12px 16px;
+  justify-content: space-between;
   align-items: center;
+  background: linear-gradient(180deg, #f5f9ff 0%, #eef5ff 100%);
+  border: 1px solid #d6e8ff;
+  border-radius: 8px;
+  box-shadow: 0 1px 2px rgba(64, 158, 255, 0.08);
+}
+
+.batch-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.batch-count-tag {
+  font-weight: 600;
+}
+
+.batch-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 12px;
+}
+
+.batch-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.batch-group-label {
+  font-size: 12px;
+  color: #909399;
+  white-space: nowrap;
+}
+
+.batch-divider {
+  height: 24px;
+  margin: 0 2px;
+}
+
+.batch-bar-enter-active,
+.batch-bar-leave-active {
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.batch-bar-enter-from,
+.batch-bar-leave-to {
+  opacity: 0;
+  transform: translateY(-6px);
+}
+
+@media screen and (max-width: 900px) {
+  .batch-operations {
+    align-items: flex-start;
+  }
+
+  .batch-actions {
+    width: 100%;
+  }
+
+  .batch-divider {
+    display: none;
+  }
 }
 </style> 

@@ -10,7 +10,7 @@
         <div class="header-info">
           <h2>{{ serverInfo?.name || '边缘节点详情' }}</h2>
           <p class="server-address">
-            {{ getPlatformLabel(serverInfo?.platform_type) }} · {{ serverInfo?.ip_address }}:{{ serverInfo?.port }}
+            {{ getPlatformLabel(serverInfo?.platform_type) }} · {{ displayHost }}
           </p>
         </div>
       </div>
@@ -21,7 +21,7 @@
         </el-button>
         <el-button @click="openAdminUrl" type="primary">
           <el-icon><Link /></el-icon>
-          {{ isMaisiNode ? '登录盒子' : (serverInfo?.platform_type === 'nodered' ? '打开编辑器' : '打开管理页') }}
+          {{ isMaisiNode ? '登录盒子' : (isEdgeBoxNode ? '打开盒子管理' : (isNodeRedNode ? '打开编辑器' : '打开管理页')) }}
         </el-button>
         <el-button v-if="dashboardUrl" @click="openDashboardUrl">
           Dashboard
@@ -33,6 +33,184 @@
       <div class="loading-card">
         <el-icon class="is-loading loading-icon"><Loading /></el-icon>
         <p>正在加载服务器信息...</p>
+      </div>
+    </div>
+
+    <!-- Edge AI Box 只读概览（无鉴权 status?detail=1） -->
+    <div v-else-if="isEdgeBoxNode" class="edgebox-panel">
+      <div class="edgebox-overview">
+        <div class="edgebox-hero" :class="getStatusClass(serverInfo?.status)">
+          <div class="edgebox-hero-main">
+            <div class="edgebox-status-row">
+              <span class="edgebox-dot" :class="serverInfo?.status"></span>
+              <span class="edgebox-status-text">{{ getStatusText(serverInfo?.status) }}</span>
+              <el-tag size="small" :type="edgeboxHealthTagType" effect="plain">
+                健康 {{ edgeboxStatus?.status || '-' }}
+              </el-tag>
+            </div>
+            <div class="edgebox-kv-row">
+              <span>主机 {{ edgeboxSystem?.hostname || '-' }}</span>
+              <span>运行 {{ edgeboxSystem?.uptime_text || '-' }}</span>
+              <span>检查 {{ formatTime(serverInfo?.last_checked) }}</span>
+            </div>
+            <div class="edgebox-kv-row muted">
+              <span>{{ edgeboxSystem?.app_name || 'edge-ai-box' }} {{ edgeboxSystem?.app_version || '' }}</span>
+              <span>推理 {{ edgeboxSystem?.edge_inference || '-' }}</span>
+              <span>{{ edgeboxSystem?.architecture || '-' }}</span>
+            </div>
+          </div>
+          <div class="edgebox-hero-links">
+            <el-link type="primary" :href="adminUrl" target="_blank">管理页 {{ adminUrl }}</el-link>
+            <span class="mono muted">探活 {{ healthCheckUrl }}</span>
+          </div>
+        </div>
+
+        <div class="edgebox-resources" v-if="edgeboxStatus">
+          <div class="edgebox-metric" v-for="m in edgeboxMetrics" :key="m.key">
+            <div class="edgebox-metric-head">
+              <span>{{ m.label }}</span>
+              <strong>{{ m.percentText }}</strong>
+            </div>
+            <el-progress
+              :percentage="m.percent"
+              :stroke-width="8"
+              :show-text="false"
+              :color="getProgressColor(m.percent)"
+            />
+            <div class="edgebox-metric-sub">{{ m.sub }}</div>
+          </div>
+        </div>
+        <div v-else class="edgebox-empty-hint">暂无资源数据，请点击「刷新状态」</div>
+      </div>
+
+      <div class="edgebox-tables info-card">
+        <el-tabs v-model="edgeboxTab">
+          <el-tab-pane :label="`模型 (${edgeboxModels?.total ?? 0})`" name="models">
+            <div class="edgebox-tab-meta">启用 {{ edgeboxModels?.active ?? 0 }} 个</div>
+            <el-table :data="edgeboxModels?.items || []" stripe size="small" empty-text="暂无模型信息（请刷新状态）">
+              <el-table-column prop="models_name" label="名称" min-width="160" show-overflow-tooltip />
+              <el-table-column prop="models_type" label="类型" width="160" />
+              <el-table-column prop="format" label="格式" width="90" />
+              <el-table-column label="状态" width="90">
+                <template #default="{ row }">
+                  <el-tag :type="row.is_active ? 'success' : 'info'" size="small">
+                    {{ row.is_active ? '启用' : '停用' }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="大小" width="100">
+                <template #default="{ row }">{{ formatFileSize(row.file_size) }}</template>
+              </el-table-column>
+              <el-table-column prop="upload_time" label="上传时间" width="160" />
+            </el-table>
+          </el-tab-pane>
+          <el-tab-pane :label="`检测任务 (${edgeboxDetection?.total_configs ?? 0})`" name="tasks">
+            <div class="edgebox-tab-meta">启用 {{ edgeboxDetection?.enabled_configs ?? 0 }} 个</div>
+            <el-table :data="edgeboxDetection?.tasks || []" stripe size="small" empty-text="暂无检测任务（请刷新状态）">
+              <el-table-column label="目标" min-width="140" show-overflow-tooltip>
+                <template #default="{ row }">
+                  {{ row.target || row.device_name || row.group_name || row.device_id || row.group_id || '-' }}
+                </template>
+              </el-table-column>
+              <el-table-column label="模式" width="80">
+                <template #default="{ row }">{{ row.config_mode === 'group' ? '分组' : '设备' }}</template>
+              </el-table-column>
+              <el-table-column prop="model_name" label="模型" min-width="120" show-overflow-tooltip />
+              <el-table-column label="状态" width="90">
+                <template #default="{ row }">
+                  <el-tag :type="row.enabled ? 'success' : 'info'" size="small">
+                    {{ row.enabled ? '启用' : '停用' }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="frequency" label="频率" width="100" />
+              <el-table-column prop="updated_at" label="更新时间" width="160" />
+            </el-table>
+          </el-tab-pane>
+        </el-tabs>
+      </div>
+
+      <div class="info-card" v-if="serverInfo?.description">
+        <div class="card-header"><h3>备注</h3></div>
+        <p class="description-text">{{ serverInfo.description }}</p>
+      </div>
+    </div>
+
+    <!-- Node-RED 详情 -->
+    <div v-else-if="isNodeRedNode" class="nodered-panel">
+      <div class="nodered-overview">
+        <div class="nodered-hero" :class="getStatusClass(serverInfo?.status)">
+          <div class="nodered-hero-main">
+            <div class="nodered-status-row">
+              <span class="nodered-dot" :class="serverInfo?.status"></span>
+              <span class="nodered-status-text">{{ getStatusText(serverInfo?.status) }}</span>
+              <el-tag size="small" type="danger" effect="plain">Node-RED</el-tag>
+            </div>
+            <div class="nodered-kv-row">
+              <span>主机 {{ displayHost }}</span>
+              <span>检查 {{ formatTime(serverInfo?.last_checked) }}</span>
+              <span>注册 {{ formatTime(serverInfo?.created_at) }}</span>
+            </div>
+          </div>
+          <div class="nodered-hero-actions">
+            <el-button type="primary" @click="openAdminUrl">
+              <el-icon><Link /></el-icon>
+              打开编辑器
+            </el-button>
+            <el-button v-if="dashboardUrl" @click="openDashboardUrl">
+              打开 Dashboard
+            </el-button>
+          </div>
+        </div>
+
+        <div class="nodered-links">
+          <div class="nodered-link-item">
+            <span class="label">编辑器</span>
+            <el-link type="primary" :href="adminUrl" target="_blank">{{ adminUrl }}</el-link>
+          </div>
+          <div class="nodered-link-item" v-if="dashboardUrl">
+            <span class="label">Dashboard</span>
+            <el-link type="primary" :href="dashboardUrl" target="_blank">{{ dashboardUrl }}</el-link>
+          </div>
+          <div class="nodered-link-item">
+            <span class="label">探活</span>
+            <span class="mono">{{ healthCheckUrl }}</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="nodered-grid">
+        <div class="info-card nodered-card">
+          <div class="card-header"><h3>快速入口</h3></div>
+          <div class="nodered-quick">
+            <div class="nodered-quick-item" @click="openAdminUrl">
+              <strong>Flow 编辑器</strong>
+              <span>编排流程、调试节点</span>
+            </div>
+            <div
+              class="nodered-quick-item"
+              :class="{ disabled: !dashboardUrl }"
+              @click="dashboardUrl && openDashboardUrl()"
+            >
+              <strong>Dashboard</strong>
+              <span>{{ dashboardUrl ? '打开可视化面板' : '未配置 Dashboard 地址' }}</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="info-card nodered-card">
+          <div class="card-header"><h3>与本平台集成</h3></div>
+          <ul class="integration-tips">
+            <li>上报事件：Node-RED 用 <strong>HTTP Request</strong> POST 到本平台「外部事件 → 事件监听」地址。</li>
+            <li>接收推送：在「数据推送器」配置 HTTP 推送，目标填 Node-RED <strong>HTTP In</strong> URL。</li>
+            <li>编辑器与 Dashboard 建议新窗口打开，避免登录态与跨域干扰。</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="info-card" v-if="serverInfo?.description">
+        <div class="card-header"><h3>备注</h3></div>
+        <p class="description-text">{{ serverInfo.description }}</p>
       </div>
     </div>
 
@@ -73,17 +251,6 @@
             <span class="value mono">{{ healthCheckUrl }}</span>
           </div>
         </div>
-      </div>
-
-      <div class="info-card integration-card" v-if="serverInfo?.platform_type === 'nodered'">
-        <div class="card-header">
-          <h3>与本平台集成</h3>
-        </div>
-        <ul class="integration-tips">
-          <li>上报事件：在 Node-RED 中使用 <strong>HTTP Request</strong> 节点 POST 到本平台的「外部事件 → 事件监听」HTTP 地址。</li>
-          <li>接收推送：在「数据推送器」中配置 HTTP 推送，目标填 Node-RED 的 <strong>HTTP In</strong> 节点 URL。</li>
-          <li>流程编辑建议在新窗口打开；Dashboard 可按需内嵌或外链。</li>
-        </ul>
       </div>
 
       <div class="info-card" v-if="serverInfo?.description">
@@ -520,7 +687,8 @@ import edgeServerAPI, {
   getAdminUrl,
   getDashboardUrl,
   getHealthCheckUrl,
-  isMaisiPlatform
+  isMaisiPlatform,
+  isEdgeBoxPlatform
 } from '@/api/edge-server'
 
 const router = useRouter()
@@ -534,9 +702,73 @@ const serverInfo = ref(null)
 const serverAPI = ref(null)
 
 const isMaisiNode = computed(() => isMaisiPlatform(serverInfo.value))
+const isEdgeBoxNode = computed(() => isEdgeBoxPlatform(serverInfo.value))
+const isNodeRedNode = computed(() => serverInfo.value?.platform_type === 'nodered')
+const displayHost = computed(() => {
+  const s = serverInfo.value
+  if (!s) return ''
+  const port = Number(s.port)
+  if (!port || port === 80) return s.ip_address
+  return `${s.ip_address}:${port}`
+})
 const adminUrl = computed(() => serverInfo.value ? getAdminUrl(serverInfo.value) : '')
 const dashboardUrl = computed(() => serverInfo.value ? getDashboardUrl(serverInfo.value) : '')
 const healthCheckUrl = computed(() => serverInfo.value ? getHealthCheckUrl(serverInfo.value) : '')
+/** EdgeBox 探活得到的完整 status（存在 system_info） */
+const edgeboxStatus = computed(() => {
+  const info = serverInfo.value?.system_info
+  if (info && typeof info === 'object' && info.system) return info
+  return null
+})
+const edgeboxSystem = computed(() => edgeboxStatus.value?.system || serverInfo.value?.version_info || null)
+const edgeboxModels = computed(() => edgeboxStatus.value?.models || serverInfo.value?.device_info?.models || null)
+const edgeboxDetection = computed(() => edgeboxStatus.value?.detection || serverInfo.value?.device_info?.detection || null)
+const edgeboxTab = ref('models')
+const edgeboxHealthTagType = computed(() => {
+  const s = edgeboxStatus.value?.status
+  if (s === 'normal') return 'success'
+  if (s === 'warning') return 'warning'
+  if (s === 'danger') return 'danger'
+  return 'info'
+})
+const edgeboxMetrics = computed(() => {
+  const st = edgeboxStatus.value
+  if (!st) return []
+  const items = [
+    {
+      key: 'cpu',
+      label: 'CPU',
+      percent: Number(st.cpu?.percent) || 0,
+      percentText: st.cpu?.percent != null ? `${st.cpu.percent}%` : '-',
+      sub: `${st.cpu?.used ?? '-'} / ${st.cpu?.total ?? '-'} 核`
+    },
+    {
+      key: 'mem',
+      label: '内存',
+      percent: Number(st.memory?.percent) || 0,
+      percentText: st.memory?.percent != null ? `${st.memory.percent}%` : '-',
+      sub: `${st.memory?.used ?? '-'} / ${st.memory?.total ?? '-'} GB`
+    },
+    {
+      key: 'disk',
+      label: '磁盘',
+      percent: Number(st.disk?.percent) || 0,
+      percentText: st.disk?.percent != null ? `${st.disk.percent}%` : '-',
+      sub: `${st.disk?.used ?? '-'} / ${st.disk?.total ?? '-'} GB`
+    }
+  ]
+  if (st.npu) {
+    const pct = st.npu.load_percent
+    items.push({
+      key: 'npu',
+      label: 'NPU',
+      percent: Number(pct) || 0,
+      percentText: pct != null ? `${pct}%` : '-',
+      sub: st.npu.load_readable || st.npu.status_text || st.npu.backend || 'NPU'
+    })
+  }
+  return items
+})
 const systemData = reactive({
   version: null,
   system: null,
@@ -576,7 +808,14 @@ let dataRefreshTimer = null
 // 初始化
 onMounted(async () => {
   await loadServerInfo()
-  if (isMaisiNode.value && serverAPI.value) {
+  if (isEdgeBoxNode.value && serverInfo.value) {
+    try {
+      await edgeServerAPI.testAndUpdateServerStatus(serverInfo.value.id, serverInfo.value)
+      await loadServerInfo()
+    } catch (_) {
+      /* 离线时仍展示缓存 */
+    }
+  } else if (isMaisiNode.value && serverAPI.value) {
     await loadSystemData()
     await nextTick()
     initChart()
@@ -1078,6 +1317,15 @@ const getStatusClass = (status) => {
     case 'offline': return 'offline'
     default: return 'unknown'
   }
+}
+
+const formatFileSize = (bytes) => {
+  if (bytes == null || bytes === '' || Number.isNaN(Number(bytes))) return '-'
+  const n = Number(bytes)
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`
+  return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`
 }
 
 const formatTime = (timeStr) => {
@@ -1912,6 +2160,345 @@ const handleImageError = () => {
 
 .image-preview-dialog .el-picker-panel {
   z-index: 10002 !important;
+}
+
+.edgebox-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 0 4px 24px;
+}
+
+.edgebox-overview {
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  overflow: hidden;
+}
+
+.edgebox-hero {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 20px 24px;
+  border-bottom: 1px solid #ebeef5;
+  position: relative;
+}
+
+.edgebox-hero::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: #e4e7ed;
+}
+
+.edgebox-hero.online::before { background: #67c23a; }
+.edgebox-hero.offline::before { background: #f56c6c; }
+
+.edgebox-status-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.edgebox-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #c0c4cc;
+}
+
+.edgebox-dot.online {
+  background: #67c23a;
+  box-shadow: 0 0 0 3px rgba(103, 194, 58, 0.2);
+}
+
+.edgebox-dot.offline {
+  background: #f56c6c;
+  box-shadow: 0 0 0 3px rgba(245, 108, 108, 0.2);
+}
+
+.edgebox-status-text {
+  font-size: 18px;
+  font-weight: 600;
+  color: #303133;
+}
+
+.edgebox-kv-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  color: #606266;
+  font-size: 13px;
+  margin-top: 4px;
+}
+
+.edgebox-kv-row.muted,
+.edgebox-panel .muted {
+  color: #909399;
+}
+
+.edgebox-hero-links {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  max-width: 42%;
+  text-align: right;
+}
+
+.edgebox-resources {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  padding: 16px 20px 20px;
+}
+
+.edgebox-metric {
+  background: #f8fafc;
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+
+.edgebox-metric-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 8px;
+  color: #606266;
+  font-size: 13px;
+}
+
+.edgebox-metric-head strong {
+  color: #303133;
+  font-size: 18px;
+}
+
+.edgebox-metric-sub {
+  margin-top: 8px;
+  color: #909399;
+  font-size: 12px;
+  line-height: 1.4;
+  word-break: break-all;
+}
+
+.edgebox-empty-hint {
+  padding: 20px 24px;
+  color: #909399;
+  font-size: 14px;
+}
+
+.edgebox-tables {
+  grid-column: unset;
+}
+
+.edgebox-tab-meta {
+  margin: -4px 0 10px;
+  color: #909399;
+  font-size: 13px;
+}
+
+.edgebox-panel .mono {
+  font-family: 'Monaco', 'Consolas', monospace;
+  font-size: 12px;
+  word-break: break-all;
+}
+
+@media (max-width: 1100px) {
+  .edgebox-resources {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 768px) {
+  .edgebox-hero {
+    flex-direction: column;
+  }
+
+  .edgebox-hero-links {
+    align-items: flex-start;
+    max-width: 100%;
+    text-align: left;
+  }
+
+  .edgebox-resources {
+    grid-template-columns: 1fr;
+  }
+}
+
+.nodered-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 0 4px 24px;
+}
+
+.nodered-overview {
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  overflow: hidden;
+}
+
+.nodered-hero {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 20px 24px;
+  border-bottom: 1px solid #ebeef5;
+  position: relative;
+}
+
+.nodered-hero::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: #e4e7ed;
+}
+
+.nodered-hero.online::before { background: #67c23a; }
+.nodered-hero.offline::before { background: #f56c6c; }
+
+.nodered-status-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.nodered-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #c0c4cc;
+}
+
+.nodered-dot.online {
+  background: #67c23a;
+  box-shadow: 0 0 0 3px rgba(103, 194, 58, 0.2);
+}
+
+.nodered-dot.offline {
+  background: #f56c6c;
+  box-shadow: 0 0 0 3px rgba(245, 108, 108, 0.2);
+}
+
+.nodered-status-text {
+  font-size: 18px;
+  font-weight: 600;
+  color: #303133;
+}
+
+.nodered-kv-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  color: #606266;
+  font-size: 13px;
+}
+
+.nodered-hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.nodered-links {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  padding: 16px 20px 20px;
+}
+
+.nodered-link-item {
+  background: #f8fafc;
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.nodered-link-item .label {
+  color: #909399;
+  font-size: 12px;
+}
+
+.nodered-link-item .mono,
+.nodered-panel .mono {
+  font-family: 'Monaco', 'Consolas', monospace;
+  font-size: 12px;
+  color: #606266;
+  word-break: break-all;
+}
+
+.nodered-grid {
+  display: grid;
+  grid-template-columns: 1fr 1.2fr;
+  gap: 16px;
+}
+
+.nodered-card {
+  grid-column: unset;
+}
+
+.nodered-quick {
+  display: grid;
+  gap: 10px;
+}
+
+.nodered-quick-item {
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  padding: 14px 16px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.nodered-quick-item:hover {
+  border-color: #c6e2ff;
+  background: #f5f9ff;
+}
+
+.nodered-quick-item.disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.nodered-quick-item.disabled:hover {
+  border-color: #ebeef5;
+  background: transparent;
+}
+
+.nodered-quick-item strong {
+  display: block;
+  color: #303133;
+  margin-bottom: 4px;
+}
+
+.nodered-quick-item span {
+  color: #909399;
+  font-size: 13px;
+}
+
+@media (max-width: 900px) {
+  .nodered-hero {
+    flex-direction: column;
+  }
+
+  .nodered-links,
+  .nodered-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .generic-node-panel {

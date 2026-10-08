@@ -145,6 +145,24 @@ export const detectionEventApi = {
     });
   },
 
+  // 按筛选条件导出检测事件
+  exportEvents(params = {}) {
+    return apiClient.get('/detection/events/export', {
+      params,
+      responseType: 'blob'
+    });
+  },
+
+  // 按选中事件 ID 导出
+  exportEventsByIds(eventIds = []) {
+    return apiClient.post('/detection/events/export', {
+      event_ids: eventIds,
+      limit: eventIds.length
+    }, {
+      responseType: 'blob'
+    });
+  },
+
   // 获取检测事件统计概览
   getEventsStatsOverview() {
     return apiClient.get('/detection/stats');
