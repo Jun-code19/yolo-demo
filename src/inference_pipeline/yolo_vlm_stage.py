@@ -1,7 +1,8 @@
 """YOLO 初筛后的 VLM 复检 / 行为分析"""
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+from collections import Counter
+from typing import Any, Dict, List, Optional
 
 import cv2
 import numpy as np
@@ -58,89 +59,210 @@ def build_vlm_input_frame(
     return crop_bbox(frame, bbox, margin_ratio=margin_ratio)
 
 
-def _resolve_verify_prompt(
+def build_yolo_class_counts(detections: List[Dict[str, Any]]) -> Dict[str, int]:
+    counter: Counter = Counter()
+    for det in detections or []:
+        name = str(det.get("class_name") or det.get("name") or "unknown").strip() or "unknown"
+        counter[name] += 1
+    return dict(counter)
+
+
+def format_yolo_summary_text(counts: Dict[str, int]) -> str:
+    if not counts:
+        return "（无检出）"
+    parts = [f"- {name} × {cnt}" for name, cnt in sorted(counts.items(), key=lambda x: (-x[1], x[0]))]
+    return "\n".join(parts)
+
+
+def _normalize_count_map(raw: Any) -> Dict[str, int]:
+    if not isinstance(raw, dict):
+        return {}
+    out: Dict[str, int] = {}
+    for key, value in raw.items():
+        name = str(key or "").strip()
+        if not name:
+            continue
+        try:
+            out[name] = int(value)
+        except (TypeError, ValueError):
+            try:
+                out[name] = int(float(value))
+            except (TypeError, ValueError):
+                continue
+    return out
+
+
+def _normalize_diffs(raw: Any, yolo_counts: Dict[str, int], vlm_counts: Dict[str, int]) -> List[Dict[str, Any]]:
+    diffs: List[Dict[str, Any]] = []
+    if isinstance(raw, list):
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            class_name = str(item.get("class_name") or item.get("label") or "").strip()
+            try:
+                yolo_n = int(item["yolo"]) if item.get("yolo") is not None else yolo_counts.get(class_name, 0)
+            except (TypeError, ValueError):
+                yolo_n = yolo_counts.get(class_name, 0)
+            try:
+                vlm_n = int(item["vlm"]) if item.get("vlm") is not None else vlm_counts.get(class_name, 0)
+            except (TypeError, ValueError):
+                vlm_n = vlm_counts.get(class_name, 0)
+            diffs.append(
+                {
+                    "type": str(item.get("type") or "count_mismatch"),
+                    "class_name": class_name or "unknown",
+                    "yolo": yolo_n,
+                    "vlm": vlm_n,
+                    "note": str(item.get("note") or item.get("reason") or ""),
+                }
+            )
+    if diffs:
+        return diffs
+    # 模型未给 diffs 时，按计数差自动生成
+    all_names = sorted(set(yolo_counts) | set(vlm_counts))
+    for name in all_names:
+        yolo_n = int(yolo_counts.get(name, 0))
+        vlm_n = int(vlm_counts.get(name, 0))
+        if yolo_n == vlm_n:
+            continue
+        if yolo_n == 0:
+            diff_type = "extra"
+            note = f"画面多出 {name}×{vlm_n}"
+        elif vlm_n == 0:
+            diff_type = "missing"
+            note = f"YOLO 多报 {name}×{yolo_n}"
+        else:
+            diff_type = "count_mismatch"
+            note = f"{name}: YOLO {yolo_n} → 画面约 {vlm_n}"
+        diffs.append(
+            {
+                "type": diff_type,
+                "class_name": name,
+                "yolo": yolo_n,
+                "vlm": vlm_n,
+                "note": note,
+            }
+        )
+    return diffs
+
+
+def _resolve_scene_verify_prompt(
     prompt_id: str,
-    detection: Dict[str, Any],
+    detections: List[Dict[str, Any]],
+    yolo_counts: Dict[str, int],
     prompt_override: Optional[str] = None,
 ) -> Dict[str, str]:
-    class_name = detection.get("class_name") or "目标"
-    confidence = float(detection.get("confidence") or 0)
+    summary_text = format_yolo_summary_text(yolo_counts)
+    total = str(len(detections or []))
     if prompt_override and prompt_override.strip():
         user = (
-            prompt_override.replace("{yolo_class}", class_name)
-            .replace("{yolo_conf}", f"{confidence:.2f}")
+            prompt_override.replace("{yolo_summary}", summary_text)
+            .replace("{yolo_total}", total)
         )
         return {
             "system": (
                 "你是视觉复检助手。只输出 JSON，不要 markdown。"
-                "必须根据裁剪图实际内容判断，禁止臆测。"
+                "必须根据整帧画面核对 YOLO 初筛的类别与数量，禁止臆测。"
             ),
             "user": user,
         }
 
-    registry_prompt = resolve_prompt(prompt_id, alert_labels=[class_name])
+    registry_prompt = resolve_prompt(prompt_id or "yolo_verify_v1")
     user = (
         registry_prompt["user"]
-        .replace("{yolo_class}", class_name)
-        .replace("{yolo_conf}", f"{confidence:.2f}")
+        .replace("{yolo_summary}", summary_text)
+        .replace("{yolo_total}", total)
     )
     return {"system": registry_prompt["system"], "user": user}
 
 
-def normalize_verify_result(
+def normalize_scene_verify_result(
     parsed: Optional[Dict[str, Any]],
+    yolo_counts: Dict[str, int],
     reject_below: float = 0.6,
 ) -> Dict[str, Any]:
+    """整帧复检结果：consistency = match | mismatch | uncertain。"""
     if not parsed or not isinstance(parsed, dict):
-        return {"verified": False, "confidence": 0.0, "reason": "VLM 无有效返回"}
+        return {
+            "consistency": "uncertain",
+            "verified": False,
+            "confidence": 0.0,
+            "reason": "VLM 无有效返回",
+            "summary": "VLM 无有效返回",
+            "yolo_summary": yolo_counts,
+            "observed_counts": {},
+            "diffs": [],
+        }
 
-    verified = bool(parsed.get("verified"))
     try:
         confidence = float(parsed.get("confidence") or 0)
     except (TypeError, ValueError):
         confidence = 0.0
 
-    reason = str(parsed.get("reason") or parsed.get("reject_reason") or "")
-    ok = verified and confidence >= reject_below
+    reason = str(parsed.get("reason") or parsed.get("summary") or parsed.get("reject_reason") or "")
+    observed = _normalize_count_map(
+        parsed.get("observed_counts") or parsed.get("vlm_summary") or parsed.get("counts")
+    )
+    diffs = _normalize_diffs(parsed.get("diffs"), yolo_counts, observed)
+
+    raw_consistency = str(parsed.get("consistency") or "").strip().lower()
+    if raw_consistency in ("match", "ok", "consistent", "same"):
+        consistency = "match"
+    elif raw_consistency in ("mismatch", "diff", "inconsistent", "different"):
+        consistency = "mismatch"
+    elif "verified" in parsed:
+        consistency = "match" if bool(parsed.get("verified")) else "mismatch"
+    elif diffs:
+        consistency = "mismatch"
+    else:
+        consistency = "match" if observed == yolo_counts or not observed else "mismatch"
+
+    if confidence < float(reject_below or 0):
+        consistency = "uncertain"
+
     return {
-        "verified": ok,
+        "consistency": consistency,
+        "verified": consistency == "match",
         "confidence": confidence,
         "reason": reason,
+        "summary": reason,
+        "yolo_summary": yolo_counts,
+        "observed_counts": observed,
+        "diffs": diffs,
     }
 
 
-def run_yolo_verify(
+def run_yolo_scene_verify(
     frame: np.ndarray,
-    detection: Dict[str, Any],
+    detections: List[Dict[str, Any]],
     model_record,
     pipeline: Dict[str, Any],
 ) -> Dict[str, Any]:
-    trigger = pipeline.get("trigger") or {}
+    """整帧一次复检：对照 YOLO 类别/数量是否与画面一致。"""
     verify_cfg = pipeline.get("verify") or {}
     input_cfg = pipeline.get("input") or {}
-    margin = float(trigger.get("margin_ratio") or 0.15)
-    context = trigger.get("context") or "crop_with_margin"
-
-    if context == "full_frame":
-        crop = frame.copy()
-    else:
-        crop = crop_bbox(frame, detection["bbox"], margin_ratio=margin)
-
-    prompts = _resolve_verify_prompt(
-        pipeline.get("prompt_id") or "yolo_verify_v1",
-        detection,
-        pipeline.get("prompt_override"),
+    yolo_counts = build_yolo_class_counts(detections)
+    # 复检固定整帧，且固定使用复检模板（忽略自定义覆盖）
+    input_frame = build_vlm_input_frame(
+        frame, detections, context="full_frame", margin_ratio=0.15
+    )
+    prompts = _resolve_scene_verify_prompt(
+        "yolo_verify_v1",
+        detections,
+        yolo_counts,
+        prompt_override=None,
     )
     image_b64 = encode_frame_to_base64(
-        crop,
+        input_frame,
         max_width=int(input_cfg.get("max_width") or 1280),
         jpeg_quality=int(input_cfg.get("jpeg_quality") or 85),
     )
 
     provider = get_vlm_provider(model_record)
     raw = provider.inspect_image(image_b64, prompts["system"], prompts["user"])
-    parsed = normalize_verify_result(
+    parsed = normalize_scene_verify_result(
         raw.get("parsed"),
+        yolo_counts=yolo_counts,
         reject_below=float(verify_cfg.get("reject_below") or 0.6),
     )
 
@@ -150,7 +272,7 @@ def run_yolo_verify(
         "latency_ms": raw.get("latency_ms") or 0,
         "raw_text": raw.get("raw_text") or "",
         "result": parsed,
-        "detection": detection,
+        "detections": detections,
     }
 
 
@@ -160,10 +282,10 @@ def run_yolo_analyze(
     model_record,
     pipeline: Dict[str, Any],
 ) -> Dict[str, Any]:
-    trigger = pipeline.get("trigger") or {}
-    context = trigger.get("context") or "crop_with_margin"
-    margin = float(trigger.get("margin_ratio") or 0.15)
-    input_frame = build_vlm_input_frame(frame, detections, context=context, margin_ratio=margin)
+    # 行为分析固定整帧
+    input_frame = build_vlm_input_frame(
+        frame, detections, context="full_frame", margin_ratio=0.15
+    )
 
     vlm_config = {"input": pipeline.get("input") or {}}
     inspection = run_vlm_only_inspection(
@@ -181,20 +303,3 @@ def run_yolo_analyze(
     }
 
 
-MAX_VERIFY_CANDIDATES_PER_FRAME = 5
-
-
-def pick_verify_candidates(
-    detections: List[Dict[str, Any]],
-    max_count: int = MAX_VERIFY_CANDIDATES_PER_FRAME,
-) -> List[Dict[str, Any]]:
-    """按置信度降序返回待复检目标（默认最多 5 个）"""
-    if not detections:
-        return []
-    ordered = sorted(detections, key=lambda d: float(d.get("confidence") or 0), reverse=True)
-    return ordered[: max(1, int(max_count or MAX_VERIFY_CANDIDATES_PER_FRAME))]
-
-
-def pick_verify_candidate(detections: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    candidates = pick_verify_candidates(detections, max_count=1)
-    return candidates[0] if candidates else None

@@ -190,10 +190,18 @@
           </template>
         </el-table-column>
 
-        <el-table-column prop="event_type" label="事件类型" min-width="120">
+        <el-table-column prop="event_type" label="事件类型" min-width="160">
           <template #default="{ row }">
             <el-tag :type="getEventTypeColor(row.event_type)" size="small">
               {{ getEventTypeName(row.event_type) }}
+            </el-tag>
+            <el-tag
+              v-if="getConsistencyLabel(row)"
+              :type="getConsistencyTagType(row)"
+              size="small"
+              style="margin-left: 6px"
+            >
+              {{ getConsistencyLabel(row) }}
             </el-tag>
           </template>
         </el-table-column>
@@ -336,59 +344,49 @@
             </el-descriptions-item>
           </el-descriptions>
 
-          <!-- 状态管理区域 -->
-          <div class="detail-section">
-            <h4>状态管理</h4>
-            <el-row :gutter="16">
-              <el-col :span="12">
-                <div class="status-operations">
-                  <el-space direction="vertical" style="width: 100%">
-                    <div>
-                      <label>当前状态：</label>
-                      <el-tag :type="getStatusColor(selectedEvent.status)">
-                        {{ getStatusLabel(selectedEvent.status) }}
-                      </el-tag>
-                    </div>
-                    <div>
-                      <label>快速操作：</label>
-                      <!-- <el-button-group size="small" > -->
-                      <el-button type="success" size="small" @click="updateEventStatus(selectedEvent, 'viewed')"
-                        :disabled="selectedEvent.status === 'viewed'">
-                        <el-icon>
-                          <View />
-                        </el-icon>
-                        标记已查看
-                      </el-button>
-                      <el-button type="warning" size="small" @click="updateEventStatus(selectedEvent, 'flagged')"
-                        :disabled="selectedEvent.status === 'flagged'">
-                        <el-icon>
-                          <Flag />
-                        </el-icon>
-                        标记重要
-                      </el-button>
-                      <el-button type="info" size="small" @click="updateEventStatus(selectedEvent, 'archived')"
-                        :disabled="selectedEvent.status === 'archived'">
-                        <el-icon>
-                          <FolderOpened />
-                        </el-icon>
-                        归档
-                      </el-button>
-                      <!-- </el-button-group> -->
-                    </div>
-                  </el-space>
-                </div>
-              </el-col>
-              <el-col :span="12">
-                <div class="status-info">
-                  <div v-if="selectedEvent.viewed_by">
-                    <label>查看者：</label>{{ selectedEvent.viewed_by }}
-                  </div>
-                  <div v-if="selectedEvent.viewed_at">
-                    <label>查看时间：</label>{{ formatDateTime(selectedEvent.viewed_at) }}
-                  </div>
-                </div>
-              </el-col>
-            </el-row>
+          <!-- 状态管理区域（紧凑单行） -->
+          <div class="detail-section detail-section--status">
+            <div class="status-bar">
+              <div class="status-bar-left">
+                <span class="status-bar-label">状态</span>
+                <el-tag size="small" :type="getStatusColor(selectedEvent.status)">
+                  {{ getStatusLabel(selectedEvent.status) }}
+                </el-tag>
+                <el-button-group class="status-bar-actions">
+                  <el-button
+                    type="success"
+                    size="small"
+                    :disabled="selectedEvent.status === 'viewed'"
+                    @click="updateEventStatus(selectedEvent, 'viewed')"
+                  >
+                    已查看
+                  </el-button>
+                  <el-button
+                    type="warning"
+                    size="small"
+                    :disabled="selectedEvent.status === 'flagged'"
+                    @click="updateEventStatus(selectedEvent, 'flagged')"
+                  >
+                    重要
+                  </el-button>
+                  <el-button
+                    type="info"
+                    size="small"
+                    :disabled="selectedEvent.status === 'archived'"
+                    @click="updateEventStatus(selectedEvent, 'archived')"
+                  >
+                    归档
+                  </el-button>
+                </el-button-group>
+              </div>
+              <div
+                v-if="selectedEvent.viewed_by || selectedEvent.viewed_at"
+                class="status-bar-meta"
+              >
+                <span v-if="selectedEvent.viewed_by">查看者 {{ selectedEvent.viewed_by }}</span>
+                <span v-if="selectedEvent.viewed_at">{{ formatDateTime(selectedEvent.viewed_at) }}</span>
+              </div>
+            </div>
           </div>
 
           <!-- 元数据信息 -->
@@ -442,17 +440,50 @@
                 {{ formatVlmLabels(selectedEvent) }}
               </el-descriptions-item>
               <el-descriptions-item
-                v-if="selectedEvent.event_type === 'yolo_verify'"
-                label="复检结论"
+                v-if="selectedEvent.event_type === 'yolo_verify' || selectedEvent.event_type === 'yolo_analyze'"
+                :label="selectedEvent.event_type === 'yolo_analyze' ? '分析结论' : '复检结论'"
               >
-                <el-tag :type="getVlmMeta(selectedEvent).result?.verified ? 'success' : 'info'" size="small">
-                  {{ getVlmMeta(selectedEvent).result?.verified ? '通过' : '未通过' }}
+                <el-tag :type="getConsistencyTagType(selectedEvent)" size="small">
+                  {{
+                    getConsistencyLabel(selectedEvent)
+                      || (getVlmMeta(selectedEvent).result?.verified ? '一致' : '未判定')
+                  }}
                 </el-tag>
                 <span v-if="getVlmMeta(selectedEvent).result?.confidence != null" style="margin-left: 8px">
                   置信度 {{ (getVlmMeta(selectedEvent).result.confidence * 100).toFixed(1) }}%
                 </span>
               </el-descriptions-item>
+              <el-descriptions-item
+                v-if="selectedEvent.event_type === 'yolo_verify'"
+                label="YOLO 汇总"
+                :span="2"
+              >
+                {{ formatCountMap(getVerifyYoloCounts(selectedEvent)) }}
+              </el-descriptions-item>
+              <el-descriptions-item
+                v-if="selectedEvent.event_type === 'yolo_verify'"
+                label="画面观测"
+                :span="2"
+              >
+                {{ formatCountMap(getVerifyObservedCounts(selectedEvent)) }}
+              </el-descriptions-item>
             </el-descriptions>
+            <el-table
+              v-if="getVerifyDiffs(selectedEvent).length"
+              :data="getVerifyDiffs(selectedEvent)"
+              size="small"
+              style="width: 100%; margin-top: 12px"
+            >
+              <el-table-column prop="class_name" label="类别" width="120" />
+              <el-table-column prop="type" label="差异类型" width="120">
+                <template #default="{ row }">
+                  {{ formatDiffType(row.type) }}
+                </template>
+              </el-table-column>
+              <el-table-column prop="yolo" label="YOLO" width="80" />
+              <el-table-column prop="vlm" label="画面" width="80" />
+              <el-table-column prop="note" label="说明" min-width="160" show-overflow-tooltip />
+            </el-table>
             <el-table
               v-if="getVlmFindings(selectedEvent).length"
               :data="getVlmFindings(selectedEvent)"
@@ -697,6 +728,63 @@ export default defineComponent({
       const vlm = getVlmMeta(event)
       const findings = vlm?.result?.findings
       return Array.isArray(findings) ? findings : []
+    }
+
+    const getConsistencyKey = (event) => {
+      const fromMeta = event?.meta_data?.consistency
+      const fromResult = getVlmMeta(event)?.result?.consistency
+      return String(fromMeta || fromResult || '').toLowerCase()
+    }
+
+    const getConsistencyLabel = (event) => {
+      const key = getConsistencyKey(event)
+      if (key === 'match') return '一致'
+      if (key === 'mismatch') return '有出入'
+      if (key === 'uncertain') return '不确定'
+      if (key === 'hit') return '命中'
+      // 行为分析事件本身即命中入库
+      if (event?.event_type === 'yolo_analyze') return '命中'
+      return ''
+    }
+
+    const getConsistencyTagType = (event) => {
+      const key = getConsistencyKey(event)
+      if (key === 'match') return 'success'
+      if (key === 'mismatch') return 'danger'
+      if (key === 'uncertain') return 'warning'
+      if (key === 'hit' || event?.event_type === 'yolo_analyze') return 'danger'
+      return 'info'
+    }
+
+    const formatCountMap = (counts) => {
+      if (!counts || typeof counts !== 'object') return '-'
+      const entries = Object.entries(counts)
+      if (!entries.length) return '-'
+      return entries.map(([k, v]) => `${k}×${v}`).join('、')
+    }
+
+    const getVerifyYoloCounts = (event) => {
+      const result = getVlmMeta(event)?.result || {}
+      return result.yolo_summary || event?.meta_data?.yolo?.class_counts || {}
+    }
+
+    const getVerifyObservedCounts = (event) => {
+      return getVlmMeta(event)?.result?.observed_counts || {}
+    }
+
+    const getVerifyDiffs = (event) => {
+      const diffs = getVlmMeta(event)?.result?.diffs
+      return Array.isArray(diffs) ? diffs : []
+    }
+
+    const formatDiffType = (type) => {
+      const map = {
+        count_mismatch: '数量不符',
+        missing: 'YOLO 多报',
+        extra: '画面多出',
+        class_mismatch: '类别不符'
+      }
+      return map[type] || type || '-'
     }
 
     const formatVlmLabels = (event) => {
@@ -1298,6 +1386,13 @@ export default defineComponent({
       getDetectionTargets,
       getVlmMeta,
       getVlmFindings,
+      getConsistencyLabel,
+      getConsistencyTagType,
+      formatCountMap,
+      getVerifyYoloCounts,
+      getVerifyObservedCounts,
+      getVerifyDiffs,
+      formatDiffType,
       formatVlmLabels,
       formatBoundingBox,
       openImagePreview,
@@ -1586,44 +1681,44 @@ export default defineComponent({
   border-radius: 2px !important;
 }
 
-/* 状态管理样式 */
-.detection-event-dialog .status-operations {
-  padding: 20px !important;
-  background-color: #ffffff !important;
-  border-radius: 8px !important;
-  border: 2px solid #e3f2fd !important;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05) !important;
+/* 状态管理：紧凑单行 */
+.detection-event-dialog .detail-section--status {
+  margin-top: 12px !important;
+  padding: 10px 12px !important;
 }
 
-.detection-event-dialog .status-operations label {
-  font-weight: 600 !important;
-  color: #1976d2 !important;
-  margin-right: 12px !important;
-  font-size: 15px !important;
+.detection-event-dialog .status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
-.detection-event-dialog .status-info {
-  padding: 20px !important;
-  background-color: #ffffff !important;
-  border-radius: 8px !important;
-  border: 2px solid #f3e5f5 !important;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05) !important;
+.detection-event-dialog .status-bar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
 }
 
-.detection-event-dialog .status-info label {
-  font-weight: 600 !important;
-  color: #7b1fa2 !important;
-  margin-right: 12px !important;
-  font-size: 15px !important;
+.detection-event-dialog .status-bar-label {
+  font-size: 13px;
+  color: #606266;
+  font-weight: 500;
 }
 
-.detection-event-dialog .status-info div {
-  margin-bottom: 12px !important;
-  line-height: 1.6 !important;
+.detection-event-dialog .status-bar-actions {
+  margin-left: 4px;
 }
 
-.detection-event-dialog .status-info div:last-child {
-  margin-bottom: 0 !important;
+.detection-event-dialog .status-bar-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 12px;
+  color: #909399;
 }
 
 /* 事件描述样式 */
@@ -1896,11 +1991,6 @@ export default defineComponent({
   .detection-event-dialog .el-dialog__body {
     padding: 12px !important;
     max-height: 75vh !important;
-  }
-
-  .detection-event-dialog .status-operations,
-  .detection-event-dialog .status-info {
-    padding: 16px !important;
   }
 
   .detection-event-dialog .event-image-container {

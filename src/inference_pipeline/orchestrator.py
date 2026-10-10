@@ -18,7 +18,7 @@ class VlmPipelineRuntime:
         self.pipeline = pipeline
         trigger = pipeline.get("trigger") or {}
         self.cooldown_sec = float(trigger.get("cooldown_sec") or 15)
-        self.max_calls_per_minute = int(trigger.get("max_calls_per_minute") or 6)
+        self.max_calls_per_minute = int(trigger.get("max_calls_per_minute") or 12)
         self._last_run_at = 0.0
         self._call_times: Deque[float] = deque()
 

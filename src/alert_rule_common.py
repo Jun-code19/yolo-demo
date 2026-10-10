@@ -3,7 +3,8 @@ from __future__ import annotations
 
 import os
 
-DEFAULT_EVAL_INTERVAL_SEC = 60
+# 评估周期：过长会导致告警延迟；可用环境变量 ALERT_RULE_EVAL_INTERVAL_SEC 覆盖
+DEFAULT_EVAL_INTERVAL_SEC = 15
 DEFAULT_WINDOW_SEC = 300
 DEFAULT_COOLDOWN_SEC = 60
 

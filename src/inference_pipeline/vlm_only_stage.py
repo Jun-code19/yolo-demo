@@ -4,7 +4,11 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 
-from src.inference_pipeline.payload_builder import encode_frame_to_base64, resolve_prompt
+from src.inference_pipeline.payload_builder import (
+    canonicalize_bbox_to_norm,
+    encode_frame_for_vlm,
+    resolve_prompt,
+)
 from src.inference_pipeline.providers.qwen_vl import get_vlm_provider
 
 _COLOR_KEYWORDS = {
@@ -116,6 +120,18 @@ def _resolve_confidence(
     return conf
 
 
+def parse_finding_bbox(
+    raw: Any,
+    ref_width: Optional[int] = None,
+    ref_height: Optional[int] = None,
+) -> Optional[List[float]]:
+    """解析 finding.bbox → 归一化 xyxy (0~1)。需提供送模图像尺寸以正确换算 0~1000/像素。"""
+    if ref_width and ref_height:
+        return canonicalize_bbox_to_norm(raw, ref_width, ref_height)
+    # 无尺寸时仅接受已是 0~1 的值
+    return canonicalize_bbox_to_norm(raw, 1000, 1000) if raw is not None else None
+
+
 def _label_mentioned_positively(summary: str, label: str) -> bool:
     summary_lower = summary.lower()
     label_lower = label.lower()
@@ -191,6 +207,8 @@ def normalize_vlm_detect_result(
     parsed: Optional[Dict[str, Any]],
     alert_labels: Optional[List[str]] = None,
     min_confidence: float = 0.7,
+    image_width: Optional[int] = None,
+    image_height: Optional[int] = None,
 ) -> Dict[str, Any]:
     if not parsed or not isinstance(parsed, dict):
         return {
@@ -215,15 +233,22 @@ def normalize_vlm_detect_result(
             confidence = float(item.get("confidence") or 0)
         except (TypeError, ValueError):
             confidence = 0.0
-        normalized.append(
-            {
-                "label": label,
-                "confidence": confidence,
-                "description": item.get("description") or "",
-                "severity": item.get("severity") or "info",
-                **({"attributes": item["attributes"]} if isinstance(item.get("attributes"), dict) else {}),
-            }
+        entry: Dict[str, Any] = {
+            "label": label,
+            "confidence": confidence,
+            "description": item.get("description") or "",
+            "severity": item.get("severity") or "info",
+        }
+        if isinstance(item.get("attributes"), dict):
+            entry["attributes"] = item["attributes"]
+        bbox = parse_finding_bbox(
+            item.get("bbox") or item.get("box") or item.get("bounding_box"),
+            ref_width=image_width,
+            ref_height=image_height,
         )
+        if bbox:
+            entry["bbox"] = bbox
+        normalized.append(entry)
 
     verified = []
     for item in normalized:
@@ -274,8 +299,16 @@ def run_vlm_only_inspection(
     max_width = int(input_cfg.get("max_width") or 1280)
     jpeg_quality = int(input_cfg.get("jpeg_quality") or 85)
 
-    prompts = resolve_prompt(prompt_id, alert_labels, prompt_override)
-    image_b64 = encode_frame_to_base64(frame, max_width=max_width, jpeg_quality=jpeg_quality)
+    image_b64, sent_w, sent_h = encode_frame_for_vlm(
+        frame, max_width=max_width, jpeg_quality=jpeg_quality
+    )
+    prompts = resolve_prompt(
+        prompt_id,
+        alert_labels,
+        prompt_override,
+        image_width=sent_w,
+        image_height=sent_h,
+    )
 
     provider = get_vlm_provider(model_record)
     raw = provider.inspect_image(image_b64, prompts["system"], prompts["user"])
@@ -284,6 +317,8 @@ def run_vlm_only_inspection(
         raw.get("parsed"),
         alert_labels=alert_labels,
         min_confidence=min_confidence,
+        image_width=sent_w,
+        image_height=sent_h,
     )
 
     return {

@@ -220,7 +220,7 @@ const devices = ref([])
 const vlmJobMap = ref({})
 const smartSchemeMap = ref({})
 const searchText = ref('')
-const evalIntervalSec = ref(60)
+const evalIntervalSec = ref(15)
 const sourceCount = ref(4)
 const dialogRef = ref(null)
 
@@ -308,7 +308,7 @@ const loadDevices = async () => {
 const loadMeta = async () => {
   try {
     const res = await alertRuleApi.getMeta()
-    evalIntervalSec.value = res.data?.eval_interval_sec || 60
+    evalIntervalSec.value = res.data?.eval_interval_sec || 15
     sourceCount.value = (res.data?.supported_sources || []).length || 4
   } catch {
     /* ignore */
@@ -360,7 +360,7 @@ const handleEvaluate = async () => {
     const res = await alertRuleApi.evaluate()
     const stats = res.data?.stats || {}
     ElMessage.success(
-      `评估完成：命中 ${stats.fired || 0} 条，推送 ${stats.pushed || 0} 条，跳过冷却 ${stats.skipped_cooldown || 0} 条`
+      `评估完成：命中 ${stats.fired || 0} 条，推送 ${stats.pushed || 0} 条，跳过冷却 ${stats.skipped_cooldown || 0} 条，跳过旧事件 ${stats.skipped_stale || 0} 条`
     )
   } catch (error) {
     ElMessage.error(error.response?.data?.detail || '评估失败（需管理员权限）')

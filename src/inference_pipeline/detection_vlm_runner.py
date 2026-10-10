@@ -14,9 +14,9 @@ from src.database import DetectionConfig, DetectionEvent, EventStatus, SaveMode,
 from src.inference_pipeline.orchestrator import VlmPipelineRuntime
 from src.inference_pipeline.pipeline_config import is_vlm_pipeline_enabled
 from src.inference_pipeline.yolo_vlm_stage import (
-    pick_verify_candidates,
+    build_yolo_class_counts,
     run_yolo_analyze,
-    run_yolo_verify,
+    run_yolo_scene_verify,
 )
 
 logger = logging.getLogger(__name__)
@@ -163,49 +163,62 @@ class DetectionVlmRunner:
     def _run_verify_worker(
         self, frame, detections, speed, device_id, device_name, device_ip, push_label
     ):
-        candidates = pick_verify_candidates(detections)
-        if not candidates:
+        """整帧一次复检：正常 / 有出入都入库推送；出入与不确定标为重要。"""
+        if not detections:
+            return
+        if not self.vlm_runtime.can_run():
             return
 
-        for candidate in candidates:
-            if not self.vlm_runtime.can_run():
-                break
+        model = self._load_vlm_model()
+        if not model:
+            return
 
-            model = self._load_vlm_model()
-            if not model:
-                return
+        self.vlm_runtime.mark_ran()
+        pipeline_result = run_yolo_scene_verify(
+            frame, detections, model, self.inference_pipeline
+        )
+        error_text = pipeline_result.get("error") or ""
+        if self._is_auth_error(error_text):
+            self.invalidate_vlm_model_cache()
+            self._load_vlm_model(force_refresh=True)
 
-            self.vlm_runtime.mark_ran()
-            pipeline_result = run_yolo_verify(frame, candidate, model, self.inference_pipeline)
-            error_text = pipeline_result.get("error") or ""
-            if self._is_auth_error(error_text):
-                self.invalidate_vlm_model_cache()
-                self._load_vlm_model(force_refresh=True)
+        if not pipeline_result.get("ok"):
+            # 调用失败也落一条不确定事件，便于排查
+            pipeline_result = {
+                **pipeline_result,
+                "ok": False,
+                "result": {
+                    "consistency": "uncertain",
+                    "verified": False,
+                    "confidence": 0.0,
+                    "reason": error_text or "VLM 复检调用失败",
+                    "summary": error_text or "VLM 复检调用失败",
+                    "yolo_summary": build_yolo_class_counts(detections),
+                    "observed_counts": {},
+                    "diffs": [],
+                },
+            }
 
-            if not pipeline_result.get("ok") or not pipeline_result.get("result", {}).get("verified"):
-                logger.debug(
-                    "VLM 复检未通过: %s",
-                    error_text or pipeline_result.get("result", {}).get("reason"),
-                )
-                continue
-
-            self._save_event(frame, [candidate], pipeline_result, "yolo_verify", device_id)
-            self._push_data(
-                [candidate],
-                frame,
-                speed,
-                pipeline_result,
-                "yolo_verify",
-                device_id,
-                device_name,
-                device_ip,
-                push_label,
-            )
+        self._save_event(frame, detections, pipeline_result, "yolo_verify", device_id)
+        self._push_data(
+            detections,
+            frame,
+            speed,
+            pipeline_result,
+            "yolo_verify",
+            device_id,
+            device_name,
+            device_ip,
+            push_label,
+        )
 
     def _run_analyze_worker(
         self, frame, detections, speed, device_id, device_name, device_ip, push_label
     ):
         if not self.vlm_runtime.can_run():
+            return
+
+        if not detections:
             return
 
         model = self._load_vlm_model()
@@ -258,6 +271,20 @@ class DetectionVlmRunner:
                     max_conf,
                     max(float(f.get("confidence") or 0) for f in vlm_result["findings"]),
                 )
+            if event_type == "yolo_verify" and vlm_result.get("confidence") is not None:
+                try:
+                    max_conf = max(max_conf, float(vlm_result.get("confidence") or 0))
+                except (TypeError, ValueError):
+                    pass
+
+            consistency = str(vlm_result.get("consistency") or "").lower()
+            event_status = EventStatus.new
+            if event_type == "yolo_verify" and consistency in ("mismatch", "uncertain"):
+                event_status = EventStatus.flagged
+            if event_type == "yolo_analyze":
+                # 行为分析仅在 needs_alert 时入库，统一标记为命中
+                consistency = "hit"
+                event_status = EventStatus.flagged
 
             event = DetectionEvent(
                 event_id=event_id,
@@ -267,22 +294,43 @@ class DetectionVlmRunner:
                 event_type=event_type,
                 confidence=max_conf,
                 bounding_box=detections,
-                status=EventStatus.new,
+                status=event_status,
                 created_at=current_time,
             )
 
             summary = vlm_result.get("summary") or vlm_result.get("reason") or ""
             if event_type == "yolo_verify":
-                desc = f"VLM 复检通过: {summary or detections[0].get('class_name', '目标')}"
+                yolo_summary = vlm_result.get("yolo_summary") or {}
+                if isinstance(yolo_summary, dict) and yolo_summary:
+                    yolo_txt = "、".join(f"{k}×{v}" for k, v in yolo_summary.items())
+                else:
+                    yolo_txt = f"{len(detections)}个目标"
+                if consistency == "match":
+                    desc = f"复检一致（{yolo_txt}）" + (f"：{summary}" if summary else "")
+                elif consistency == "uncertain":
+                    desc = f"复检不确定（{yolo_txt}）" + (f"：{summary}" if summary else "")
+                else:
+                    diffs = vlm_result.get("diffs") or []
+                    if diffs:
+                        tip = "；".join(
+                            str(d.get("note") or d.get("class_name") or "")
+                            for d in diffs[:3]
+                            if isinstance(d, dict)
+                        )
+                        desc = f"复检有出入（{yolo_txt}）" + (f"：{tip or summary}" if (tip or summary) else "")
+                    else:
+                        desc = f"复检有出入（{yolo_txt}）" + (f"：{summary}" if summary else "")
             else:
                 labels = vlm_result.get("alert_labels") or []
-                desc = summary or f"VLM 分析告警: {', '.join(labels)}"
+                label_txt = "、".join(str(x) for x in labels if x)
+                desc = f"行为分析命中" + (f"：{label_txt}" if label_txt else "") + (f"；{summary}" if summary else "")
 
             meta = {
                 "current_count": len(detections),
                 "target_class": self.target_class,
                 "event_description": desc,
                 "pipeline_mode": self.inference_pipeline.get("mode"),
+                "consistency": consistency or None,
                 "vlm": {
                     "model_id": self.inference_pipeline.get("vlm_model_id"),
                     "prompt_id": self.inference_pipeline.get("prompt_id"),
@@ -290,6 +338,8 @@ class DetectionVlmRunner:
                     "result": vlm_result,
                 },
                 "yolo": {
+                    "count": len(detections),
+                    "class_counts": vlm_result.get("yolo_summary") or {},
                     "detections": [
                         {
                             "class_name": d.get("class_name"),
@@ -297,7 +347,7 @@ class DetectionVlmRunner:
                             "bbox": d.get("bbox"),
                         }
                         for d in detections
-                    ]
+                    ],
                 },
             }
             if self.group_id:
@@ -353,6 +403,12 @@ class DetectionVlmRunner:
             "pipeline_mode": self.inference_pipeline.get("mode"),
             "vlm_summary": vlm_result.get("summary") or vlm_result.get("reason") or "",
             "vlm_alert_labels": vlm_result.get("alert_labels") or [],
+            "consistency": (
+                "hit" if event_type == "yolo_analyze" else vlm_result.get("consistency")
+            ),
+            "yolo_class_counts": vlm_result.get("yolo_summary") or {},
+            "observed_counts": vlm_result.get("observed_counts") or {},
+            "diffs": vlm_result.get("diffs") or [],
         }
         if self.group_id:
             push_data["groupId"] = self.group_id

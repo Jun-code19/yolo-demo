@@ -13,11 +13,13 @@ DEFAULT_INFERENCE_PIPELINE: Dict[str, Any] = {
     "min_confidence": 0.7,
     "trigger": {
         "cooldown_sec": 15,
-        "max_calls_per_minute": 6,
-        "context": "crop_with_margin",
+        "max_calls_per_minute": 12,
+        # 整帧复检默认送整图；裁剪模式仍可用（对全目标并集）
+        "context": "full_frame",
         "margin_ratio": 0.15,
     },
     "verify": {
+        # VLM 结论置信度低于此值视为 uncertain，仍入库并标重要
         "reject_below": 0.6,
     },
     "input": {
@@ -54,8 +56,13 @@ def normalize_inference_pipeline(config: Optional[Dict[str, Any]]) -> Dict[str, 
     if mode not in (MODE_YOLO_ONLY, MODE_YOLO_VERIFY, MODE_YOLO_ANALYZE):
         mode = MODE_YOLO_ONLY
     merged["mode"] = mode
-    if mode == MODE_YOLO_ANALYZE and merged.get("prompt_id") == "yolo_verify_v1":
+    if mode == MODE_YOLO_VERIFY:
+        merged["prompt_id"] = "yolo_verify_v1"
+        merged["prompt_override"] = None
+    elif mode == MODE_YOLO_ANALYZE and merged.get("prompt_id") == "yolo_verify_v1":
         merged["prompt_id"] = "general_patrol_v1"
+    # VLM 管道统一送整帧
+    merged["trigger"]["context"] = "full_frame"
     return merged
 
 

@@ -777,6 +777,59 @@ def _ensure_rule_state(db: Session, rule_id: str) -> AlertRuleState:
     return state
 
 
+_DEVICE_COOLDOWN_KEY = "__device_cooldown__"
+
+
+def _cooldown_key(device_id: Optional[str]) -> str:
+    return device_id or "__global__"
+
+
+def _parse_dt(value: Any) -> Optional[datetime]:
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str) and value:
+        try:
+            return datetime.fromisoformat(value)
+        except ValueError:
+            return None
+    return None
+
+
+def _get_device_cooldowns(condition_state: Optional[Dict[str, Any]]) -> Dict[str, datetime]:
+    raw = (condition_state or {}).get(_DEVICE_COOLDOWN_KEY) or {}
+    if not isinstance(raw, dict):
+        return {}
+    out: Dict[str, datetime] = {}
+    for key, value in raw.items():
+        dt = _parse_dt(value)
+        if dt is not None:
+            out[str(key)] = dt
+    return out
+
+
+def _with_device_cooldown(
+    condition_state: Optional[Dict[str, Any]],
+    device_id: Optional[str],
+    fired_at: datetime,
+) -> Dict[str, Any]:
+    """写入设备级冷却时间，并清空持续条件（保留冷却表）。"""
+    cool = _get_device_cooldowns(condition_state)
+    cool[_cooldown_key(device_id)] = fired_at
+    # 只保留近 24h，避免 JSON 无限膨胀
+    cutoff = fired_at - timedelta(hours=24)
+    cool = {k: v for k, v in cool.items() if v >= cutoff}
+    return {
+        _DEVICE_COOLDOWN_KEY: {k: v.isoformat() for k, v in cool.items()},
+    }
+
+
+def _has_new_evidence(matched: List[NormalizedEvent], anchor: Optional[datetime]) -> bool:
+    """冷却结束后若窗口内仍是旧事件，不应重复告警；需有新于 anchor 的证据。"""
+    if anchor is None:
+        return True
+    return any(event.timestamp > anchor for event in matched)
+
+
 def _build_alert_title(rule: AlertRule, device_id: Optional[str], device_ids: Optional[List[str]] = None) -> str:
     if device_id:
         device_part = device_id
@@ -914,7 +967,14 @@ def evaluate_rules(db: Optional[Session] = None, push_enabled: bool = True) -> D
     """评估所有启用规则，命中写入 composite_alert"""
     own_session = db is None
     session = db or SessionLocal()
-    stats = {"evaluated": 0, "fired": 0, "pushed": 0, "skipped_cooldown": 0, "errors": 0}
+    stats = {
+        "evaluated": 0,
+        "fired": 0,
+        "pushed": 0,
+        "skipped_cooldown": 0,
+        "skipped_stale": 0,
+        "errors": 0,
+    }
 
     try:
         now = datetime.now()
@@ -935,9 +995,7 @@ def evaluate_rules(db: Optional[Session] = None, push_enabled: bool = True) -> D
 
                 state = _ensure_rule_state(session, rule.rule_id)
                 cooldown_sec = float(definition.get("cooldown_sec") or DEFAULT_COOLDOWN_SEC)
-                if state.last_fired_at and (now - state.last_fired_at).total_seconds() < cooldown_sec:
-                    stats["skipped_cooldown"] += 1
-                    continue
+                device_cooldowns = _get_device_cooldowns(state.condition_state)
 
                 window_sec = float(definition.get("window_sec") or DEFAULT_WINDOW_SEC)
                 max_duration_sec = _max_rule_duration_sec(definition)
@@ -956,35 +1014,60 @@ def evaluate_rules(db: Optional[Session] = None, push_enabled: bool = True) -> D
                 device_ids = _group_device_ids(events, same_device)
 
                 event_cursor = state.watermark
-                fired_any = False
+                # 评估过程中持续条件会更新；冷却表需始终保留
+                working_state = dict(state.condition_state or {})
+                if _DEVICE_COOLDOWN_KEY not in working_state:
+                    working_state[_DEVICE_COOLDOWN_KEY] = {
+                        k: v.isoformat() for k, v in device_cooldowns.items()
+                    }
+
                 for device_id in device_ids:
+                    cool_key = _cooldown_key(device_id)
+                    last_dev_fire = device_cooldowns.get(cool_key)
+                    if last_dev_fire and (now - last_dev_fire).total_seconds() < cooldown_sec:
+                        stats["skipped_cooldown"] += 1
+                        continue
+
                     hit, matched, new_condition_state = _evaluate_for_device(
                         definition,
                         events,
                         device_id,
-                        state.condition_state or {},
+                        working_state,
                         now,
                         event_cursor=event_cursor,
                     )
-                    state.condition_state = new_condition_state
+                    # 合并持续条件，但不要丢掉冷却表
+                    merged_state = dict(new_condition_state or {})
+                    merged_state[_DEVICE_COOLDOWN_KEY] = working_state.get(_DEVICE_COOLDOWN_KEY) or {}
+                    working_state = merged_state
+                    state.condition_state = working_state
+
                     if not hit or not matched:
+                        continue
+
+                    # AND 窗口会反复扫到旧事件：无新证据则不重复告警
+                    if not _has_new_evidence(matched, last_dev_fire):
+                        stats["skipped_stale"] += 1
                         continue
 
                     matched_device_ids = sorted({event.device_id for event in matched if event.device_id})
                     summary = f"规则 {rule.name} 命中，匹配 {len(matched)} 条事件"
+                    alert_device_id = device_id
                     if len(matched_device_ids) == 1:
-                        device_id = matched_device_ids[0]
+                        alert_device_id = matched_device_ids[0]
                     elif len(matched_device_ids) > 1:
-                        device_id = None
+                        alert_device_id = None
                         summary += f"，涉及 {len(matched_device_ids)} 台设备"
+                    elif len(device_ids) == 1:
+                        alert_device_id = device_ids[0]
                     else:
-                        device_id = device_ids[0] if len(device_ids) == 1 else None
+                        alert_device_id = None
 
                     alert = CompositeAlert(
                         alert_id=str(uuid.uuid4()),
                         rule_id=rule.rule_id,
-                        device_id=device_id,
-                        title=_build_alert_title(rule, device_id, matched_device_ids),
+                        device_id=alert_device_id,
+                        title=_build_alert_title(rule, alert_device_id, matched_device_ids),
                         summary=summary,
                         matched_events=[_event_to_dict(event) for event in matched],
                         definition_snapshot=definition,
@@ -995,7 +1078,7 @@ def evaluate_rules(db: Optional[Session] = None, push_enabled: bool = True) -> D
                     session.flush()
                     if push_enabled:
                         try:
-                            if _push_composite_alert(session, rule, alert, device_id, matched):
+                            if _push_composite_alert(session, rule, alert, alert_device_id, matched):
                                 stats["pushed"] += 1
                         except Exception as push_exc:
                             logger.error(
@@ -1005,21 +1088,20 @@ def evaluate_rules(db: Optional[Session] = None, push_enabled: bool = True) -> D
                                 push_exc,
                             )
                     state.last_fired_at = now
-                    state.condition_state = {}
-                    fired_any = True
+                    working_state = _with_device_cooldown(working_state, alert_device_id or device_id, now)
+                    device_cooldowns = _get_device_cooldowns(working_state)
+                    state.condition_state = working_state
                     stats["fired"] += 1
                     logger.info(
                         "复合告警命中 rule=%s device=%s matched=%s",
                         rule.rule_id,
-                        device_id,
+                        alert_device_id,
                         len(matched),
                     )
-                    break
+                    # 不再 break：同轮允许多设备各自告警（各自冷却）
 
                 state.watermark = max(event.timestamp for event in events)
                 state.updated_at = now
-                if fired_any:
-                    continue
 
             except Exception as exc:
                 stats["errors"] += 1

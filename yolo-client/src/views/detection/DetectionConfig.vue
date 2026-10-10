@@ -561,24 +561,28 @@
                         v-model="formState.pipelinePromptId"
                         teleported
                         style="width: 100%"
+                        :disabled="formState.pipelineMode === 'yolo_then_verify'"
                         @change="handlePipelinePromptChange"
                       >
                         <el-option
-                          v-for="p in vlmPrompts"
+                          v-for="p in pipelinePromptOptions"
                           :key="p.prompt_id"
                           :label="p.name"
                           :value="p.prompt_id"
                         />
                       </el-select>
-                      <p v-if="currentPipelinePromptDesc" class="field-hint">{{ currentPipelinePromptDesc }}</p>
-                      <p class="field-hint">
+                      <p v-if="formState.pipelineMode === 'yolo_then_verify'" class="field-hint">
+                        复检固定使用「YOLO 整帧复检」模板，不可更改。
+                      </p>
+                      <p v-else-if="currentPipelinePromptDesc" class="field-hint">{{ currentPipelinePromptDesc }}</p>
+                      <p v-if="formState.pipelineMode === 'yolo_then_analyze'" class="field-hint">
                         <el-link type="primary" @click="router.push('/vlm-inspection/prompt-templates')">管理 Prompt 模板库</el-link>
                       </p>
                     </el-form-item>
                   </div>
 
                   <el-form-item
-                    v-if="formState.pipelinePromptId === 'custom_freeform_v1'"
+                    v-if="formState.pipelineMode === 'yolo_then_analyze' && formState.pipelinePromptId === 'custom_freeform_v1'"
                     label="自定义 Prompt"
                   >
                     <el-input
@@ -612,100 +616,75 @@
                     <p class="field-hint">切换 Prompt 模板时会自动填充默认告警标签，也可手动增删。</p>
                   </el-form-item>
 
-                  <div class="form-row pipeline-limit-row">
-                    <el-form-item
-                      v-if="formState.pipelineMode === 'yolo_then_verify'"
-                      label="复检置信阈值"
-                      class="form-item pipeline-confidence-item"
-                    >
-                      <el-input-number
-                        v-model="formState.pipelineRejectBelow"
-                        :min="0.1"
-                        :max="1"
-                        :step="0.05"
-                        :precision="2"
-                        controls-position="right"
-                        style="width: 100%"
-                      />
-                    </el-form-item>
-                    <el-form-item
-                      v-if="formState.pipelineMode === 'yolo_then_analyze'"
-                      label="最低置信度"
-                      class="form-item pipeline-confidence-item"
-                    >
-                      <el-input-number
-                        v-model="formState.pipelineMinConfidence"
-                        :min="0.1"
-                        :max="1"
-                        :step="0.05"
-                        :precision="2"
-                        controls-position="right"
-                        style="width: 100%"
-                      />
-                    </el-form-item>
-                    <el-form-item label="VLM 冷却（秒）" class="form-item">
-                      <el-input-number
-                        v-model="formState.pipelineCooldownSec"
-                        :min="5"
-                        :max="600"
-                        controls-position="right"
-                        style="width: 100%"
-                      />
-                    </el-form-item>
-                    <el-form-item label="每分钟上限" class="form-item">
-                      <el-input-number
-                        v-model="formState.pipelineMaxCallsPerMinute"
-                        :min="1"
-                        :max="60"
-                        controls-position="right"
-                        style="width: 100%"
-                      />
-                    </el-form-item>
-                  </div>
-                  <p
-                    v-if="formState.pipelineMode === 'yolo_then_verify'"
-                    class="field-hint pipeline-limit-hint"
-                  >
-                    复检置信阈值：VLM 返回 verified=true 且置信度 ≥ 此值才写入事件，默认 0.6。
-                  </p>
+                  <template v-if="formState.pipelineMode === 'yolo_then_verify'">
+                    <div class="form-row pipeline-limit-row pipeline-limit-row--3">
+                      <el-form-item label="复检置信阈值" class="form-item">
+                        <el-input-number
+                          v-model="formState.pipelineRejectBelow"
+                          :min="0.1"
+                          :max="1"
+                          :step="0.05"
+                          :precision="2"
+                          controls-position="right"
+                        />
+                      </el-form-item>
+                      <el-form-item label="VLM 冷却（秒）" class="form-item">
+                        <el-input-number
+                          v-model="formState.pipelineCooldownSec"
+                          :min="5"
+                          :max="600"
+                          controls-position="right"
+                        />
+                      </el-form-item>
+                      <el-form-item label="每分钟上限" class="form-item">
+                        <el-input-number
+                          v-model="formState.pipelineMaxCallsPerMinute"
+                          :min="1"
+                          :max="60"
+                          controls-position="right"
+                        />
+                      </el-form-item>
+                    </div>
+                    <p class="field-hint pipeline-limit-hint">
+                      整帧一次复检：对照 YOLO 类别/数量，一致与有出入都会入库并推送；有出入或不确定自动标为重要。
+                      复检置信阈值：VLM 结论置信度低于此值视为不确定。冷却 / 每分钟上限限制 VLM 调用次数。
+                    </p>
+                  </template>
 
-                  <div class="pipeline-image-block">
-                    <el-form-item label="送 VLM 图像范围" class="pipeline-image-scope-item">
-                      <el-radio-group v-model="formState.pipelineContext">
-                        <el-radio-button value="crop">目标裁剪</el-radio-button>
-                        <el-radio-button value="crop_with_margin">裁剪+边距</el-radio-button>
-                        <el-radio-button value="full_frame">整帧</el-radio-button>
-                      </el-radio-group>
-                    </el-form-item>
+                  <template v-else-if="formState.pipelineMode === 'yolo_then_analyze'">
+                    <div class="form-row pipeline-limit-row pipeline-limit-row--3">
+                      <el-form-item label="最低置信度" class="form-item">
+                        <el-input-number
+                          v-model="formState.pipelineMinConfidence"
+                          :min="0.1"
+                          :max="1"
+                          :step="0.05"
+                          :precision="2"
+                          controls-position="right"
+                        />
+                      </el-form-item>
+                      <el-form-item label="VLM 冷却（秒）" class="form-item">
+                        <el-input-number
+                          v-model="formState.pipelineCooldownSec"
+                          :min="5"
+                          :max="600"
+                          controls-position="right"
+                        />
+                      </el-form-item>
+                      <el-form-item label="每分钟上限" class="form-item">
+                        <el-input-number
+                          v-model="formState.pipelineMaxCallsPerMinute"
+                          :min="1"
+                          :max="60"
+                          controls-position="right"
+                        />
+                      </el-form-item>
+                    </div>
+                    <p class="field-hint pipeline-limit-hint">
+                      最低置信度约束 VLM findings。冷却 / 每分钟上限限制 VLM API 调用次数（不是告警推送）。
+                    </p>
+                  </template>
 
-                    <el-form-item
-                      v-if="formState.pipelineContext === 'crop_with_margin'"
-                      label="裁剪边距"
-                      class="pipeline-margin-item"
-                    >
-                      <div class="margin-ratio-control">
-                        <div class="margin-ratio-row">
-                          <el-slider
-                            v-model="formState.pipelineMarginRatio"
-                            :min="5"
-                            :max="50"
-                            :step="5"
-                            :format-tooltip="(v) => `${v}%`"
-                            class="margin-ratio-slider"
-                          />
-                          <el-input-number
-                            v-model="formState.pipelineMarginRatio"
-                            :min="5"
-                            :max="50"
-                            :step="5"
-                            controls-position="right"
-                            class="margin-ratio-input"
-                          />
-                        </div>
-                        <span class="unit-label">相对目标框各边扩展比例</span>
-                      </div>
-                    </el-form-item>
-                  </div>
                 </template>
               </div>
             </div>
@@ -1011,8 +990,8 @@ export default defineComponent({
       pipelineMinConfidence: 0.7,
       pipelineRejectBelow: 0.6,
       pipelineCooldownSec: 15,
-      pipelineMaxCallsPerMinute: 6,
-      pipelineContext: 'crop_with_margin',
+      pipelineMaxCallsPerMinute: 12,
+      pipelineContext: 'full_frame',
       pipelineMarginRatio: 15
     });
 
@@ -1028,6 +1007,18 @@ export default defineComponent({
     const currentPipelinePromptDesc = computed(() => {
       const p = vlmPrompts.value.find(item => item.prompt_id === formState.pipelinePromptId);
       return p?.description || '';
+    });
+
+    const pipelinePromptOptions = computed(() => {
+      const list = vlmPrompts.value || [];
+      if (formState.pipelineMode === 'yolo_then_verify') {
+        const verify = list.find((p) => p.prompt_id === 'yolo_verify_v1');
+        return verify
+          ? [verify]
+          : [{ prompt_id: 'yolo_verify_v1', name: 'YOLO 整帧复检', description: '' }];
+      }
+      // 行为分析不展示复检模板
+      return list.filter((p) => p.prompt_id !== 'yolo_verify_v1');
     });
 
     const suggestedPipelineLabels = computed(() => {
@@ -1071,8 +1062,9 @@ export default defineComponent({
     };
 
     const handlePipelineModeChange = (mode) => {
+      formState.pipelineContext = 'full_frame';
       if (mode === 'yolo_then_analyze') {
-        if (formState.pipelinePromptId === 'yolo_verify_v1' || formState.pipelinePromptId === 'custom_freeform_v1') {
+        if (formState.pipelinePromptId === 'yolo_verify_v1') {
           formState.pipelinePromptId = 'general_patrol_v1';
           formState.pipelinePromptOverride = '';
         }
@@ -1094,8 +1086,8 @@ export default defineComponent({
       formState.pipelineMinConfidence = 0.7;
       formState.pipelineRejectBelow = 0.6;
       formState.pipelineCooldownSec = 15;
-      formState.pipelineMaxCallsPerMinute = 6;
-      formState.pipelineContext = 'crop_with_margin';
+      formState.pipelineMaxCallsPerMinute = 12;
+      formState.pipelineContext = 'full_frame';
       formState.pipelineMarginRatio = 15;
     };
 
@@ -1112,20 +1104,24 @@ export default defineComponent({
         trigger: {
           cooldown_sec: formState.pipelineCooldownSec,
           max_calls_per_minute: formState.pipelineMaxCallsPerMinute,
-          context: formState.pipelineContext,
-          margin_ratio: (formState.pipelineMarginRatio || 15) / 100
+          context: 'full_frame',
+          margin_ratio: 0.15
         }
       };
       if (formState.pipelineMode === 'yolo_then_verify') {
-        pipeline.prompt_id = formState.pipelinePromptId || 'yolo_verify_v1';
+        pipeline.prompt_id = 'yolo_verify_v1';
         pipeline.verify = {
           reject_below: formState.pipelineRejectBelow ?? 0.6
         };
+        // 复检不使用自定义覆盖
+        delete pipeline.prompt_override;
       } else if (formState.pipelineMode === 'yolo_then_analyze') {
-        pipeline.prompt_id = formState.pipelinePromptId || 'general_patrol_v1';
-      }
-      if (formState.pipelinePromptOverride?.trim()) {
-        pipeline.prompt_override = formState.pipelinePromptOverride.trim();
+        pipeline.prompt_id = formState.pipelinePromptId === 'yolo_verify_v1'
+          ? 'general_patrol_v1'
+          : (formState.pipelinePromptId || 'general_patrol_v1');
+        if (formState.pipelinePromptOverride?.trim()) {
+          pipeline.prompt_override = formState.pipelinePromptOverride.trim();
+        }
       }
       return pipeline;
     };
@@ -1138,8 +1134,15 @@ export default defineComponent({
       }
       formState.pipelineMode = pipeline.mode;
       formState.vlmModelId = pipeline.vlm_model_id || '';
-      formState.pipelinePromptId = pipeline.prompt_id || 'yolo_verify_v1';
-      formState.pipelinePromptOverride = pipeline.prompt_override || '';
+      if (pipeline.mode === 'yolo_then_verify') {
+        formState.pipelinePromptId = 'yolo_verify_v1';
+        formState.pipelinePromptOverride = '';
+      } else {
+        formState.pipelinePromptId = pipeline.prompt_id === 'yolo_verify_v1'
+          ? 'general_patrol_v1'
+          : (pipeline.prompt_id || 'general_patrol_v1');
+        formState.pipelinePromptOverride = pipeline.prompt_override || '';
+      }
       formState.pipelineAlertLabels = pipeline.alert_labels?.length
         ? [...pipeline.alert_labels]
         : (() => {
@@ -1149,12 +1152,9 @@ export default defineComponent({
       formState.pipelineMinConfidence = pipeline.min_confidence ?? 0.7;
       formState.pipelineRejectBelow = pipeline.verify?.reject_below ?? 0.6;
       formState.pipelineCooldownSec = pipeline.trigger?.cooldown_sec ?? 15;
-      formState.pipelineMaxCallsPerMinute = pipeline.trigger?.max_calls_per_minute ?? 6;
-      formState.pipelineContext = pipeline.trigger?.context || 'crop_with_margin';
-      const marginRatio = pipeline.trigger?.margin_ratio;
-      formState.pipelineMarginRatio = marginRatio != null
-        ? Math.round(Number(marginRatio) * 100)
-        : 15;
+      formState.pipelineMaxCallsPerMinute = pipeline.trigger?.max_calls_per_minute ?? 12;
+      formState.pipelineContext = 'full_frame';
+      formState.pipelineMarginRatio = 15;
     };
 
     const resetPushSettings = () => {
@@ -1674,6 +1674,7 @@ export default defineComponent({
                 return;
               }
               if (
+                formState.pipelineMode === 'yolo_then_analyze' &&
                 formState.pipelinePromptId === 'custom_freeform_v1' &&
                 !formState.pipelinePromptOverride?.trim()
               ) {
@@ -1871,6 +1872,7 @@ export default defineComponent({
       filterModelList,
       vlmModels,
       vlmPrompts,
+      pipelinePromptOptions,
       currentPipelinePromptDesc,
       suggestedPipelineLabels,
       pipelineCustomPromptPlaceholder,
@@ -2717,11 +2719,22 @@ export default defineComponent({
 
 .pipeline-limit-row {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 16px;
+  gap: 12px 16px;
   align-items: start;
   margin-top: 4px;
   margin-bottom: 4px;
+}
+
+.pipeline-limit-row--4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.pipeline-limit-row--3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.pipeline-limit-row--2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .pipeline-limit-hint {
@@ -2735,6 +2748,12 @@ export default defineComponent({
 
 .pipeline-limit-row :deep(.el-input-number) {
   width: 100%;
+}
+
+@media (max-width: 1100px) {
+  .pipeline-limit-row--4 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .pipeline-image-block {

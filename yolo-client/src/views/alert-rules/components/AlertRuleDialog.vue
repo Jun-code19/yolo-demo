@@ -78,7 +78,7 @@
         </div>
 
         <div class="form-row-2 timing-row">
-          <el-form-item label="窗口">
+          <el-form-item label="窗口(秒)">
             <el-input-number
               v-model="form.definition.window_sec"
               :min="10"
@@ -87,9 +87,11 @@
               controls-position="right"
               class="w-full"
             />
+            <div class="field-tip">AND 时：条件事件需落在此时间窗内</div>
           </el-form-item>
-          <el-form-item label="冷却">
+          <el-form-item label="冷却(秒)">
             <el-input-number v-model="form.definition.cooldown_sec" :min="0" :max="86400" controls-position="right" class="w-full" />
+            <div class="field-tip">同一设备冷却期内不重复告警；结束后需有新事件才再触发</div>
           </el-form-item>
         </div>
 
@@ -628,6 +630,13 @@ defineExpose({ openCreate, openEdit })
 
 .timing-row :deep(.el-form-item__label) {
   font-size: 12px;
+}
+
+.field-tip {
+  margin-top: 4px;
+  color: #909399;
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .divider-btn {

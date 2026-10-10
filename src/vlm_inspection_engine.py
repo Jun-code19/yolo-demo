@@ -22,7 +22,7 @@ from src.database import (
 from src.detection_runtime import extract_runtime_config, is_within_active_period
 from src.data_pusher import data_pusher
 from src.frame_acquisition import frame_acquisition
-from src.inference_pipeline.payload_builder import save_snapshot
+from src.inference_pipeline.payload_builder import annotate_frame_with_findings, save_snapshot
 from src.inference_pipeline.vlm_only_stage import run_vlm_only_inspection
 from src.vlm_inspection_job_utils import (
     normalize_group_settings,
@@ -228,9 +228,6 @@ class VlmInspectionEngine:
                     db.commit()
                     continue
 
-                if vlm_config.get("save_snapshot", True):
-                    finding.snapshot_path = save_snapshot(frame, job_id, finding_id)
-
                 inspection = run_vlm_only_inspection(
                     frame=frame,
                     model_record=model,
@@ -246,15 +243,23 @@ class VlmInspectionEngine:
                     "raw_text": (inspection.get("raw_text") or "")[:4000],
                     "raw_parsed": inspection.get("raw_parsed"),
                 }
-                finding.findings = inspection.get("result", {}).get("findings") or []
-                finding.summary = inspection.get("result", {}).get("summary") or ""
+                result = inspection.get("result") or {}
+                findings_list = result.get("findings") or []
+                finding.findings = findings_list
+                finding.summary = result.get("summary") or ""
+
+                # 落盘原图；bbox 由详情页 canvas / 告警推送时再叠框，避免坐标系改后旧框烧进图
+                push_frame = frame
+                if vlm_config.get("save_snapshot", True):
+                    finding.snapshot_path = save_snapshot(frame, job_id, finding_id)
+                if any(isinstance(f, dict) and f.get("bbox") for f in findings_list):
+                    push_frame = annotate_frame_with_findings(frame, findings_list)
 
                 if inspection.get("error"):
                     finding.error = inspection["error"]
                     fail_count += 1
                 else:
                     success_count += 1
-                    result = inspection.get("result") or {}
                     needs_alert = bool(result.get("needs_alert"))
                     if needs_alert and self._in_cooldown(db, job_id, device_id, cooldown_sec):
                         needs_alert = False
@@ -263,7 +268,7 @@ class VlmInspectionEngine:
                     if needs_alert:
                         alert_count += 1
                         self._mark_cooldown(db, job_id, device_id)
-                        self._push_vlm_alert(job, device, finding, frame, result)
+                        self._push_vlm_alert(job, device, finding, push_frame, result)
 
                 db.add(finding)
                 db.commit()
