@@ -187,15 +187,38 @@ class DetectionEvent(Base):
     person_gallery_items = relationship("PersonGalleryItem", back_populates="event", cascade="all, delete-orphan")
 
 
+class PersonTrack(Base):
+    """人员搜索轨迹：同设备多帧聚合特征，检索主对象。"""
+    __tablename__ = "person_track"
+
+    track_id = Column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
+    device_id = Column(String(64), ForeignKey("device.device_id"), nullable=False, index=True)
+    local_track_id = Column(Integer, nullable=True)
+    agg_embedding = Column(JSONB)
+    repr_crop_path = Column(Text)
+    frame_count = Column(Integer, default=0)
+    quality_score = Column(Float)
+    first_seen = Column(DateTime, index=True)
+    last_seen = Column(DateTime, index=True)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    device = relationship("Device")
+    gallery_items = relationship("PersonGalleryItem", back_populates="track")
+
+
 class PersonGalleryItem(Base):
-    """人员搜索图库（POC：检测事件人体抠图 + 特征向量）"""
+    """人员搜索图库：检测事件人体抠图 + 帧级特征向量。"""
     __tablename__ = "person_gallery"
 
     gallery_id = Column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
     event_id = Column(String(64), ForeignKey("detection_event.event_id"), nullable=True)
     device_id = Column(String(64), ForeignKey("device.device_id"), nullable=False)
+    track_id = Column(String(64), ForeignKey("person_track.track_id"), nullable=True, index=True)
     bbox_index = Column(Integer, default=0)
     confidence = Column(Float)
+    quality_score = Column(Float)
+    is_keyframe = Column(Boolean, default=False)
     crop_path = Column(Text, nullable=False)
     bbox = Column(JSONB)
     embedding = Column(JSONB)
@@ -203,6 +226,7 @@ class PersonGalleryItem(Base):
 
     event = relationship("DetectionEvent", back_populates="person_gallery_items")
     device = relationship("Device")
+    track = relationship("PersonTrack", back_populates="gallery_items")
 
 class DetectionPerformance(Base):
     __tablename__ = "detection_performance"

@@ -299,7 +299,7 @@
       <!-- 分页 -->
       <div class="pagination">
         <el-pagination v-model:current-page="page" v-model:page-size="pageSize" :total="total"
-          :page-sizes="[10, 20, 50, 100]" layout="prev, pager, next, jumper, ->, total, sizes"
+          :page-sizes="[10, 50, 100, 200]" layout="prev, pager, next, jumper, ->, total, sizes"
           @size-change="handleSizeChange" @current-change="handlePageChange" />
       </div>
     </el-card>

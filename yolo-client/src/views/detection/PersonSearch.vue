@@ -3,7 +3,7 @@
     <div class="page-header">
       <div>
         <h2>人员搜索</h2>
-        <p>OSNet ReID + 模糊区间颜色复核 + 查询图自动抠人</p>
+        <p>轨迹聚合 + OSNet ReID + k-reciprocal 重排 · 辅助以图搜人</p>
       </div>
       <el-space wrap>
         <el-button type="primary" :loading="rebuilding" @click="handleRebuildEmbeddings">
@@ -20,13 +20,16 @@
     </div>
 
     <el-row :gutter="16" class="stats-row">
-      <el-col :span="8">
-        <el-card shadow="never"><div class="stat-num">{{ stats.total || 0 }}</div><div class="stat-label">图库总量</div></el-card>
+      <el-col :span="6">
+        <el-card shadow="never"><div class="stat-num">{{ stats.track_count || 0 }}</div><div class="stat-label">轨迹数</div></el-card>
       </el-col>
-      <el-col :span="8">
+      <el-col :span="6">
+        <el-card shadow="never"><div class="stat-num">{{ stats.total || 0 }}</div><div class="stat-label">帧图库</div></el-card>
+      </el-col>
+      <el-col :span="6">
         <el-card shadow="never"><div class="stat-num">{{ stats.today || 0 }}</div><div class="stat-label">今日入库</div></el-card>
       </el-col>
-      <el-col :span="8">
+      <el-col :span="6">
         <el-card shadow="never"><div class="stat-num">{{ stats.device_count || 0 }}</div><div class="stat-label">覆盖设备</div></el-card>
       </el-col>
     </el-row>
@@ -52,8 +55,8 @@
 
           <el-form label-width="88px" class="query-form">
             <el-form-item label="匹配分≥">
-              <el-slider v-model="searchForm.minSimilarity" :min="0.3" :max="0.95" :step="0.05" show-input />
-              <div class="field-tip">排序以 OSNet 深度相似度为准；建议 0.55–0.65</div>
+              <el-slider v-model="searchForm.minSimilarity" :min="0.35" :max="0.95" :step="0.01" show-input />
+              <div class="field-tip">跨角度/光照建议 0.50–0.60；近原图才会到 0.85+。误报多再上调</div>
             </el-form-item>
             <el-form-item label="返回条数">
               <el-input-number v-model="searchForm.topK" :min="5" :max="100" />
@@ -92,8 +95,8 @@
               <div class="result-header-left">
                 <span>{{ activeTab === 'search' ? '搜索结果' : '最近入库' }}</span>
                 <span v-if="activeTab === 'search' && searchMeta" class="search-meta">
-                  检索 {{ searchMeta.scanned }} 张 · 重排 {{ searchMeta.reranked }} 条
-                  <template v-if="searchMeta.verified"> · 复核 {{ searchMeta.verified }} 条</template>
+                  扫描 {{ searchMeta.scanned }} · 重排 {{ searchMeta.reranked }}
+                  <template v-if="searchMeta.backend"> · {{ searchMeta.backend }}</template>
                   · {{ searchMeta.search_ms }} ms
                 </span>
               </div>
@@ -107,7 +110,13 @@
           <div v-if="activeTab === 'search'" v-loading="searching">
             <el-empty v-if="!searchResults.length" description="上传照片并搜索，或先回填历史检测事件" />
             <el-row v-else :gutter="12">
-              <el-col v-for="item in searchResults" :key="item.gallery_id" :xs="12" :sm="8" :md="6">
+              <el-col
+                v-for="item in searchResults"
+                :key="item.track_id || item.gallery_id"
+                :xs="12"
+                :sm="8"
+                :md="6"
+              >
                 <div class="result-card">
                   <div class="result-img-wrap">
                     <el-image
@@ -120,28 +129,40 @@
                       hide-on-click-modal
                     />
                   </div>
-                    <div class="result-meta">
+                  <div class="result-meta">
                     <div class="result-tags">
-                      <el-tooltip
-                        v-if="isCombinedSimilarityCapped(item)"
-                        content="深度相似度较高，但综合分因外观 veto 被压低；卡片显示深度分"
-                        placement="top"
-                      >
-                        <el-tag type="success" size="small">
-                          {{ formatPercentFromRatio(primarySimilarity(item), 1) }}
-                        </el-tag>
-                      </el-tooltip>
-                      <el-tag v-else type="success" size="small">
+                      <el-tag type="success" size="small">
                         {{ formatPercentFromRatio(primarySimilarity(item), 1) }}
+                      </el-tag>
+                      <el-tag v-if="item.result_type === 'track'" size="small" effect="plain">
+                        轨迹 {{ item.frame_count || 1 }} 帧
                       </el-tag>
                       <el-tag v-if="item.match_confidence === 'high'" type="success" size="small" effect="plain">高置信</el-tag>
                       <el-tag v-else-if="item.match_confidence === 'medium'" type="warning" size="small" effect="plain">中置信</el-tag>
                       <el-tag v-else-if="item.match_confidence === 'low'" type="info" size="small" effect="plain">低置信</el-tag>
                     </div>
                     <span class="device-name">{{ item.device_name || item.device_id }}</span>
-                    <span class="time-text">{{ formatTime(item.created_at) }}</span>
-                    <el-button link type="primary" size="small" class="detail-btn" @click.stop="openDetail(item, { similarity: item.similarity, deep_similarity: item.deep_similarity, color_similarity: item.color_similarity, hue_similarity: item.hue_similarity, garment_similarity: item.garment_similarity, body_similarity: item.body_similarity, gender_hint: item.gender_hint, match_confidence: item.match_confidence })">
-                      查看详情
+                    <span class="time-text">{{ formatTime(item.last_seen || item.created_at) }}</span>
+                    <div v-if="item.frames?.length" class="frame-thumbs">
+                      <el-image
+                        v-for="fr in item.frames.slice(0, 4)"
+                        :key="fr.gallery_id"
+                        :src="cropUrl(fr.crop_path)"
+                        :preview-src-list="item.frames.map(f => cropUrl(f.crop_path))"
+                        :preview-z-index="IMAGE_PREVIEW_Z_INDEX"
+                        fit="cover"
+                        class="frame-thumb"
+                        preview-teleported
+                      />
+                    </div>
+                    <el-button
+                      link
+                      type="primary"
+                      size="small"
+                      class="detail-btn"
+                      @click.stop="openSearchResult(item)"
+                    >
+                      {{ item.track_id ? '轨迹详情' : '查看详情' }}
                     </el-button>
                   </div>
                 </div>
@@ -346,6 +367,7 @@ import {
   getPersonRebuildEmbeddingsStatus,
   getPersonGallery,
   getPersonGalleryDetail,
+  getPersonTrackDetail,
   getPersonReidModelInfo,
   getPersonSearchStats,
   searchPersonByImage
@@ -369,7 +391,7 @@ const activeTab = ref('search')
 
 const searchForm = reactive({
   minSimilarity: 0.55,
-  topK: 50,
+  topK: 30,
   days: 30,
   deviceId: ''
 })
@@ -389,7 +411,7 @@ const rebuildWarningText = computed(() => {
   const legacy = stats.value.legacy_embeddings || 0
   const stale = stats.value.stale_embeddings || 0
   if (legacy > 0 || stale > 0) {
-    return `旧版特征 ${legacy} 条；待补全字段 ${stale} 条（v4 含 ReID + 颜色/体态）。`
+    return `旧版特征 ${legacy} 条；待补全字段 ${stale} 条（需重建以启用轨迹聚合/FAISS）。`
   }
   return ''
 })
@@ -414,17 +436,20 @@ const modelTipText = computed(() => {
   const legacy = stats.value.legacy_embeddings || 0
   const stale = stats.value.stale_embeddings || 0
   const current = stats.value.current_embeddings || 0
+  const tracks = stats.value.track_count || 0
   let base =
-    '排序以 OSNet 深度为主：同一人换装仍靠 ReID 匹配；颜色/体态仅在深度偏低时辅助挡误报。'
+    '检索对象为轨迹聚合特征；粗检后做 k-reciprocal 重排。颜色仅弱融合，需人审确认。详见 docs/person_search_finetune.md。'
   if (legacy > 0 || stale > 0) {
-    base += ` 当前图库：完整 ${current} 条，旧版 ${legacy} 条，待补全 ${stale} 条。`
+    base += ` 图库：完整 ${current}，旧版 ${legacy}，待补全 ${stale}；轨迹 ${tracks}。`
+  } else {
+    base += ` 轨迹 ${tracks}，帧 ${stats.value.total || 0}。`
   }
   if (!info) return `${base} 首次搜索/入库会自动加载 ReID 权重。`
-  const parsing = info.parsing_onnx_ready ? 'LIP ONNX' : 'fast_zone'
+  const backend = info.faiss_available ? (info.faiss_ready ? 'FAISS 就绪' : 'FAISS 可用') : '内存矩阵'
   if (info.weights_ready) {
-    return `${base} ReID 已就绪${info.loaded ? `（${info.device}）` : ''}；解析模式 ${parsing}。`
+    return `${base} 模型 ${info.model} v${info.embedding_version}；${backend}；权重 ${info.weights_path}。`
   }
-  return `${base} ReID 权重尚未下载，首次搜索/入库时将自动下载（约 17MB）。`
+  return `${base} ReID 权重尚未下载，首次使用将自动下载。`
 })
 
 const cropUrl = (path) => {
@@ -473,9 +498,13 @@ const colorLabel = (name) => {
 /** 后端相似度均为 0~1；卡片与排序以 OSNet 深度分为准 */
 const primarySimilarity = (item) => {
   if (item == null) return 0
+  const finalScore = Number(item.similarity)
+  if (Number.isFinite(finalScore)) return finalScore
+  const rerank = Number(item.rerank_similarity)
+  if (Number.isFinite(rerank)) return rerank
   const deep = Number(item.deep_similarity)
   if (Number.isFinite(deep)) return deep
-  return Number(item.similarity) || 0
+  return 0
 }
 
 const formatPercentFromRatio = (ratio, digits = 1) => {
@@ -496,8 +525,9 @@ const suggestSearchThreshold = (results) => {
   if (!Array.isArray(results) || results.length < 2) return null
   const top = primarySimilarity(results[0])
   const second = primarySimilarity(results[1])
-  if (top >= 0.82 && top - second >= 0.12) {
-    const suggested = Math.min(0.72, Math.max(0.58, second + 0.06))
+  // 仅当首条近原图、且与第二名落差极大时提示上调，避免压掉跨视角同一人
+  if (top >= 0.90 && top - second >= 0.25) {
+    const suggested = Math.min(0.78, Math.max(0.55, second + 0.08))
     return Math.round(suggested * 100) / 100
   }
   return null
@@ -517,6 +547,46 @@ const openDetail = async (item, extra = {}) => {
   } finally {
     detailLoading.value = false
   }
+}
+
+const openSearchResult = async (item) => {
+  const extra = {
+    similarity: item.similarity,
+    deep_similarity: item.deep_similarity,
+    rerank_similarity: item.rerank_similarity,
+    color_similarity: item.color_similarity,
+    hue_similarity: item.hue_similarity,
+    match_confidence: item.match_confidence,
+  }
+  if (item.track_id && item.result_type === 'track') {
+    detailVisible.value = true
+    detailLoading.value = true
+    detailData.value = null
+    try {
+      const res = await getPersonTrackDetail(item.track_id)
+      const data = res.data?.data || {}
+      detailData.value = {
+        ...extra,
+        track_id: data.track_id,
+        crop_path: data.repr_crop_path || item.crop_path,
+        device_id: data.device_id,
+        device_name: data.device_name,
+        created_at: data.last_seen,
+        confidence: data.quality_score,
+        frame_count: data.frame_count,
+        frames: data.frames || item.frames || [],
+        gallery_id: data.frames?.[0]?.gallery_id,
+        event_id: data.frames?.[0]?.event_id,
+      }
+    } catch {
+      detailData.value = { ...item, ...extra }
+      ElMessage.warning('加载轨迹详情失败，已展示列表数据')
+    } finally {
+      detailLoading.value = false
+    }
+    return
+  }
+  await openDetail(item, extra)
 }
 
 const goDetectionEvents = () => {
@@ -606,7 +676,7 @@ const handleSearch = async () => {
       search_ms: res.data?.data?.search_ms ?? 0,
       scanned: res.data?.data?.scanned ?? 0,
       reranked: res.data?.data?.reranked ?? 0,
-      verified: res.data?.data?.verified ?? 0,
+      backend: res.data?.data?.backend,
     }
     const needsRebuild = res.data?.data?.needs_rebuild
     const legacySkipped = res.data?.data?.legacy_skipped || 0
@@ -644,7 +714,7 @@ const pollRebuildStatus = async () => {
         ElMessage.error(`重建失败：${job.error}`)
       } else {
         ElMessage.success(
-          `重建完成：升级 ${job.updated || 0} 条，跳过 ${job.skipped || 0} 条，失败 ${job.failed || 0} 条`
+          `重建完成：升级 ${job.updated || 0} 条，跳过 ${job.skipped || 0} 条，失败 ${job.failed || 0} 条，轨迹 ${job.tracks_updated || 0} 条`
         )
       }
       await loadStats()
@@ -665,7 +735,7 @@ const handleRebuildEmbeddings = async () => {
   }
   try {
     await ElMessageBox.confirm(
-      '将按当前模型重新提取图库抠图特征，图库较大时可能需数分钟。任务在 detect 服务后台执行，可继续浏览页面。',
+      '将按当前模型重新提取图库抠图特征，并补齐缺失轨迹（否则搜图会按单帧检索、结果容易乱）。图库较大时可能需数分钟。',
       '重建图库特征',
       { type: 'info', confirmButtonText: '开始重建', cancelButtonText: '取消' }
     )
@@ -674,7 +744,7 @@ const handleRebuildEmbeddings = async () => {
   }
   rebuilding.value = true
   try {
-    const res = await rebuildPersonGalleryEmbeddings(10000)
+    const res = await rebuildPersonGalleryEmbeddings(10000, true)
     const data = res.data?.data || {}
     if (data.started === false) {
       rebuildJob.value = data.job || { running: true }
@@ -879,6 +949,20 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
   gap: 4px;
   align-items: center;
+}
+
+.frame-thumbs {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.frame-thumb {
+  width: 40px;
+  height: 52px;
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid #ebeef5;
 }
 
 .device-name {

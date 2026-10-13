@@ -1,0 +1,13 @@
+{
+  "description": "人员搜索评测对：query 相对 gallery 的同人/异人标注。将图片放入 queries/ 与 gallery/ 后填写 pairs。",
+  "queries": [],
+  "gallery": [],
+  "pairs": [
+    {
+      "query": "queries/example_q1.jpg",
+      "positives": ["gallery/example_g1a.jpg", "gallery/example_g1b.jpg"],
+      "negatives": ["gallery/example_other.jpg"],
+      "note": "示例：删除后按真实文件填写"
+    }
+  ]
+}

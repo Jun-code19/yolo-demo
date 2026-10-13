@@ -13,6 +13,9 @@ MIN_CROP_HEIGHT = 64
 MIN_CROP_WIDTH = 24
 MIN_CROP_ASPECT = 1.15
 MAX_CROP_ASPECT = 5.0
+# 入库质量门：Laplacian 方差过低视为模糊
+MIN_SHARPNESS = float(__import__("os").getenv("PERSON_SEARCH_MIN_SHARPNESS", "35"))
+MIN_QUALITY_SCORE = float(__import__("os").getenv("PERSON_SEARCH_MIN_QUALITY", "0.35"))
 
 
 def is_person_detection(det: Dict[str, Any]) -> bool:
@@ -70,11 +73,86 @@ def is_valid_person_crop(bgr: np.ndarray) -> bool:
     return MIN_CROP_ASPECT <= ratio <= MAX_CROP_ASPECT
 
 
+def crop_sharpness(bgr: np.ndarray) -> float:
+    """Laplacian 方差，值越高越清晰。"""
+    if bgr is None or bgr.size == 0:
+        return 0.0
+    try:
+        gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+        return float(cv2.Laplacian(gray, cv2.CV_64F).var())
+    except Exception:
+        return 0.0
+
+
+def compute_crop_quality(
+    bgr: np.ndarray,
+    *,
+    detection_confidence: float = 0.0,
+) -> Dict[str, Any]:
+    """综合清晰度/尺寸/宽高比/检测置信，返回 quality_score ∈ [0,1]。"""
+    if bgr is None or bgr.size == 0:
+        return {"ok": False, "quality_score": 0.0, "sharpness": 0.0, "reason": "empty"}
+    h, w = bgr.shape[:2]
+    if h < MIN_CROP_HEIGHT or w < MIN_CROP_WIDTH:
+        return {"ok": False, "quality_score": 0.0, "sharpness": 0.0, "reason": "too_small"}
+    ratio = h / max(w, 1)
+    if ratio < MIN_CROP_ASPECT or ratio > MAX_CROP_ASPECT:
+        return {"ok": False, "quality_score": 0.0, "sharpness": 0.0, "reason": "bad_aspect"}
+
+    sharpness = crop_sharpness(bgr)
+    if sharpness < MIN_SHARPNESS:
+        return {
+            "ok": False,
+            "quality_score": 0.0,
+            "sharpness": sharpness,
+            "reason": "blurry",
+        }
+
+    # 归一化分量
+    sharp_n = float(np.clip(sharpness / 200.0, 0.0, 1.0))
+    size_n = float(np.clip(min(h / 256.0, w / 96.0), 0.0, 1.0))
+    # 理想行人比例约 2.0–3.0
+    aspect_n = float(np.clip(1.0 - abs(ratio - 2.4) / 2.0, 0.0, 1.0))
+    conf_n = float(np.clip(detection_confidence, 0.0, 1.0))
+    score = 0.40 * sharp_n + 0.25 * size_n + 0.20 * aspect_n + 0.15 * conf_n
+    ok = score >= MIN_QUALITY_SCORE
+    return {
+        "ok": ok,
+        "quality_score": round(float(score), 4),
+        "sharpness": round(sharpness, 2),
+        "reason": None if ok else "low_quality",
+    }
+
+
+def bbox_iou(a: Tuple[int, int, int, int], b: Tuple[int, int, int, int]) -> float:
+    ax1, ay1, ax2, ay2 = a
+    bx1, by1, bx2, by2 = b
+    ix1, iy1 = max(ax1, bx1), max(ay1, by1)
+    ix2, iy2 = min(ax2, bx2), min(ay2, by2)
+    iw, ih = max(0, ix2 - ix1), max(0, iy2 - iy1)
+    inter = iw * ih
+    if inter <= 0:
+        return 0.0
+    area_a = max(0, ax2 - ax1) * max(0, ay2 - ay1)
+    area_b = max(0, bx2 - bx1) * max(0, by2 - by1)
+    union = area_a + area_b - inter
+    return float(inter / union) if union > 0 else 0.0
+
+
 def preprocess_reid_crop(bgr: np.ndarray) -> np.ndarray:
-    """按行人 ReID 常用比例缩放，保留全身轮廓。"""
+    """按行人 ReID 常用比例缩放，并对亮度做轻度归一，减轻光照差异。"""
     if bgr is None or bgr.size == 0:
         return bgr
-    return cv2.resize(bgr, (REID_WIDTH, REID_HEIGHT), interpolation=cv2.INTER_LINEAR)
+    resized = cv2.resize(bgr, (REID_WIDTH, REID_HEIGHT), interpolation=cv2.INTER_LINEAR)
+    try:
+        lab = cv2.cvtColor(resized, cv2.COLOR_BGR2LAB)
+        l_ch, a_ch, b_ch = cv2.split(lab)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        l_ch = clahe.apply(l_ch)
+        normalized = cv2.cvtColor(cv2.merge([l_ch, a_ch, b_ch]), cv2.COLOR_LAB2BGR)
+        return normalized
+    except Exception:
+        return resized
 
 
 def _upper_torso_region(bgr: np.ndarray) -> np.ndarray:

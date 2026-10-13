@@ -17,8 +17,11 @@ from src.db_migrations import (
     ensure_alert_rule_tables,
     ensure_heatmap_dashboard_screen_name,
     ensure_heatmap_area_shape_type,
+    ensure_person_search_schema,
 )
-from src.env_loader import load_env_file
+from src.env_loader import configure_openmp_compat, load_env_file
+
+configure_openmp_compat()
 import uvicorn
 import logging
 
@@ -43,6 +46,7 @@ ensure_device_monitor_method(engine)
 ensure_alert_rule_tables(engine)
 ensure_heatmap_dashboard_screen_name(engine)
 ensure_heatmap_area_shape_type(engine)
+ensure_person_search_schema(engine)
 
 # 创建FastAPI应用
 app = FastAPI(

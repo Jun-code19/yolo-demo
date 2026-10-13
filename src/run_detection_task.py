@@ -473,9 +473,10 @@ class DetectionTask:
                     if should_detect:
                          # 执行检测
                         detect_frame = frame_rgb.copy()
+                        # 无框原图：人员图库抠图/特征必须用这个，避免入库裁切带检测框
+                        clean_frame = detect_frame.copy()
                         if self.stop_event.is_set():
                             break
-                        # img_result = frame_rgb.copy() 保留如果保存不带检测结果的帧，可以用于调试 _process_detection_events                 
                         # 使用 try-except 捕获模型推理过程中的错误
                         try:
                             results = predict_detection_frame(
@@ -536,7 +537,11 @@ class DetectionTask:
                                         )
                                     else:
                                         self._process_detection_events(
-                                            detect_frame, basic_detections, speed, cooldown_period
+                                            detect_frame,
+                                            basic_detections,
+                                            speed,
+                                            cooldown_period,
+                                            clean_frame=clean_frame,
                                         )
 
                             if self.frequency == 'manual':
@@ -826,7 +831,9 @@ class DetectionTask:
         )
 
     # 保存检测事件到数据库并存储图像/视频
-    def _process_detection_events(self, img_result, detections, speed, cooldown_period):
+    def _process_detection_events(
+        self, img_result, detections, speed, cooldown_period, clean_frame=None
+    ):
         """生成普通检测事件（不参与规则）"""
         if not detections:
             return
@@ -834,14 +841,14 @@ class DetectionTask:
         if now - self.last_yolo_event_time < float(cooldown_period or 0):
             return
         try:
-            self.save_detection_event(img_result, detections)
+            self.save_detection_event(img_result, detections, clean_frame=clean_frame)
             self.push_detection_data_legacy(detections, img_result, speed)
             self.last_yolo_event_time = now
             self.last_detection_time = now
         except Exception as exc:
             logger.error("保存检测事件失败: %s", exc)
             
-    def save_detection_event(self, frame, detections): # 保存检测事件到数据库并存储图像/视频
+    def save_detection_event(self, frame, detections, clean_frame=None): # 保存检测事件到数据库并存储图像/视频
         """保存检测事件到数据库并存储图像/视频"""
         try:
             # 保存事件到数据库
@@ -876,13 +883,17 @@ class DetectionTask:
                 # 根据保存模式保存图像/视频
                 save_dir = Path(f"storage/events/{current_time.strftime('%Y-%m-%d')}/{self.device_id}")
                 save_dir.mkdir(parents=True, exist_ok=True, mode=0o777)   
-                # 保存带检测框的截图（原图）
+                # 事件列表展示：带检测框；人员回填另存无框原图
                 thumbnail_path = save_dir / f"{event_id}.jpg"
-                if self.stream_type == 'sub':
-                    cv2.imwrite(str(thumbnail_path), frame, [int(cv2.IMWRITE_JPEG_QUALITY), 100])
-                else:
-                    cv2.imwrite(str(thumbnail_path), frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
+                quality = 100 if self.stream_type == 'sub' else 70
+                cv2.imwrite(str(thumbnail_path), frame, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
                 event.thumbnail_path = str(thumbnail_path)
+                if clean_frame is not None:
+                    raw_path = save_dir / f"{event_id}_raw.jpg"
+                    cv2.imwrite(str(raw_path), clean_frame, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
+                    meta = dict(event.meta_data or {})
+                    meta["raw_frame_path"] = str(raw_path)
+                    event.meta_data = meta
             
             # 提交事件
             db.add(event)
@@ -890,8 +901,13 @@ class DetectionTask:
             logger.info(f"已保存检测事件: {event_id}")
             try:
                 from src.person_search.runner import person_search_runner
+                # 人员图库必须用无框帧抠图，否则裁切上会带着检测框
                 person_search_runner.submit(
-                    frame, detections, event_id, self.device_id, current_time
+                    clean_frame if clean_frame is not None else frame,
+                    detections,
+                    event_id,
+                    self.device_id,
+                    current_time,
                 )
             except Exception as embed_exc:
                 logger.debug("人员图库异步入库跳过: %s", embed_exc)

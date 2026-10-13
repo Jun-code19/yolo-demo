@@ -26,15 +26,20 @@ from src.person_search.utils import (
 
 logger = logging.getLogger(__name__)
 
-EMBEDDING_VERSION = 4
+# v5：ReID 预处理增加 CLAHE 亮度归一，需重建图库特征
+EMBEDDING_VERSION = 5
 DEEP_HIGH_CONFIDENCE = 0.80
 COLOR_STRONG_MATCH = 0.62
 COLOR_WEAK_MATCH = 0.48
-# 深度 ReID 超过该值时，不因换装/色相差异做 hard veto（仍保留展示用的颜色/体态分）
-DEEP_APPEARANCE_TRUST = float(os.getenv("PERSON_SEARCH_DEEP_TRUST", "0.56"))
-# 仅当深度低于该值时，体态=0（高置信性别/轮廓冲突）才参与否决
-BODY_VETO_DEEP_MAX = float(os.getenv("PERSON_SEARCH_BODY_VETO_DEEP", "0.52"))
-HUE_HARD_VETO_MAX = 0.28
+# 深度 ReID 超过该值时，放宽颜色硬否决（跨机位/光照同一人常见 0.5–0.7）
+DEEP_APPEARANCE_TRUST = float(os.getenv("PERSON_SEARCH_DEEP_TRUST", "0.62"))
+# 仅当深度很低时，体态=0（高置信性别/轮廓冲突）才参与否决
+BODY_VETO_DEEP_MAX = float(os.getenv("PERSON_SEARCH_BODY_VETO_DEEP", "0.48"))
+# 色相否决仅拦截极端矛盾；光照变化会显著拉低 hue，阈值必须低
+HUE_HARD_VETO_MAX = float(os.getenv("PERSON_SEARCH_HUE_VETO", "0.16"))
+MATCH_GATE_DEEP_MIN = float(os.getenv("PERSON_SEARCH_GATE_DEEP", "0.48"))
+# 高于此深度可跳过读盘复核
+SKIP_VERIFY_DEEP = float(os.getenv("PERSON_SEARCH_SKIP_VERIFY_DEEP", "0.82"))
 
 _embedder = None
 
@@ -50,20 +55,21 @@ class PersonEmbedder:
             EMBEDDING_VERSION,
         )
 
-    def _deep_embed(self, bgr: np.ndarray) -> Optional[List[float]]:
-        vec = self.reid.extract(bgr, tta_flip=True)
+    def _deep_embed(self, bgr: np.ndarray, *, tta_flip: bool = False) -> Optional[List[float]]:
+        # 检索查询默认关闭 TTA：约快一倍，对 OSNet 精度影响很小；入库重建仍可用 flip
+        vec = self.reid.extract(bgr, tta_flip=tta_flip)
         if vec is None:
             return None
         return vec.astype(np.float32).tolist()
 
-    def embed_bgr(self, bgr: np.ndarray) -> Optional[Dict[str, Any]]:
+    def embed_bgr(self, bgr: np.ndarray, *, tta_flip: bool = False) -> Optional[Dict[str, Any]]:
         if bgr is None or bgr.size == 0:
             return None
         h, w = bgr.shape[:2]
         if h < 8 or w < 8:
             return None
 
-        deep = self._deep_embed(bgr)
+        deep = self._deep_embed(bgr, tta_flip=tta_flip)
         clean = strip_segmentation_border(bgr)
         color = extract_color_signature(clean)
         color_hue = extract_hue_signature(clean)
@@ -191,14 +197,8 @@ def is_hard_veto(
     attrs_veto: bool = False,
     deep_sim: float = 0.0,
 ) -> bool:
-    """外观 hard veto：仅在 ReID 深度不够可靠时启用，避免换装/角度误伤同一人。"""
-    del attrs_veto, garment_sim
-    if deep_sim >= DEEP_APPEARANCE_TRUST:
-        return False
-    if body_sim == 0.0 and deep_sim < BODY_VETO_DEEP_MAX:
-        return True
-    if hue_sim > 0 and hue_sim <= HUE_HARD_VETO_MAX:
-        return True
+    """软落地策略：默认不做外观硬否决，由阈值 + re-rank + 人审控制误报。"""
+    del hue_sim, garment_sim, body_sim, attrs_veto, deep_sim
     return False
 
 
@@ -211,11 +211,9 @@ def passes_match_gate(
     attrs_veto: bool = False,
     attr_sim: float = -1.0,
 ) -> bool:
-    """准入：深度达标且未被极端否决（不依赖不可靠的属性分）。"""
-    del color_sim, attrs_veto, attr_sim
-    if is_hard_veto(hue_sim, garment_sim, body_sim, deep_sim=deep_sim):
-        return False
-    return deep_sim >= 0.45
+    """准入：仅按深度下限过滤。"""
+    del color_sim, hue_sim, garment_sim, body_sim, attrs_veto, attr_sim
+    return deep_sim >= MATCH_GATE_DEEP_MIN
 
 
 def _blend_similarity(
@@ -227,9 +225,9 @@ def _blend_similarity(
     attr_sim: float = -1.0,
     attrs_veto: bool = False,
 ) -> float:
-    """排序分以 OSNet 深度为主；深度可靠时综合分=深度分（支持换装）。"""
-    del color_sim, attr_sim, attrs_veto
-    if is_hard_veto(hue_sim, garment_sim, body_sim, deep_sim=deep_sim):
+    """排序分以 OSNet 深度为主；跨视角/光照不依赖颜色拉低分数。"""
+    del color_sim, attr_sim
+    if is_hard_veto(hue_sim, garment_sim, body_sim, attrs_veto=attrs_veto, deep_sim=deep_sim):
         return min(deep_sim, max(0.05, hue_sim + 0.05))
     return float(deep_sim)
 
@@ -449,10 +447,11 @@ def _confidence_tier(
     attr_sim: float = -1.0,
     attrs_veto: bool = False,
 ) -> str:
-    del color_sim, combined, attrs_veto
-    if is_hard_veto(hue_sim, garment_sim, body_sim, deep_sim=deep_sim):
+    del color_sim, combined, attr_sim
+    if is_hard_veto(hue_sim, garment_sim, body_sim, attrs_veto=attrs_veto, deep_sim=deep_sim):
         return "weak"
-    if deep_sim >= 0.78 and (attr_sim >= 0.55 or body_sim >= 0.50):
+    # 跨机位同一人常在 0.55–0.75；近原图才会到 0.9+
+    if deep_sim >= 0.82:
         return "high"
     if deep_sim >= 0.68:
         return "medium"

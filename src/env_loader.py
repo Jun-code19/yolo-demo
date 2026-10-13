@@ -3,8 +3,17 @@ import os
 from pathlib import Path
 
 
+def configure_openmp_compat() -> None:
+    """Windows 上 PyTorch(libiomp5md) 与 OpenCV(libomp140) 并存会触发 OMP Error #15。"""
+    os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+    os.environ.setdefault("OMP_NUM_THREADS", os.getenv("OMP_NUM_THREADS") or "1")
+    os.environ.setdefault("MKL_NUM_THREADS", os.getenv("MKL_NUM_THREADS") or "1")
+    os.environ.setdefault("OPENBLAS_NUM_THREADS", os.getenv("OPENBLAS_NUM_THREADS") or "1")
+
+
 def configure_ultralytics_env() -> None:
     """禁止 Ultralytics 运行时 pip 自动升级依赖（避免 onnx 拉取 numpy 2.2+）。"""
+    configure_openmp_compat()
     os.environ.setdefault("YOLO_AUTOINSTALL", "false")
     os.environ.setdefault("ULTRALYTICS_OFFLINE", "1")
     os.environ.setdefault("YOLO_NO_ANALYTICS", "1")

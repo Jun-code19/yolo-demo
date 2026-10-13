@@ -452,3 +452,58 @@ def ensure_heatmap_area_shape_type(engine) -> None:
         )
         logger.info("已执行数据库补丁: heatmap_areas.shape_type")
 
+
+def ensure_person_search_schema(engine) -> None:
+    """人员搜索：person_track 表 + person_gallery 轨迹/质量字段。"""
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+
+    with engine.begin() as conn:
+        if "person_track" not in tables:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS person_track (
+                        track_id VARCHAR(64) PRIMARY KEY,
+                        device_id VARCHAR(64) NOT NULL REFERENCES device(device_id),
+                        local_track_id INTEGER,
+                        agg_embedding JSONB,
+                        repr_crop_path TEXT,
+                        frame_count INTEGER DEFAULT 0,
+                        quality_score FLOAT,
+                        first_seen TIMESTAMP,
+                        last_seen TIMESTAMP,
+                        created_at TIMESTAMP,
+                        updated_at TIMESTAMP
+                    )
+                    """
+                )
+            )
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_person_track_device_id ON person_track(device_id)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_person_track_first_seen ON person_track(first_seen)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_person_track_last_seen ON person_track(last_seen)"))
+            logger.info("已创建表 person_track")
+
+        if "person_gallery" in tables:
+            columns = {col["name"] for col in inspector.get_columns("person_gallery")}
+            statements = []
+            if "track_id" not in columns:
+                statements.append(
+                    "ALTER TABLE person_gallery ADD COLUMN track_id VARCHAR(64) REFERENCES person_track(track_id)"
+                )
+            if "quality_score" not in columns:
+                statements.append("ALTER TABLE person_gallery ADD COLUMN quality_score FLOAT")
+            if "is_keyframe" not in columns:
+                statements.append(
+                    "ALTER TABLE person_gallery ADD COLUMN is_keyframe BOOLEAN DEFAULT FALSE"
+                )
+            for sql in statements:
+                conn.execute(text(sql))
+                logger.info("已执行数据库补丁: %s", sql)
+            if "track_id" not in columns:
+                conn.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS ix_person_gallery_track_id ON person_gallery(track_id)"
+                    )
+                )
+

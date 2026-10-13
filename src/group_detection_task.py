@@ -359,17 +359,24 @@ class GroupDetectionTask:
                 save_dir.mkdir(parents=True, exist_ok=True, mode=0o777)
                 thumbnail_path = save_dir / f"{event_id}.jpg"
                 quality = 70
+                # 事件展示用带框图；无框原图供人员图库回填
                 save_image = self._render_saved_event_image(frame, detections, roi_pixels)
                 cv2.imwrite(
                     str(thumbnail_path), save_image, [int(cv2.IMWRITE_JPEG_QUALITY), quality]
                 )
                 event.thumbnail_path = str(thumbnail_path)
+                raw_path = save_dir / f"{event_id}_raw.jpg"
+                cv2.imwrite(str(raw_path), frame, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
+                meta = dict(event.meta_data or {})
+                meta["raw_frame_path"] = str(raw_path)
+                event.meta_data = meta
 
             db.add(event)
             db.commit()
             logger.info("分组检测已保存事件: %s device=%s", event_id, device_id)
             try:
                 from src.person_search.runner import person_search_runner
+                # frame 为无框原图，人员抠图不带检测框
                 person_search_runner.submit(
                     frame, detections, event_id, device_id, current_time
                 )

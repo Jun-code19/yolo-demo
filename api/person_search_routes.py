@@ -15,6 +15,7 @@ from src.person_search.service import (
     get_gallery_stats,
     get_rebuild_gallery_job,
     get_reid_model_info,
+    get_track_detail,
     index_detection_event,
     list_gallery,
     search_by_image,
@@ -31,6 +32,7 @@ class BatchIndexBody(BaseModel):
 
 class RebuildEmbeddingsBody(BaseModel):
     limit: int = Field(5000, ge=1, le=20000)
+    force: bool = False
 
 
 @router.get("/stats")
@@ -63,11 +65,19 @@ async def person_search_gallery_detail(gallery_id: str, _: User = Depends(get_cu
     return {"status": "success", "data": data}
 
 
+@router.get("/tracks/{track_id}")
+async def person_search_track_detail(track_id: str, _: User = Depends(get_current_user)):
+    data = get_track_detail(track_id)
+    if not data:
+        raise HTTPException(status_code=404, detail="轨迹不存在")
+    return {"status": "success", "data": data}
+
+
 @router.post("/search")
 async def person_search_by_image(
     file: UploadFile = File(...),
     top_k: int = Query(20, ge=1, le=100),
-    min_similarity: float = Query(0.5, ge=0.0, le=1.0),
+    min_similarity: float = Query(0.55, ge=0.0, le=1.0),
     device_id: Optional[str] = None,
     days: int = Query(7, ge=1, le=90),
     _: User = Depends(get_current_user),
@@ -103,6 +113,7 @@ async def person_search_by_image(
             "search_ms": payload.get("search_ms", 0),
             "scanned": payload.get("scanned", 0),
             "reranked": payload.get("reranked", 0),
+            "backend": payload.get("backend"),
         },
     }
 
@@ -129,7 +140,7 @@ async def person_search_rebuild_embeddings(
     body: RebuildEmbeddingsBody,
     _: User = Depends(get_current_user),
 ):
-    data = start_rebuild_gallery_embeddings_async(limit=body.limit)
+    data = start_rebuild_gallery_embeddings_async(limit=body.limit, force=body.force)
     return {"status": "success", "data": data}
 
 

@@ -41,6 +41,10 @@ export function getPersonGalleryDetail(galleryId) {
   return apiClient.get(`/gallery/${galleryId}`)
 }
 
+export function getPersonTrackDetail(trackId) {
+  return apiClient.get(`/tracks/${trackId}`)
+}
+
 export function searchPersonByImage(formData, params = {}) {
   return apiClient.post('/search', formData, {
     params,
@@ -56,8 +60,8 @@ export function batchIndexPersonEvents(limit = 50) {
   return apiClient.post('/batch-index', { limit })
 }
 
-export function rebuildPersonGalleryEmbeddings(limit = 5000) {
-  return apiClient.post('/rebuild-embeddings', { limit }, { timeout: 60000 })
+export function rebuildPersonGalleryEmbeddings(limit = 5000, force = true) {
+  return apiClient.post('/rebuild-embeddings', { limit, force }, { timeout: 60000 })
 }
 
 export function getPersonRebuildEmbeddingsStatus() {
@@ -69,6 +73,7 @@ export default {
   getPersonReidModelInfo,
   getPersonGallery,
   getPersonGalleryDetail,
+  getPersonTrackDetail,
   searchPersonByImage,
   indexPersonEvent,
   batchIndexPersonEvents,
