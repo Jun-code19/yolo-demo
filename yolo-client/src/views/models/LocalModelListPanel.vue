@@ -118,8 +118,19 @@
             <el-option label="RF-DETR" value="rfdetr" />
           </el-select>
           <p v-if="uploadForm.backend === 'rfdetr'" class="field-hint">
-            首期仅目标检测；建议 GPU。权重一般为 .pt / .pth；可选参数 rfdetr_size（nano/small/base/large）。
+            首期仅目标检测；建议 GPU。权重一般为 .pt / .pth。
           </p>
+        </el-form-item>
+
+        <el-form-item v-if="uploadForm.backend === 'rfdetr'" label="RF规格" prop="rfdetrSize">
+          <el-select v-model="uploadForm.rfdetrSize" style="width: 100%" popper-append-to-body>
+            <el-option label="Nano" value="nano" />
+            <el-option label="Small" value="small" />
+            <el-option label="Medium" value="medium" />
+            <el-option label="Base" value="base" />
+            <el-option label="Large" value="large" />
+          </el-select>
+          <p class="field-hint">须与下载的权重一致，否则会出现「partially loaded」精度崩坏。</p>
         </el-form-item>
 
         <el-form-item label="模型类型" prop="modelType">
@@ -562,6 +573,7 @@ const uploadForm = ref({
   modelName: '',
   modelType: 'object_detection',
   backend: 'yolo',
+  rfdetrSize: 'nano',
   description: '',
   modelFile: null,
   fileList: [],
@@ -587,6 +599,7 @@ const getBackendTagType = (backend) => {
 const onUploadBackendChange = (backend) => {
   if (backend === 'rfdetr') {
     uploadForm.value.modelType = 'object_detection'
+    if (!uploadForm.value.rfdetrSize) uploadForm.value.rfdetrSize = 'nano'
   }
   uploadForm.value.modelFile = null
   uploadForm.value.fileList = []
@@ -692,6 +705,7 @@ const showUploadDialog = () => {
     modelName: '',
     modelType: 'object_detection',
     backend: 'yolo',
+    rfdetrSize: 'nano',
     description: '',
     modelFile: null,
     fileList: [],
@@ -782,6 +796,9 @@ const uploadModel = async () => {
     }
 
     const uploadParams = buildUploadParameters(uploadForm.value.parameters)
+    if (uploadForm.value.backend === 'rfdetr') {
+      uploadParams.rfdetr_size = uploadForm.value.rfdetrSize || 'nano'
+    }
     uploading.value = true
 
     // 初始化进度追踪

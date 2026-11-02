@@ -556,35 +556,46 @@ const updateAreaCounts = () => {
 // 计算地图显示的缩放参数
 const getMapTransform = () => {
   if (!mapImage || !canvas) return null
-  
+  if (!(mapImage.width > 0) || !(mapImage.height > 0)) return null
+  if (!(canvas.width > 0) || !(canvas.height > 0)) return null
+
   const scale = Math.min(canvas.width / mapImage.width, canvas.height / mapImage.height)
+  if (!Number.isFinite(scale) || scale <= 0) return null
+
   const width = mapImage.width * scale
   const height = mapImage.height * scale
   const x = (canvas.width - width) / 2
   const y = (canvas.height - height) / 2
-  
+
   return { scale, width, height, x, y }
 }
+
+const isFinitePoint = (point) =>
+  point && Number.isFinite(Number(point.x)) && Number.isFinite(Number(point.y))
 
 // 将canvas坐标转换为地图坐标
 const canvasToMapCoords = (canvasX, canvasY) => {
   const transform = getMapTransform()
   if (!transform) return { x: canvasX, y: canvasY }
-  
+
   const mapX = (canvasX - transform.x) / transform.scale
   const mapY = (canvasY - transform.y) / transform.scale
-  
+
   return { x: mapX, y: mapY }
 }
 
 // 将地图坐标转换为canvas坐标
 const mapToCanvasCoords = (mapX, mapY) => {
   const transform = getMapTransform()
-  if (!transform) return { x: mapX, y: mapY }
-  
-  const canvasX = mapX * transform.scale + transform.x
-  const canvasY = mapY * transform.scale + transform.y
-  
+  const x = Number(mapX)
+  const y = Number(mapY)
+  if (!transform || !Number.isFinite(x) || !Number.isFinite(y)) {
+    return { x: NaN, y: NaN }
+  }
+
+  const canvasX = x * transform.scale + transform.x
+  const canvasY = y * transform.scale + transform.y
+
   return { x: canvasX, y: canvasY }
 }
 
@@ -620,8 +631,11 @@ const drawCanvas = () => {
 
 const drawArea = (area) => {
   if (!area.points || area.points.length < 3) return
+  if (!area.points.every(isFinitePoint)) return
 
   const canvasPoints = area.points.map(point => mapToCanvasCoords(point.x, point.y))
+  if (!canvasPoints.every(isFinitePoint)) return
+
   const highlighted = isFeatureHighlighted(area)
   const count = getAreaCount(area)
   const strokeColor = getHeatmapStrokeColor(count, maxAreaCount.value)
@@ -667,9 +681,11 @@ const drawArea = (area) => {
 }
 
 const drawProject = (area) => {
-  if (!area.points?.length) return
+  if (!area.points?.length || !isFinitePoint(area.points[0])) return
 
   const point = mapToCanvasCoords(area.points[0].x, area.points[0].y)
+  if (!isFinitePoint(point)) return
+
   const highlighted = isFeatureHighlighted(area)
   const ratio = getHeatmapRatio(getAreaCount(area), maxAreaCount.value)
   const { r, g, b } = getHeatmapRgbAtRatio(ratio)

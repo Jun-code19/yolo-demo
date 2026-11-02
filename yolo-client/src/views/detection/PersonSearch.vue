@@ -12,6 +12,9 @@
         <el-button :loading="indexing" @click="handleBatchIndex">
           回填最近事件
         </el-button>
+        <el-button :loading="cleaningOrphans" @click="handleCleanupOrphans">
+          清理空轨迹
+        </el-button>
         <el-button @click="loadStats">
           <el-icon><Refresh /></el-icon>
           刷新
@@ -143,18 +146,6 @@
                     </div>
                     <span class="device-name">{{ item.device_name || item.device_id }}</span>
                     <span class="time-text">{{ formatTime(item.last_seen || item.created_at) }}</span>
-                    <div v-if="item.frames?.length" class="frame-thumbs">
-                      <el-image
-                        v-for="fr in item.frames.slice(0, 4)"
-                        :key="fr.gallery_id"
-                        :src="cropUrl(fr.crop_path)"
-                        :preview-src-list="item.frames.map(f => cropUrl(f.crop_path))"
-                        :preview-z-index="IMAGE_PREVIEW_Z_INDEX"
-                        fit="cover"
-                        class="frame-thumb"
-                        preview-teleported
-                      />
-                    </div>
                     <el-button
                       link
                       type="primary"
@@ -247,8 +238,8 @@
 
     <el-dialog
       v-model="detailVisible"
-      title="图库详情"
-      width="760px"
+      :title="detailDialogTitle"
+      width="960px"
       destroy-on-close
       append-to-body
       class="gallery-detail-dialog"
@@ -256,7 +247,7 @@
       <div v-loading="detailLoading" class="detail-body">
         <template v-if="detailData">
           <el-row :gutter="16">
-            <el-col :xs="24" :sm="10">
+            <el-col :xs="24" :sm="9">
               <div class="detail-img-wrap">
                 <el-image
                   :src="cropUrl(detailData.crop_path)"
@@ -281,7 +272,7 @@
                 </div>
               </div>
             </el-col>
-            <el-col :xs="24" :sm="14">
+            <el-col :xs="24" :sm="15">
               <el-descriptions :column="1" border size="small" class="detail-desc">
                 <el-descriptions-item v-if="detailData.deep_similarity != null" label="深度相似度（ReID）">
                   <el-tag type="success">{{ formatPercentFromRatio(detailData.deep_similarity, 1) }}</el-tag>
@@ -316,7 +307,7 @@
                 <el-descriptions-item v-if="detailData.match_confidence" label="匹配置信">
                   {{ matchConfidenceLabel(detailData.match_confidence) }}
                 </el-descriptions-item>
-                <el-descriptions-item label="图库 ID">{{ detailData.gallery_id }}</el-descriptions-item>
+                <el-descriptions-item label="图库 ID">{{ detailData.gallery_id || '-' }}</el-descriptions-item>
                 <el-descriptions-item label="关联事件">
                   <span>{{ detailData.event_id || '-' }}</span>
                   <el-button
@@ -335,7 +326,7 @@
                   {{ detailData.confidence != null ? formatPercentFromRatio(detailData.confidence, 1) : '-' }}
                 </el-descriptions-item>
                 <el-descriptions-item label="目标序号">
-                  {{ detailData.bbox_index != null ? `#${detailData.bbox_index + 1}` : '-' }}
+                  {{ formatBboxIndex(detailData.bbox_index) }}
                 </el-descriptions-item>
                 <el-descriptions-item label="边界框">{{ formatBbox(detailData.bbox) }}</el-descriptions-item>
                 <el-descriptions-item label="特征维度">{{ detailData.embedding_dim || '-' }}</el-descriptions-item>
@@ -363,6 +354,7 @@ import { Refresh, UploadFilled } from '@element-plus/icons-vue'
 import deviceApi from '@/api/device'
 import {
   batchIndexPersonEvents,
+  cleanupPersonOrphans,
   rebuildPersonGalleryEmbeddings,
   getPersonRebuildEmbeddingsStatus,
   getPersonGallery,
@@ -382,6 +374,7 @@ const queryFile = ref(null)
 const queryPreview = ref('')
 const searching = ref(false)
 const indexing = ref(false)
+const cleaningOrphans = ref(false)
 const rebuilding = ref(false)
 const rebuildJob = ref({ running: false })
 let rebuildPollTimer = null
@@ -406,6 +399,10 @@ const detailVisible = ref(false)
 const detailLoading = ref(false)
 const detailData = ref(null)
 const IMAGE_PREVIEW_Z_INDEX = 1000000
+
+const detailDialogTitle = computed(() =>
+  detailData.value?.track_id ? '轨迹详情' : '图库详情'
+)
 
 const rebuildWarningText = computed(() => {
   const legacy = stats.value.legacy_embeddings || 0
@@ -466,6 +463,13 @@ const cropUrl = (path) => {
 const formatTime = (value) => {
   if (!value) return '-'
   return new Date(value).toLocaleString('zh-CN')
+}
+
+const formatBboxIndex = (index) => {
+  if (index === null || index === undefined || index === '') return '-'
+  const n = Number(index)
+  if (Number.isNaN(n)) return '-'
+  return `#${n + 1}`
 }
 
 const formatBbox = (bbox) => {
@@ -540,7 +544,8 @@ const openDetail = async (item, extra = {}) => {
   detailData.value = null
   try {
     const res = await getPersonGalleryDetail(item.gallery_id)
-    detailData.value = { ...(res.data?.data || {}), ...extra }
+    // 列表项兜底（如 bbox_index），接口字段优先
+    detailData.value = { ...item, ...(res.data?.data || {}), ...extra }
   } catch {
     detailData.value = { ...item, ...extra }
     ElMessage.warning('加载完整详情失败，已展示列表数据')
@@ -565,19 +570,44 @@ const openSearchResult = async (item) => {
     try {
       const res = await getPersonTrackDetail(item.track_id)
       const data = res.data?.data || {}
-      detailData.value = {
+      const frames = data.frames || item.frames || []
+      const reprPath = data.repr_crop_path || item.crop_path
+      const firstFrame =
+        frames.find((f) => f.crop_path && reprPath && f.crop_path === reprPath) || frames[0]
+      const merged = {
         ...extra,
         track_id: data.track_id,
-        crop_path: data.repr_crop_path || item.crop_path,
+        crop_path: reprPath,
         device_id: data.device_id,
         device_name: data.device_name,
         created_at: data.last_seen,
-        confidence: data.quality_score,
+        confidence: firstFrame?.confidence ?? data.quality_score,
         frame_count: data.frame_count,
-        frames: data.frames || item.frames || [],
-        gallery_id: data.frames?.[0]?.gallery_id,
-        event_id: data.frames?.[0]?.event_id,
+        frames,
+        gallery_id: firstFrame?.gallery_id,
+        event_id: firstFrame?.event_id,
+        bbox_index: firstFrame?.bbox_index ?? item.bbox_index,
+        bbox: firstFrame?.bbox ?? item.bbox,
       }
+      // 轨迹详情补充关联事件截图与完整图库字段
+      if (firstFrame?.gallery_id) {
+        try {
+          const gRes = await getPersonGalleryDetail(firstFrame.gallery_id)
+          const g = gRes.data?.data || {}
+          Object.assign(merged, {
+            event: g.event,
+            event_id: g.event_id || merged.event_id,
+            bbox: g.bbox ?? merged.bbox,
+            bbox_index: g.bbox_index ?? merged.bbox_index,
+            confidence: g.confidence ?? merged.confidence,
+            embedding_dim: g.embedding_dim,
+            gallery_id: g.gallery_id || merged.gallery_id,
+          })
+        } catch {
+          /* 事件截图加载失败不影响轨迹主信息 */
+        }
+      }
+      detailData.value = merged
     } catch {
       detailData.value = { ...item, ...extra }
       ElMessage.warning('加载轨迹详情失败，已展示列表数据')
@@ -783,27 +813,57 @@ const handleBatchIndex = async () => {
   }
 }
 
+const handleCleanupOrphans = async () => {
+  try {
+    await ElMessageBox.confirm(
+      '将删除：无检测事件关联的图库帧、已无任何帧的空轨迹、磁盘遗留抠图。不影响仍有有效帧的轨迹。',
+      '清理空轨迹 / 孤儿数据',
+      { type: 'warning', confirmButtonText: '开始清理', cancelButtonText: '取消' }
+    )
+  } catch {
+    return
+  }
+  cleaningOrphans.value = true
+  try {
+    const res = await cleanupPersonOrphans()
+    const data = res.data?.data || {}
+    ElMessage.success(
+      `清理完成：空轨迹 ${data.tracks_deleted || 0}，孤儿图库 ${data.gallery_deleted || 0}，遗留文件 ${data.files_deleted || 0}`
+    )
+    await loadStats()
+    await loadGallery()
+  } catch (error) {
+    ElMessage.error(error.response?.data?.detail || '清理失败')
+  } finally {
+    cleaningOrphans.value = false
+  }
+}
+
 watch(activeTab, (tab) => {
   if (tab === 'gallery') {
-    loadStats()
+    // 不再重复打 /stats；列表接口已优化
     loadGallery()
   }
 })
 
-onMounted(async () => {
-  await Promise.all([loadStats(), loadDevices(), loadModelInfo()])
-  try {
-    const res = await getPersonRebuildEmbeddingsStatus()
-    const job = res.data?.data || {}
-    rebuildJob.value = job
-    if (job.running) {
-      rebuilding.value = true
-      stopRebuildPolling()
-      rebuildPollTimer = setInterval(pollRebuildStatus, 2000)
-    }
-  } catch {
-    /* 忽略状态探测失败 */
-  }
+onMounted(() => {
+  // 首屏只等 stats + 设备；model-info / 重建状态延后，避免卡住页面
+  loadStats()
+  loadDevices()
+  Promise.resolve().then(() => {
+    loadModelInfo()
+    getPersonRebuildEmbeddingsStatus()
+      .then((res) => {
+        const job = res.data?.data || {}
+        rebuildJob.value = job
+        if (job.running) {
+          rebuilding.value = true
+          stopRebuildPolling()
+          rebuildPollTimer = setInterval(pollRebuildStatus, 2000)
+        }
+      })
+      .catch(() => {})
+  })
 })
 
 onBeforeUnmount(() => {
@@ -951,20 +1011,6 @@ onBeforeUnmount(() => {
   align-items: center;
 }
 
-.frame-thumbs {
-  display: flex;
-  gap: 4px;
-  margin-top: 4px;
-}
-
-.frame-thumb {
-  width: 40px;
-  height: 52px;
-  border-radius: 4px;
-  overflow: hidden;
-  border: 1px solid #ebeef5;
-}
-
 .device-name {
   font-size: 13px;
   color: #303133;
@@ -1057,11 +1103,28 @@ onBeforeUnmount(() => {
 
 .detail-desc {
   margin-top: 0;
+  width: 100%;
+}
+
+.detail-desc :deep(.el-descriptions__label) {
+  width: 148px;
+  min-width: 148px;
+  max-width: 148px;
+  white-space: nowrap;
+  vertical-align: top;
+}
+
+.detail-desc :deep(.el-descriptions__content) {
+  word-break: break-word;
 }
 
 .path-text {
   word-break: break-all;
   font-size: 12px;
   color: #606266;
+}
+
+.gallery-detail-dialog :deep(.el-dialog__body) {
+  padding-top: 12px;
 }
 </style>

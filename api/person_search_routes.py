@@ -18,6 +18,7 @@ from src.person_search.service import (
     get_track_detail,
     index_detection_event,
     list_gallery,
+    purge_orphan_person_data,
     search_by_image,
     start_rebuild_gallery_embeddings_async,
 )
@@ -38,6 +39,13 @@ class RebuildEmbeddingsBody(BaseModel):
 @router.get("/stats")
 async def person_search_stats(_: User = Depends(get_current_user)):
     return {"status": "success", "data": get_gallery_stats()}
+
+
+@router.post("/cleanup-orphans")
+async def person_search_cleanup_orphans(_: User = Depends(get_current_user)):
+    """清理无事件关联的图库帧、无帧的空轨迹、磁盘遗留抠图。"""
+    data = purge_orphan_person_data()
+    return {"status": "success", "data": data}
 
 
 @router.get("/model-info")

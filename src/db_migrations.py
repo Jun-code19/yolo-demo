@@ -453,6 +453,23 @@ def ensure_heatmap_area_shape_type(engine) -> None:
         logger.info("已执行数据库补丁: heatmap_areas.shape_type")
 
 
+def ensure_detection_model_backend(engine) -> None:
+    """detection_model.backend：yolo | rfdetr。"""
+    inspector = inspect(engine)
+    if "detection_model" not in inspector.get_table_names():
+        return
+    columns = {col["name"] for col in inspector.get_columns("detection_model")}
+    if "backend" in columns:
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "ALTER TABLE detection_model ADD COLUMN backend VARCHAR(20) DEFAULT 'yolo' NOT NULL"
+            )
+        )
+        logger.info("已执行数据库补丁: detection_model.backend")
+
+
 def ensure_person_search_schema(engine) -> None:
     """人员搜索：person_track 表 + person_gallery 轨迹/质量字段。"""
     inspector = inspect(engine)

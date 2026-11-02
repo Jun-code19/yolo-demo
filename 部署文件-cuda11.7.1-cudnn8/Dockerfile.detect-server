@@ -1,26 +1,37 @@
-# 使用包含完整编解码库的Runtime镜像（替代Base镜像）
-FROM nvidia/cuda:11.7.1-cudnn8-runtime-ubuntu20.04
+# Ubuntu 22.04 自带 Python 3.10，避免 deadsnakes PPA（国内常装不上）
+FROM nvidia/cuda:11.7.1-cudnn8-runtime-ubuntu22.04
 
 WORKDIR /app
 
-# 配置阿里云APT源
+# 配置阿里云 APT 源
 RUN sed -i 's@archive.ubuntu.com@mirrors.aliyun.com@g' /etc/apt/sources.list \
     && sed -i 's@security.ubuntu.com@mirrors.aliyun.com@g' /etc/apt/sources.list
 
-# 显式安装视频硬解码库（NVIDIA Video Codec SDK）
+# 安装 Python 3.10（系统默认）与运行依赖；tzdata 必须装，否则 TZ=Asia/Shanghai 无效
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    build-essential python3.10 python3-pip \
-    libgl1-mesa-glx libglib2.0-0 libsm6 libxext6 libxrender-dev libpq-dev fonts-wqy-zenhei ffmpeg \
+    build-essential curl ca-certificates tzdata \
+    python3 python3-dev python3-venv python3-pip \
+    libgl1-mesa-glx libglib2.0-0 libsm6 libxext6 libxrender-dev libpq-dev \
+    fonts-wqy-zenhei ffmpeg \
     && ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime \
     && echo "Asia/Shanghai" > /etc/timezone \
     && rm -rf /var/lib/apt/lists/*
 
-# 配置PyTorch安装源
+ENV TZ=Asia/Shanghai
+
+# 独立 venv，保证 pip/python 都是 3.10
+RUN python3 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+ENV VIRTUAL_ENV=/opt/venv
+
+# 配置 PyPI 镜像
 COPY pip.conf /etc/pip.conf
 
-# 安装Python依赖
+# 安装 Python 依赖
 COPY requirements.base.txt requirements.detect-server.txt ./
-RUN pip install --no-cache-dir "numpy==1.26.4" \
+RUN python -c "import sys; assert sys.version_info[:2] == (3, 10), sys.version" \
+    && pip install --upgrade pip \
+    && pip install --no-cache-dir "numpy==1.26.4" \
     && pip install --no-cache-dir -r requirements.base.txt -r requirements.detect-server.txt
 
 # 复制项目文件
@@ -41,10 +52,10 @@ RUN set -e; \
 # 创建目录
 RUN mkdir -p models storage uploads
 
-# 启用GPU支持
+# 启用 GPU 支持
 ENV NVIDIA_VISIBLE_DEVICES=all
 ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility,video
 ENV YOLO_AUTOINSTALL=false ULTRALYTICS_OFFLINE=1 YOLO_NO_ANALYTICS=1 NO_VERSION_CHECK=1
 
 EXPOSE 8000
-CMD ["uvicorn", "base_detect_server:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+CMD ["python", "-m", "uvicorn", "base_detect_server:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

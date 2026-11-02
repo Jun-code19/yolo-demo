@@ -2,11 +2,15 @@
 
 services:
   # 数据服务
+  # 建议宿主机先: export HOST_UID=$(id -u) HOST_GID=$(id -g)
+  # 并: sudo chown -R $HOST_UID:$HOST_GID storage uploads
+  # 避免容器 root 写卷后，宿主机 ubuntu 用户无法删除截图
   data-server:
     build:
       context: .
       dockerfile: Dockerfile.data-server
     container_name: yolo-data-server
+    user: "${HOST_UID:-0}:${HOST_GID:-0}"
     deploy:
       resources:
         reservations:
@@ -23,6 +27,7 @@ services:
     environment:
       - DATABASE_URL=postgresql://postgres:admin123@postgres:5432/yolo
       - DETECT_SERVER_URL=http://detect-server:8000
+      - TZ=Asia/Shanghai
     depends_on:
       - postgres
       - detect-server
@@ -36,6 +41,7 @@ services:
       context: .
       dockerfile: Dockerfile.detect-server
     container_name: yolo-detect-server
+    user: "${HOST_UID:-0}:${HOST_GID:-0}"
     deploy:
       resources:
         reservations:
@@ -52,6 +58,7 @@ services:
     environment:
       - DATABASE_URL=postgresql://postgres:admin123@postgres:5432/yolo
       - NVIDIA_VISIBLE_DEVICES=all
+      - TZ=Asia/Shanghai
     depends_on:
       - postgres
     restart: always
@@ -83,6 +90,8 @@ services:
       - POSTGRES_PASSWORD=admin123
       - POSTGRES_USER=postgres
       - POSTGRES_DB=yolo
+      - TZ=Asia/Shanghai
+      - PGTZ=Asia/Shanghai
     ports:
       - "5432:5432"
     restart: always

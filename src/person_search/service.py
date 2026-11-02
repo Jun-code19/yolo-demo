@@ -11,7 +11,8 @@ from typing import Any, Dict, List, Optional
 
 import cv2
 import numpy as np
-from sqlalchemy.orm import Session
+from sqlalchemy import case, cast, exists, func, Integer, or_
+from sqlalchemy.orm import Session, defer
 
 from src.database import Device, DetectionEvent, PersonGalleryItem, PersonTrack, SessionLocal
 from src.person_search.embedder import (
@@ -59,6 +60,7 @@ RERANK_K2 = int(os.getenv("PERSON_SEARCH_RERANK_K2", "6"))
 APPEARANCE_BLEND = float(os.getenv("PERSON_SEARCH_APPEARANCE_BLEND", "0.1"))
 SEARCH_INDEX_CACHE_TTL = int(os.getenv("PERSON_SEARCH_INDEX_CACHE_TTL", "300"))
 VERSION_STATS_CACHE_TTL = int(os.getenv("PERSON_SEARCH_VERSION_STATS_TTL", "300"))
+STATS_CACHE_TTL = int(os.getenv("PERSON_SEARCH_STATS_TTL", "30"))
 DEFAULT_MIN_SIMILARITY = float(os.getenv("PERSON_SEARCH_MIN_SIMILARITY", "0.55"))
 _quality_reject_count = 0
 
@@ -74,6 +76,7 @@ _search_index_cache: Dict[str, Any] = {
 }
 
 _version_stats_cache: Dict[str, Any] = {"built_at": 0.0, "data": None}
+_gallery_stats_cache: Dict[str, Any] = {"built_at": 0.0, "data": None}
 
 
 def invalidate_search_index_cache() -> None:
@@ -83,6 +86,8 @@ def invalidate_search_index_cache() -> None:
     _search_index_cache["deep_matrix"] = None
     _version_stats_cache["built_at"] = 0.0
     _version_stats_cache["data"] = None
+    _gallery_stats_cache["built_at"] = 0.0
+    _gallery_stats_cache["data"] = None
     invalidate_faiss_index()
 
 
@@ -204,15 +209,21 @@ def _load_search_index(
 
 
 def _save_crop(crop: np.ndarray, device_id: str, event_id: str, index: int, ts: datetime) -> str:
+    from src.storage_fs import write_bgr_image
+
     save_dir = Path(f"storage/person_crops/{ts.strftime('%Y-%m-%d')}/{device_id}")
-    save_dir.mkdir(parents=True, exist_ok=True, mode=0o777)
     crop_path = save_dir / f"{event_id}_{index}.jpg"
-    cv2.imwrite(str(crop_path), crop, [int(cv2.IMWRITE_JPEG_QUALITY), 88])
+    write_bgr_image(crop_path, crop, [int(cv2.IMWRITE_JPEG_QUALITY), 88])
     return str(crop_path).replace("\\", "/")
 
 
 def _persist_track(db, track) -> None:
-    """将缓冲轨迹写入/更新 person_track，并回填帧级 track_id。"""
+    """将缓冲轨迹写入/更新 person_track，并回填帧级 track_id。
+
+    注意：SessionLocal 为 autoflush=False。同一事务内多次入库时，
+    query().first() 看不到尚未 flush 的 pending 对象，会重复 add 同一主键；
+    必须用 Session.get() 先查 identity map。
+    """
     frames = list(track.frames)
     if not frames:
         return
@@ -222,7 +233,7 @@ def _persist_track(db, track) -> None:
     if not agg:
         return
     best = keyframes[0]
-    row = db.query(PersonTrack).filter(PersonTrack.track_id == track.track_id).first()
+    row = db.get(PersonTrack, track.track_id)
     if row is None:
         row = PersonTrack(track_id=track.track_id, device_id=track.device_id)
         db.add(row)
@@ -239,7 +250,7 @@ def _persist_track(db, track) -> None:
     for fr in frames:
         if not fr.gallery_id:
             continue
-        item = db.query(PersonGalleryItem).filter(PersonGalleryItem.gallery_id == fr.gallery_id).first()
+        item = db.get(PersonGalleryItem, fr.gallery_id)
         if not item:
             continue
         item.track_id = track.track_id
@@ -299,6 +310,7 @@ def index_frame_persons(
 
     buffer = get_track_buffer()
     saved = 0
+    touched_tracks = {}
     db = SessionLocal()
     try:
         for idx, det in enumerate(persons):
@@ -311,7 +323,12 @@ def index_frame_persons(
             crop = crop_person(frame, bbox)
             if crop is None:
                 continue
-            quality = compute_crop_quality(crop, detection_confidence=conf)
+            quality = compute_crop_quality(
+                crop,
+                detection_confidence=conf,
+                bbox=bbox,
+                frame_shape=getattr(frame, "shape", None),
+            )
             if not quality.get("ok"):
                 _quality_reject_count += 1
                 continue
@@ -348,9 +365,11 @@ def index_frame_persons(
                     gallery_id=gallery_id,
                 )
             )
-            # 在线增量更新轨迹聚合，便于即时可搜
-            _persist_track(db, active)
+            touched_tracks[active.track_id] = active
             saved += 1
+        # 同一帧内同一轨迹只落盘一次，避免 autoflush=False 下重复 INSERT
+        for tr in touched_tracks.values():
+            _persist_track(db, tr)
         if saved:
             db.commit()
             invalidate_search_index_cache()
@@ -439,26 +458,41 @@ def batch_index_recent_events(limit: int = 50, only_with_person: bool = True) ->
 
 
 def _embedding_version_stats(db) -> Dict[str, int]:
+    """用 SQL 聚合统计版本，避免把全部 embedding JSON 拉进 Python。"""
     now = time.time()
     cached = _version_stats_cache.get("data")
     if cached and now - float(_version_stats_cache.get("built_at") or 0) < VERSION_STATS_CACHE_TTL:
         return dict(cached)
 
-    rows = (
-        db.query(PersonGalleryItem.embedding)
+    base = (
+        db.query(PersonGalleryItem.gallery_id)
         .join(DetectionEvent, PersonGalleryItem.event_id == DetectionEvent.event_id)
-        .all()
     )
-    current = 0
-    legacy = 0
-    stale = 0
-    for (embedding,) in rows:
-        if embedding_version(embedding) < EMBEDDING_VERSION:
-            legacy += 1
-        elif embedding_needs_rebuild(embedding):
-            stale += 1
-        else:
-            current += 1
+    # embedding->>'v' 缺失/非对象 → 视为旧版
+    version_expr = func.coalesce(
+        cast(PersonGalleryItem.embedding["v"].as_string(), Integer),
+        0,
+    )
+    legacy = base.filter(version_expr < EMBEDDING_VERSION).count()
+
+    current_base = base.filter(version_expr >= EMBEDDING_VERSION)
+
+    def _json_array_len(key: str):
+        node = PersonGalleryItem.embedding[key]
+        return case(
+            (func.jsonb_typeof(node) == "array", func.jsonb_array_length(node)),
+            else_=0,
+        )
+
+    # stale：版本够但仍缺 garment/clothing/body 字段或长度不足
+    stale_filter = or_(
+        _json_array_len("garment") < 39,
+        _json_array_len("clothing") < 9,
+        _json_array_len("body") < 7,
+    )
+    stale = current_base.filter(stale_filter).count()
+    current = max(0, current_base.count() - stale)
+
     result = {
         "current_embeddings": current,
         "legacy_embeddings": legacy,
@@ -694,7 +728,7 @@ def rebuild_track_aggregates(db: Optional[Session] = None) -> int:
             if not agg:
                 continue
             best = max(tf_list, key=lambda x: x.quality_score)
-            row = db.query(PersonTrack).filter(PersonTrack.track_id == tid).first()
+            row = db.get(PersonTrack, tid)
             if row is None:
                 device_id = frames[0].device_id
                 row = PersonTrack(track_id=tid, device_id=device_id)
@@ -802,6 +836,27 @@ def delete_gallery_for_events(event_ids: List[str], db: Optional[Session] = None
     return deleted
 
 
+def purge_orphan_person_data() -> Dict[str, Any]:
+    """清理孤儿图库、空轨迹与遗留抠图文件（手动/运维用）。"""
+    from src.person_search.gallery_cleanup import cleanup_orphan_tracks
+
+    gallery_deleted = cleanup_orphan_gallery_items()
+    files_deleted = cleanup_orphan_person_crop_files()
+    db = SessionLocal()
+    try:
+        tracks_deleted = cleanup_orphan_tracks(db)
+        if tracks_deleted:
+            db.commit()
+            invalidate_search_index_cache()
+    finally:
+        db.close()
+    return {
+        "gallery_deleted": gallery_deleted,
+        "tracks_deleted": tracks_deleted,
+        "files_deleted": files_deleted,
+    }
+
+
 def cleanup_orphan_person_crop_files() -> int:
     """清理检测事件已删除但磁盘仍遗留的人员抠图文件"""
     crop_root = Path("storage/person_crops")
@@ -841,9 +896,12 @@ def cleanup_orphan_person_crop_files() -> int:
 
 
 def cleanup_orphan_gallery_items() -> int:
-    """清理检测事件已删除但遗留的图库记录"""
+    """清理检测事件已删除但遗留的图库记录，并顺带清理空轨迹。"""
+    from src.person_search.gallery_cleanup import cleanup_orphan_tracks
+
     db = SessionLocal()
     deleted = 0
+    tracks_removed = 0
     try:
         orphans = (
             db.query(PersonGalleryItem)
@@ -851,19 +909,34 @@ def cleanup_orphan_gallery_items() -> int:
             .filter(DetectionEvent.event_id.is_(None))
             .all()
         )
+        affected_tracks = {item.track_id for item in orphans if item.track_id}
+        from src.storage_fs import safe_unlink
+
         for item in orphans:
             if item.crop_path:
-                try:
-                    if os.path.exists(item.crop_path):
-                        os.remove(item.crop_path)
-                except OSError as exc:
-                    logger.warning("删除孤儿抠图失败 %s: %s", item.crop_path, exc)
+                if not safe_unlink(item.crop_path):
+                    logger.warning("删除孤儿抠图失败 %s", item.crop_path)
             db.delete(item)
             deleted += 1
         if deleted:
+            db.flush()
+            tracks_removed = cleanup_orphan_tracks(db, affected_tracks)
+            # 再扫一遍全量空轨迹（历史遗留）
+            tracks_removed += cleanup_orphan_tracks(db)
             db.commit()
             invalidate_search_index_cache()
-            logger.info("已清理 %s 条孤儿人员图库记录", deleted)
+            logger.info(
+                "已清理 %s 条孤儿人员图库、%s 条空轨迹",
+                deleted,
+                tracks_removed,
+            )
+        else:
+            # 图库已干净时仍清理历史空轨迹
+            tracks_removed = cleanup_orphan_tracks(db)
+            if tracks_removed:
+                db.commit()
+                invalidate_search_index_cache()
+                logger.info("已清理 %s 条空轨迹", tracks_removed)
     except Exception:
         db.rollback()
         raise
@@ -1076,32 +1149,60 @@ def get_gallery_stats(*, run_cleanup: bool = False) -> Dict[str, Any]:
     if run_cleanup:
         cleanup_orphan_gallery_items()
         cleanup_orphan_person_crop_files()
-    db = SessionLocal()
-    try:
-        # 顺手清掉「图库已删、轨迹还在」的孤儿，避免轨迹数虚高
         from src.person_search.gallery_cleanup import cleanup_orphan_tracks
 
-        removed_tracks = cleanup_orphan_tracks(db)
-        if removed_tracks:
-            db.commit()
-            invalidate_search_index_cache()
-            logger.info("统计时清理空轨迹 %s 条", removed_tracks)
+        db_cleanup = SessionLocal()
+        try:
+            removed_tracks = cleanup_orphan_tracks(db_cleanup)
+            if removed_tracks:
+                db_cleanup.commit()
+                invalidate_search_index_cache()
+                logger.info("统计时清理空轨迹 %s 条", removed_tracks)
+        finally:
+            db_cleanup.close()
 
+    now = time.time()
+    cached = _gallery_stats_cache.get("data")
+    if (
+        not run_cleanup
+        and cached
+        and now - float(_gallery_stats_cache.get("built_at") or 0) < STATS_CACHE_TTL
+    ):
+        return dict(cached)
+
+    db = SessionLocal()
+    try:
         base = (
-            db.query(PersonGalleryItem)
+            db.query(PersonGalleryItem.gallery_id)
             .join(DetectionEvent, PersonGalleryItem.event_id == DetectionEvent.event_id)
         )
         total = base.count()
         today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
         today = base.filter(PersonGalleryItem.created_at >= today_start).count()
-        devices = base.with_entities(PersonGalleryItem.device_id).distinct().count()
-        track_count = db.query(PersonTrack).count()
+        devices = (
+            db.query(func.count(func.distinct(PersonGalleryItem.device_id)))
+            .select_from(PersonGalleryItem)
+            .join(DetectionEvent, PersonGalleryItem.event_id == DetectionEvent.event_id)
+            .scalar()
+        ) or 0
+        # 只统计仍有帧图库的轨迹，避免空壳轨迹把数字顶高
+        track_count = (
+            db.query(func.count(PersonTrack.track_id))
+            .filter(exists().where(PersonGalleryItem.track_id == PersonTrack.track_id))
+            .scalar()
+        ) or 0
+        orphan_track_count = (
+            db.query(func.count(PersonTrack.track_id))
+            .filter(~exists().where(PersonGalleryItem.track_id == PersonTrack.track_id))
+            .scalar()
+        ) or 0
         version_stats = _embedding_version_stats(db)
-        return {
+        result = {
             "total": total,
             "today": today,
-            "device_count": devices,
-            "track_count": track_count,
+            "device_count": int(devices),
+            "track_count": int(track_count),
+            "orphan_track_count": int(orphan_track_count),
             "quality_rejected": _quality_reject_count,
             "faiss_ready": has_faiss_index(),
             "faiss_available": faiss_available(),
@@ -1112,6 +1213,9 @@ def get_gallery_stats(*, run_cleanup: bool = False) -> Dict[str, Any]:
                 or version_stats.get("stale_embeddings", 0) > 0
             ),
         }
+        _gallery_stats_cache["built_at"] = now
+        _gallery_stats_cache["data"] = result
+        return dict(result)
     finally:
         db.close()
 
@@ -1150,6 +1254,8 @@ def get_track_detail(track_id: str) -> Optional[Dict[str, Any]]:
                     "crop_path": f.crop_path,
                     "quality_score": f.quality_score,
                     "confidence": f.confidence,
+                    "bbox_index": f.bbox_index,
+                    "bbox": f.bbox,
                     "is_keyframe": bool(f.is_keyframe),
                     "event_id": f.event_id,
                     "created_at": f.created_at.isoformat() if f.created_at else None,
@@ -1171,11 +1277,26 @@ def list_gallery(
     since = datetime.now() - timedelta(days=max(1, min(days, 90)))
     db = SessionLocal()
     try:
-        q = _active_gallery_query(db)
-        q = q.filter(PersonGalleryItem.created_at >= since)
+        # count 不 join device，避免无谓开销；列表查询 defer 掉巨型 embedding
+        count_q = (
+            db.query(func.count(PersonGalleryItem.gallery_id))
+            .select_from(PersonGalleryItem)
+            .join(DetectionEvent, PersonGalleryItem.event_id == DetectionEvent.event_id)
+            .filter(PersonGalleryItem.created_at >= since)
+        )
+        if device_id:
+            count_q = count_q.filter(PersonGalleryItem.device_id == device_id)
+        total = int(count_q.scalar() or 0)
+
+        q = (
+            db.query(PersonGalleryItem, Device.device_name)
+            .options(defer(PersonGalleryItem.embedding))
+            .join(Device, PersonGalleryItem.device_id == Device.device_id)
+            .join(DetectionEvent, PersonGalleryItem.event_id == DetectionEvent.event_id)
+            .filter(PersonGalleryItem.created_at >= since)
+        )
         if device_id:
             q = q.filter(PersonGalleryItem.device_id == device_id)
-        total = q.count()
         rows = (
             q.order_by(PersonGalleryItem.created_at.desc())
             .offset((page - 1) * page_size)
@@ -1204,10 +1325,11 @@ def list_gallery(
 def get_gallery_detail(gallery_id: str) -> Optional[Dict[str, Any]]:
     db = SessionLocal()
     try:
+        # outerjoin：设备/事件缺失时仍返回图库主字段（含 bbox_index）
         row = (
             db.query(PersonGalleryItem, Device.device_name, DetectionEvent)
-            .join(Device, PersonGalleryItem.device_id == Device.device_id)
-            .join(DetectionEvent, PersonGalleryItem.event_id == DetectionEvent.event_id)
+            .outerjoin(Device, PersonGalleryItem.device_id == Device.device_id)
+            .outerjoin(DetectionEvent, PersonGalleryItem.event_id == DetectionEvent.event_id)
             .filter(PersonGalleryItem.gallery_id == gallery_id)
             .first()
         )
@@ -1248,8 +1370,8 @@ def get_gallery_detail(gallery_id: str) -> Optional[Dict[str, Any]]:
 
 def get_reid_model_info() -> Dict[str, Any]:
     from src.person_search import embedder as embedder_module
+    from src.person_search import human_parsing as human_parsing_module
     from src.person_search.embedder import EMBEDDING_VERSION
-    from src.person_search.human_parsing import get_human_parser
     from src.person_search.model_assets import get_parsing_onnx_path
     from src.person_search.reid_loader import DEFAULT_MODEL_NAME, DEFAULT_WEIGHTS_PATH
 
@@ -1259,8 +1381,15 @@ def get_reid_model_info() -> Dict[str, Any]:
     if loaded:
         device = str(embedder_module._embedder.reid.device)
 
-    parser = get_human_parser()
+    # 不在信息接口里加载 ONNX，避免首次进页卡顿
     parsing_onnx = get_parsing_onnx_path()
+    parser = human_parsing_module._parser
+    if parser is not None:
+        parsing_mode = parser.mode
+    elif parsing_onnx:
+        parsing_mode = "onnx_lip(lazy)"
+    else:
+        parsing_mode = "fast_zone"
 
     return {
         "model": DEFAULT_MODEL_NAME,
@@ -1271,7 +1400,7 @@ def get_reid_model_info() -> Dict[str, Any]:
         "search_mode": "track+rerank",
         "faiss_available": faiss_available(),
         "faiss_ready": has_faiss_index(),
-        "parsing_mode": parser.mode,
+        "parsing_mode": parsing_mode,
         "parsing_onnx_ready": parsing_onnx is not None,
         "parsing_onnx_path": parsing_onnx,
         "weights_path": DEFAULT_WEIGHTS_PATH,

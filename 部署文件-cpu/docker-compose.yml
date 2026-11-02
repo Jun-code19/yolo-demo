@@ -1,12 +1,13 @@
 # version: '3.8'
 
 services:
-  # 数据服务
+  # 数据服务（建议 export HOST_UID=$(id -u) HOST_GID=$(id -g)）
   data-server:
     build:
       context: .
       dockerfile: Dockerfile.data-server
     container_name: yolo-data-server
+    user: "${HOST_UID:-0}:${HOST_GID:-0}"
     volumes:
       - ./models:/app/models
       - ./storage:/app/storage
@@ -29,6 +30,7 @@ services:
       context: .
       dockerfile: Dockerfile.detect-server
     container_name: yolo-detect-server
+    user: "${HOST_UID:-0}:${HOST_GID:-0}"
     volumes:
       - ./models:/app/models
       - ./storage:/app/storage

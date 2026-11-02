@@ -575,6 +575,7 @@
           <div class="el-upload__tip">
             请上传 Excel(.xlsx/.xls) 或 CSV(.csv) 格式文件，文件大小不超过 10MB。
             旧模板不含 rtsp_url_mode / rtsp_url 时，将默认使用大华拉流方式。
+            含 group_name 时按分组名称同步：不存在则自动创建，留空为未分组。
           </div>
         </template>
       </el-upload>

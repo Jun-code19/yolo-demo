@@ -12,105 +12,147 @@
     </div>
 
     <!-- 系统状态面板 -->
-    <div v-if="activeTab === 'status'">
-      <!-- <div class="status-header">
+    <div v-if="activeTab === 'status'" class="status-panel" v-loading="statusLoading">
+      <div class="status-header">
+        <span class="status-hint">每 60 秒自动刷新 · 当前时间以服务端为准</span>
         <el-button type="primary" @click="refreshStatus">
-          <el-icon>
-            <Refresh />
-          </el-icon>
+          <el-icon><Refresh /></el-icon>
           刷新
         </el-button>
-      </div> -->
+      </div>
 
-      <el-row :gutter="20">
-        <el-col :span="10">
-          <el-card class="status-card">
-            <template #header>
-              <div class="card-header">
-                <span>系统资源</span>
-                <el-tag type="success" v-if="systemStatus.status === 'normal'">运行正常</el-tag>
-                <el-tag type="warning" v-else-if="systemStatus.status === 'warning'">需要注意</el-tag>
-                <el-tag type="danger" v-else>异常</el-tag>
+      <el-card class="status-card info-card">
+        <template #header>
+          <div class="card-header">
+            <span>主机信息</span>
+            <el-tag type="success" v-if="systemStatus.status === 'normal'">运行正常</el-tag>
+            <el-tag type="warning" v-else-if="systemStatus.status === 'warning'">需要注意</el-tag>
+            <el-tag type="danger" v-else>异常</el-tag>
+          </div>
+        </template>
+        <el-descriptions :column="3" border size="small">
+          <el-descriptions-item label="主机名">{{ systemInfo.hostname || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="应用">
+            {{ systemInfo.app_name }} {{ systemInfo.app_version }}
+          </el-descriptions-item>
+          <el-descriptions-item label="Python">{{ systemInfo.python_version || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="当前时间">{{ systemInfo.current_time || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="开机时间">{{ systemInfo.boot_time || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="运行时长">{{ systemInfo.uptime_text || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="系统" :span="2">{{ systemInfo.platform || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="架构">{{ systemInfo.architecture || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="启用检测任务">{{ detectionInfo.enabled_configs }} 个</el-descriptions-item>
+          <el-descriptions-item label="激活模型">{{ detectionInfo.active_models }} 个</el-descriptions-item>
+          <el-descriptions-item label="GPU">
+            <template v-if="showGpu">{{ systemStatus.gpu.name || '已检测到' }}</template>
+            <template v-else>未检测到 NVIDIA GPU</template>
+          </el-descriptions-item>
+        </el-descriptions>
+      </el-card>
+
+      <el-card class="status-card">
+        <template #header>
+          <div class="card-header">
+            <span>系统资源</span>
+          </div>
+        </template>
+        <el-row :gutter="20" class="resource-grid">
+          <el-col :xs="24" :sm="12" :lg="8">
+            <div class="resource-item">
+              <div class="item-header">
+                <span>CPU</span>
+                <span>{{ formatPercent(systemStatus.cpu.percent) }}%</span>
               </div>
-            </template>
-
-            <div class="resource-list">
-              <div class="resource-item">
-                <div class="item-header">
-                  <span>CPU 使用率</span>
-                  <span>{{ systemStatus.cpu.percent }}%</span>
-                </div>
-                <el-progress :percentage="systemStatus.cpu.percent" :status="getCpuStatus(systemStatus.cpu.percent)" />
-                <div class="item-footer">
-                  <span>总核数: {{ systemStatus.cpu.total }}</span>
-                  <span>已使用: {{ systemStatus.cpu.used }} 核</span>
-                </div>
-              </div>
-
-              <div class="resource-item">
-                <div class="item-header">
-                  <span>内存使用率</span>
-                  <span>{{ systemStatus.memory.percent }}%</span>
-                </div>
-                <el-progress :percentage="systemStatus.memory.percent" :status="getMemoryStatus(systemStatus.memory.percent)" />
-                <div class="item-footer">
-                  <span>总内存: {{ systemStatus.memory.total }} GB</span>
-                  <span>已使用: {{ systemStatus.memory.used }} GB</span>
-                </div>
-              </div>
-
-              <div class="resource-item">
-                <div class="item-header">
-                  <span>GPU 使用率</span>
-                  <span>{{ systemStatus.gpu.percent }}%</span>
-                </div>
-                <el-progress :percentage="systemStatus.gpu.percent" :status="getGpuStatus(systemStatus.gpu.percent)" />
-                <div class="item-footer">
-                  <span>总显存: {{ systemStatus.gpu.total }} GB</span>
-                  <span>已使用: {{ systemStatus.gpu.used }} GB</span>
-                </div>
-              </div>
-
-              <div class="resource-item">
-                <div class="item-header">
-                  <span>磁盘使用率</span>
-                  <span>{{ systemStatus.disk.percent }}%</span>
-                </div>
-                <el-progress :percentage="systemStatus.disk.percent" :status="getDiskStatus(systemStatus.disk.percent)" />
-                <div class="item-footer">
-                  <span>总磁盘: {{ systemStatus.disk.total }} GB</span>
-                  <span>已使用: {{ systemStatus.disk.used }} GB</span>
-                </div>
+              <el-progress
+                :percentage="clampPercent(systemStatus.cpu.percent)"
+                :status="getCpuStatus(systemStatus.cpu.percent)"
+              />
+              <div class="item-footer">
+                <span>逻辑核 {{ systemStatus.cpu.total }}{{ systemStatus.cpu.physical ? ` / 物理核 ${systemStatus.cpu.physical}` : '' }}</span>
+                <span>约占用 {{ systemStatus.cpu.used }} 核</span>
               </div>
             </div>
-          </el-card>
-        </el-col>
-        <el-col :span="14">
-          <el-card class="status-card">
-            <template #header>
-              <div class="card-header">
-                <span>实时日志</span>
-                <el-button type="primary" link @click="clearLogs">
-                  清空日志
-                </el-button>
+          </el-col>
+          <el-col :xs="24" :sm="12" :lg="8">
+            <div class="resource-item">
+              <div class="item-header">
+                <span>内存</span>
+                <span>{{ formatPercent(systemStatus.memory.percent) }}%</span>
               </div>
-            </template>
+              <el-progress
+                :percentage="clampPercent(systemStatus.memory.percent)"
+                :status="getMemoryStatus(systemStatus.memory.percent)"
+              />
+              <div class="item-footer">
+                <span>已用 {{ systemStatus.memory.used }} / {{ systemStatus.memory.total }} GB</span>
+                <span>可用 {{ systemStatus.memory.available ?? '—' }} GB</span>
+              </div>
+            </div>
+          </el-col>
+          <el-col v-if="showGpu" :xs="24" :sm="12" :lg="8">
+            <div class="resource-item">
+              <div class="item-header">
+                <span>GPU{{ systemStatus.gpu.name ? ` · ${systemStatus.gpu.name}` : '' }}</span>
+                <span>{{ formatPercent(systemStatus.gpu.percent) }}%</span>
+              </div>
+              <el-progress
+                :percentage="clampPercent(systemStatus.gpu.percent)"
+                :status="getGpuStatus(systemStatus.gpu.percent)"
+              />
+              <div class="item-footer">
+                <span>显存 {{ systemStatus.gpu.used }} / {{ systemStatus.gpu.total }} GB</span>
+                <span v-if="gpuDevices.length > 1">共 {{ gpuDevices.length }} 张卡</span>
+              </div>
+            </div>
+          </el-col>
+          <el-col :xs="24" :sm="12" :lg="8">
+            <div class="resource-item">
+              <div class="item-header">
+                <span>系统盘</span>
+                <span>{{ formatPercent(systemStatus.disk.percent) }}%</span>
+              </div>
+              <el-progress
+                :percentage="clampPercent(systemStatus.disk.percent)"
+                :status="getDiskStatus(systemStatus.disk.percent)"
+              />
+              <div class="item-footer">
+                <span class="path-text">{{ systemStatus.disk.path || '—' }}</span>
+                <span>{{ systemStatus.disk.used }} / {{ systemStatus.disk.total }} GB</span>
+              </div>
+            </div>
+          </el-col>
+          <el-col :xs="24" :sm="12" :lg="8">
+            <div class="resource-item">
+              <div class="item-header">
+                <span>应用目录盘</span>
+                <span>{{ formatPercent(dataStorage.percent) }}%</span>
+              </div>
+              <el-progress
+                :percentage="clampPercent(dataStorage.percent)"
+                :status="getDiskStatus(dataStorage.percent)"
+              />
+              <div class="item-footer">
+                <span class="path-text" :title="dataStorage.path">{{ dataStorage.path || '—' }}</span>
+                <span>{{ dataStorage.used }} / {{ dataStorage.total }} GB</span>
+              </div>
+            </div>
+          </el-col>
+        </el-row>
 
-            <el-table :data="logs" style="width: 100%" height="60vh">
-              <el-table-column prop="time" label="时间" width="180" />
-              <el-table-column prop="level" label="级别" width="100">
-                <template #default="{ row }">
-                  <el-tag :type="getLogLevelType(row.level)" size="small">
-                    {{ row.level }}
-                  </el-tag>
-                </template>
-              </el-table-column>
-              <el-table-column prop="message" label="内容" />
-            </el-table>
-          </el-card>
-        </el-col>
-      </el-row>
-
+        <div v-if="gpuDevices.length > 1" class="gpu-list">
+          <div v-for="gpu in gpuDevices" :key="gpu.id" class="gpu-item">
+            <div class="item-header">
+              <span>#{{ gpu.id }} {{ gpu.name }}</span>
+              <span>{{ formatPercent(gpu.percent) }}%</span>
+            </div>
+            <el-progress :percentage="clampPercent(gpu.percent)" :status="getGpuStatus(gpu.percent)" />
+            <div class="item-footer">
+              <span>显存 {{ gpu.memory_used }} / {{ gpu.memory_total }} GB</span>
+              <span v-if="gpu.temperature != null">温度 {{ gpu.temperature }}°C</span>
+            </div>
+          </div>
+        </div>
+      </el-card>
     </div>
 
     <!-- 系统日志面板 -->
@@ -334,7 +376,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onUnmounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { Refresh, Download, Delete } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -358,108 +400,97 @@ const syncTabFromRoute = () => {
 
 watch(() => route.query.tab, syncTabFromRoute)
 
-// 系统状态数据
+const defaultDisk = () => ({ path: '', percent: 0, total: 0, used: 0, free: 0 })
+
+const statusLoading = ref(false)
 const systemStatus = ref({
   status: 'normal',
-  cpu: { percent: 0, total: 0, used: 0 },
-  memory: { percent: 0, total: 0, used: 0 },
-  gpu: { percent: 0, total: 0, used: 0 },
-  disk: { percent: 0, total: 0, used: 0 }
+  cpu: { percent: 0, total: 0, physical: 0, used: 0 },
+  memory: { percent: 0, total: 0, used: 0, available: 0 },
+  gpu: { percent: 0, total: 0, used: 0, name: '', available: false, devices: [] },
+  disk: defaultDisk()
 })
+const systemInfo = ref({
+  hostname: '',
+  platform: '',
+  architecture: '',
+  python_version: '',
+  app_name: 'yolo-demo',
+  app_version: '',
+  current_time: '',
+  boot_time: '',
+  uptime_text: ''
+})
+const dataStorage = ref(defaultDisk())
+const detectionInfo = ref({ enabled_configs: 0, active_models: 0 })
 
-// 服务列表
-const services = ref([
-  { name: '检测服务', status: 'stopped' },
-  { name: '数据服务', status: 'stopped' },
-  { name: '数据库服务', status: 'stopped' },
-  { name: '网页服务', status: 'stopped' }
-])
+const showGpu = computed(() => {
+  const g = systemStatus.value.gpu || {}
+  return !!(g.available || (g.total || 0) > 0 || (g.percent || 0) > 0)
+})
+const gpuDevices = computed(() => systemStatus.value.gpu?.devices || [])
 
-// 系统日志
-const logs = ref([])
+const clampPercent = (value) => {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return 0
+  return Math.min(100, Math.max(0, Math.round(n)))
+}
+const formatPercent = (value) => {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return 0
+  return Number.isInteger(n) ? n : Number(n.toFixed(1))
+}
 
-// 检测日志
-const detectionLogs = ref([])
-
-// 刷新状态
 const refreshStatus = async () => {
+  statusLoading.value = true
   try {
     const response = await systemLogApi.getSystemStatus()
-
-    if (response.status === 200) {
-      // 更新系统状态
-      systemStatus.value = {
-        status: response.data.status,
-        cpu: response.data.cpu,
-        memory: response.data.memory,
-        gpu: response.data.gpu,
-        disk: response.data.disk
-      }
-
-      // 更新服务状态
-      if (response.data.services && response.data.services.length > 0) {
-        services.value = response.data.services
-      }
-
-      // 更新日志
-      if (response.data.logs && response.data.logs.length > 0) {
-        logs.value = response.data.logs
-      }
-
-      // 不显示通知，避免频繁刷新时打扰用户
-    } else {
-      // console.error('获取系统状态失败:', response)
+    if (response.status !== 200) return
+    const data = response.data || {}
+    systemStatus.value = {
+      status: data.status || 'normal',
+      cpu: { percent: 0, total: 0, physical: 0, used: 0, ...(data.cpu || {}) },
+      memory: { percent: 0, total: 0, used: 0, available: 0, ...(data.memory || {}) },
+      gpu: {
+        percent: 0,
+        total: 0,
+        used: 0,
+        name: '',
+        available: false,
+        devices: [],
+        ...(data.gpu || {})
+      },
+      disk: { ...defaultDisk(), ...(data.disk || {}) }
+    }
+    systemInfo.value = {
+      hostname: '',
+      platform: '',
+      architecture: '',
+      python_version: '',
+      app_name: 'yolo-demo',
+      app_version: '',
+      current_time: '',
+      boot_time: '',
+      uptime_text: '',
+      ...(data.system || {})
+    }
+    dataStorage.value = { ...defaultDisk(), ...(data.data_storage || {}) }
+    detectionInfo.value = {
+      enabled_configs: data.detection?.enabled_configs || 0,
+      active_models: data.detection?.active_models || 0
     }
   } catch (error) {
-    // console.error('获取系统状态失败:', error)
     ElMessage.error('获取系统状态失败，请检查网络连接')
+  } finally {
+    statusLoading.value = false
   }
 }
 
-// 资源状态判断
 const getCpuStatus = (value) => value > 90 ? 'exception' : value > 70 ? 'warning' : 'success'
 const getMemoryStatus = (value) => value > 90 ? 'exception' : value > 80 ? 'warning' : 'success'
 const getGpuStatus = (value) => value > 90 ? 'exception' : value > 70 ? 'warning' : 'success'
 const getDiskStatus = (value) => value > 90 ? 'exception' : value > 80 ? 'warning' : 'success'
 
-// 日志级别标签类型
-const getLogLevelType = (level) => {
-  const typeMap = {
-    INFO: 'info',
-    WARNING: 'warning',
-    ERROR: 'danger',
-    DEBUG: ''
-  }
-  return typeMap[level]
-}
-
-// 日志操作
-const addLog = (level, message) => {
-  logs.value.unshift({
-    time: new Date().toLocaleString(),
-    level,
-    message
-  })
-}
-
-const clearLogs = async () => {
-  const result = await ElMessageBox.confirm(
-    '确定要清空所有日志吗？',
-    '警告',
-    {
-      confirmButtonText: '确定',
-      cancelButtonText: '取消',
-      type: 'warning'
-    }
-  ).catch(() => false)
-
-  if (result) {
-    logs.value = []
-    addLog('INFO', '日志已清空')
-  }
-}
-
-// 定时刷新
 let refreshInterval
 
 // =========================
@@ -485,94 +516,188 @@ const logFilters = reactive({
   userId: ''
 })
 
-// 操作类型映射
+// 操作类型映射（与后端 log_action 实际写入对齐）
 const actionTypes = {
   device: {
     label: '设备管理',
     options: {
-      'create_device': '创建设备',
-      'update_device': '更新设备',
-      'delete_device': '删除设备',
-      'device_status_change': '设备状态变更'
+      create_device: '创建设备',
+      update_device: '更新设备',
+      delete_device: '删除设备',
+      device_status_change: '设备状态变更',
+      import_devices: '导入设备',
+      export_devices: '导出设备',
+      export_device_template: '导出设备模板',
+      create_device_group: '创建设备组',
+      update_device_group: '更新设备组',
+      delete_device_group: '删除设备组'
     }
   },
   detectionconfig: {
     label: '检测管理',
     options: {
-      'create_detection_config': '创建检测配置',
-      'update_detection_config': '更新检测配置',
-      'delete_detection_config': '删除检测配置',
-      'start_detection': '启动检测任务',
-      'stop_detection': '停止检测任务'
+      create_detection_config: '创建检测配置',
+      update_detection_config: '更新检测配置',
+      delete_detection_config: '删除检测配置',
+      toggle_detection_active: '启用/禁用检测配置',
+      toggle_detection_config: '启用/禁用检测配置',
+      start_detection: '启动检测任务',
+      stop_detection: '停止检测任务'
     }
   },
   detectionevent: {
     label: '检测事件',
     options: {
-      'create_detection_event': '创建检测事件',
-      'update_detection_event': '更新检测事件',
-      'delete_detection_event': '删除检测事件',
-      'export_detection_events': '导出检测事件'
+      create_detection_event: '创建检测事件',
+      update_detection_event: '更新检测事件',
+      delete_detection_event: '删除检测事件',
+      batch_delete_detection_events: '批量删除检测事件',
+      export_detection_events: '导出检测事件',
+      cleanup_detection_events: '清理过期检测事件',
+      cleanup_expired_events: '清理过期事件'
     }
   },
   model: {
     label: '模型管理',
     options: {
-      'upload_model': '上传模型',
-      'delete_model': '删除模型',
-      'toggle_model': '启用/禁用模型',
-      'update_model_config': '更新模型配置'
+      upload_model: '上传模型',
+      update_model: '更新模型',
+      delete_model: '删除模型',
+      activate_model: '启用模型',
+      deactivate_model: '禁用模型',
+      toggle_model: '启用/禁用模型',
+      update_model_config: '更新模型配置'
     }
   },
   crowd: {
     label: '人群分析',
     options: {
-      'create_crowd_task': '创建人群分析任务',
-      'update_crowd_task': '更新人群分析任务',
-      'delete_crowd_task': '删除人群分析任务',
-      'export_crowd_results': '导出人群分析结果',
-      'pause_crowd_task': '暂停人群分析任务',
-      'resume_crowd_task': '恢复人群分析任务',
-      'run_crowd_task': '运行人群分析任务'
+      create_crowd_task: '创建人群分析任务',
+      update_crowd_task: '更新人群分析任务',
+      delete_crowd_task: '删除人群分析任务',
+      export_crowd_results: '导出人群分析结果',
+      pause_crowd_task: '暂停人群分析任务',
+      resume_crowd_task: '恢复人群分析任务',
+      run_crowd_task: '立即执行人群分析任务'
     }
   },
   push: {
     label: '推送管理',
     options: {
-      'create_data_push': '创建推送配置',
-      'update_data_push': '更新推送配置',
-      'delete_data_push': '删除推送配置',
-      'toggle_data_push': '启用/禁用推送配置'
+      create_data_push: '创建推送配置',
+      update_data_push: '更新推送配置',
+      delete_data_push: '删除推送配置',
+      toggle_data_push: '启用/禁用推送配置',
+      test_data_push: '测试推送配置',
+      create_push_config: '创建推送配置',
+      update_push_config: '更新推送配置',
+      delete_push_config: '删除推送配置',
+      toggle_push_config: '启用/禁用推送配置'
+    }
+  },
+  smart: {
+    label: '事件订阅',
+    options: {
+      create_smart_scheme: '创建事件订阅',
+      update_smart_scheme: '更新事件订阅',
+      delete_smart_scheme: '删除事件订阅',
+      start_smart_scheme: '启动事件订阅',
+      stop_smart_scheme: '停止事件订阅',
+      restart_smart_scheme: '重启事件订阅',
+      update_smart_event: '更新智能事件',
+      delete_smart_event: '删除智能事件',
+      batch_delete_events: '批量删除事件',
+      batch_process_events: '批量处理事件',
+      batch_ignore_events: '批量忽略事件',
+      cleanup_smart_events: '清理过期智能事件'
+    }
+  },
+  listener: {
+    label: '数据监听',
+    options: {
+      create_listener_config: '创建监听配置',
+      update_listener_config: '更新监听配置',
+      delete_listener_config: '删除监听配置',
+      start_listener: '启动监听',
+      stop_listener: '停止监听',
+      restart_listener: '重启监听',
+      batch_start_listeners: '批量启动监听',
+      batch_stop_listeners: '批量停止监听',
+      update_external_event: '更新外部事件',
+      delete_event: '删除外部事件',
+      cleanup_external_events: '清理外部事件'
+    }
+  },
+  alert: {
+    label: '复合告警',
+    options: {
+      create_alert_rule: '创建告警规则',
+      update_alert_rule: '更新告警规则',
+      delete_alert_rule: '删除告警规则',
+      evaluate_alert_rules: '手动评估告警规则'
+    }
+  },
+  vlm: {
+    label: 'VLM 巡检',
+    options: {
+      bootstrap_qwen_vlm: '注册 Qwen-VL 模型',
+      create_vlm_model: '注册 VLM 模型',
+      update_vlm_model: '更新 VLM 模型',
+      delete_vlm_model: '删除 VLM 模型',
+      update_vlm_api_key: '更新 VLM API Key',
+      import_prompt_templates: '导入 Prompt 模板',
+      create_prompt_template: '创建 Prompt 模板',
+      update_prompt_template: '更新 Prompt 模板',
+      delete_prompt_template: '删除 Prompt 模板',
+      create_vlm_inspection: '创建 VLM 巡检任务',
+      update_vlm_inspection: '更新 VLM 巡检任务',
+      delete_vlm_inspection: '删除 VLM 巡检任务',
+      pause_vlm_inspection: '暂停 VLM 巡检任务',
+      resume_vlm_inspection: '恢复 VLM 巡检任务',
+      run_vlm_inspection: '立即执行 VLM 巡检'
+    }
+  },
+  edge: {
+    label: '边缘服务器',
+    options: {
+      create_edge_server: '创建边缘服务器',
+      update_edge_server: '更新边缘服务器',
+      update_edge_server_status: '更新边缘服务器状态',
+      delete_edge_server: '删除边缘服务器'
     }
   },
   system: {
     label: '系统管理',
     options: {
-      'clear_system_logs': '清除系统日志',
-      'export_system_logs': '导出系统日志',
-      'update_system_config': '更新系统配置',
-      'restart_service': '重启服务'
+      clear_system_logs: '清除系统日志',
+      export_system_logs: '导出系统日志',
+      clear_detection_logs: '清除检测日志',
+      export_detection_logs: '导出检测日志',
+      update_system_config: '更新系统配置',
+      restart_service: '重启服务'
     }
   },
   user: {
     label: '用户管理',
     options: {
-      'create_user': '创建用户',
-      'update_user': '更新用户',
-      'delete_user': '删除用户',
-      'update_user_permission': '更新用户权限',
-      'change_password': '修改密码',
-      'login': '用户登录',
-      'logout': '用户登出'
+      create_user: '创建用户',
+      create_admin: '创建管理员',
+      update_user: '更新用户',
+      update_profile: '更新个人信息',
+      delete_user: '删除用户',
+      update_user_permission: '更新用户权限',
+      change_password: '修改密码',
+      login: '用户登录',
+      logout: '用户登出'
     }
   },
   data: {
     label: '数据管理',
     options: {
-      'export_data': '导出数据',
-      'import_data': '导入数据',
-      'backup_system': '系统备份',
-      'restore_system': '系统恢复'
+      export_data: '导出数据',
+      import_data: '导入数据',
+      backup_system: '系统备份',
+      restore_system: '系统恢复'
     }
   }
 }
@@ -638,58 +763,19 @@ const getActionTypeText = (type) => {
   return type
 }
 
-// 获取操作类型标签样式
+// 获取操作类型标签样式（按动作语义推断，覆盖未单独列出的类型）
 const getActionTypeTag = (type) => {
-  const typeTagMap = {
-    // 设备管理
-    'create_device': 'success',
-    'update_device': 'warning',
-    'delete_device': 'danger',
-    'device_status_change': 'info',
-    // 检测管理
-    'create_detection_config': 'success',
-    'update_detection_config': 'warning',
-    'delete_detection_config': 'danger',
-    'toggle_detection_config': 'info',
-    'create_detection_event': 'success',
-    'update_detection_event': 'warning',
-    'delete_detection_event': 'danger',
-    'export_detection_events': 'success',
-    // 模型管理
-    'upload_model': 'success',
-    'delete_model': 'danger',
-    'toggle_model': 'info',
-    'update_model_config': 'warning',
-    // 人群分析
-    'create_crowd_task': 'success',
-    'update_crowd_task': 'warning',
-    'delete_crowd_task': 'danger',
-    'export_crowd_results': 'success',
-    // 推送管理
-    'create_push_config': 'success',
-    'update_push_config': 'warning',
-    'delete_push_config': 'danger',
-    'toggle_push_config': 'info',
-    // 系统管理
-    'clear_system_logs': 'success',
-    'export_system_logs': 'success',
-    'update_system_config': 'warning',
-    'restart_service': 'warning',
-    // 用户管理
-    'create_user': 'success',
-    'update_user': 'warning',
-    'delete_user': 'danger',
-    'update_user_permission': 'info',
-    'change_password': 'success',
-    'login': 'success',
-    'logout': 'success',
-    // 数据管理
-    'export_data': 'success',
-    'import_data': 'success',
-    'backup_system': 'success',
-    'restore_system': 'success'
+  const key = String(type || '')
+  if (/^(delete|stop|clear|cleanup|deactivate|logout|pause|batch_delete|batch_stop|batch_ignore)/.test(key)) {
+    return 'danger'
   }
-  return typeTagMap[type] || ''
+  if (/^(update|change|toggle|restart|restore)/.test(key)) {
+    return 'warning'
+  }
+  if (/^(create|upload|start|run|activate|resume|login|export|import|evaluate|bootstrap|test|backup|batch_start|batch_process)/.test(key)) {
+    return 'success'
+  }
+  return 'info'
 }
 
 // 处理导出
@@ -754,6 +840,7 @@ const resetFilter = () => {
 }
 
 // 检测日志数据
+const detectionLogs = ref([])
 const detectionLogsLoading = ref(false)
 const detectionLogCurrentPage = ref(1)
 const detectionLogPageSize = ref(10)
@@ -939,7 +1026,7 @@ const confirmClearDetectionLog = async () => {
 onMounted(() => {
   syncTabFromRoute()
   refreshStatus()
-  refreshInterval = setInterval(refreshStatus, 5000)
+  refreshInterval = setInterval(refreshStatus, 60000)
 
   // 加载系统日志
   loadLogData()
@@ -993,14 +1080,29 @@ onUnmounted(() => {
   margin-bottom: 10px;
 }
 
+.status-panel {
+  margin-top: 4px;
+}
+
 .status-header {
   display: flex;
-  justify-content: flex-end;
-  margin-bottom: 20px;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  gap: 12px;
+}
+
+.status-hint {
+  color: #909399;
+  font-size: 13px;
 }
 
 .status-card {
-  margin-bottom: 20px;
+  margin-bottom: 24px;
+}
+
+.info-card :deep(.el-card__body) {
+  padding-top: 12px;
 }
 
 .card-header {
@@ -1009,21 +1111,27 @@ onUnmounted(() => {
   align-items: center;
 }
 
-.resource-list {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
+.resource-grid {
+  margin-top: 4px;
 }
 
-.resource-item {
+.resource-grid :deep(.el-col) {
+  margin-bottom: 20px;
+}
+
+.resource-item,
+.gpu-item {
   background-color: #f8fafc;
   padding: 16px;
   border-radius: 8px;
+  height: 100%;
+  box-sizing: border-box;
 }
 
 .item-header {
   display: flex;
   justify-content: space-between;
+  gap: 8px;
   margin-bottom: 8px;
   color: #64748b;
   font-size: 14px;
@@ -1032,56 +1140,24 @@ onUnmounted(() => {
 .item-footer {
   display: flex;
   justify-content: space-between;
+  gap: 8px;
   margin-top: 8px;
   color: #909399;
   font-size: 12px;
 }
 
-.service-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+.path-text {
+  max-width: 55%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.service-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 12px;
-  background-color: #f8fafc;
-  border-radius: 8px;
-}
-
-.service-info {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.status-icon {
-  font-size: 18px;
-}
-
-.status-icon.running {
-  color: #67c23a;
-}
-
-.status-icon.stopped {
-  color: #f56c6c;
-}
-
-.status-icon.starting,
-.status-icon.stopping {
-  color: #e6a23c;
-}
-
-.service-name {
-  font-size: 14px;
-  color: #2c3e50;
-}
-
-.mt-20 {
-  margin-top: 20px;
+.gpu-list {
+  margin-top: 8px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
 }
 
 /* 系统日志样式 */

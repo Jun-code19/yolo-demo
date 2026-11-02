@@ -9,12 +9,17 @@ from sqlalchemy import exists, func
 from sqlalchemy.orm import Session
 
 from src.database import PersonGalleryItem, PersonTrack, SessionLocal
+from src.storage_fs import safe_unlink
 
 logger = logging.getLogger(__name__)
 
 
 def cleanup_orphan_tracks(db: Session, candidate_track_ids: Optional[Set[str]] = None) -> int:
-    """删除已无任何帧图库的轨迹行。"""
+    """删除已无任何帧图库的轨迹行。
+
+    注意：SessionLocal 默认 autoflush=False，调用方若刚 delete 了图库行，
+    须先 db.flush()，否则 count 仍会算到未落库的删除，轨迹清不掉。
+    """
     removed = 0
     if candidate_track_ids is not None:
         tids = [t for t in candidate_track_ids if t]
@@ -64,21 +69,22 @@ def delete_gallery_for_events(event_ids: List[str], db: Optional[Session] = None
         affected_tracks = {item.track_id for item in items if item.track_id}
         for item in items:
             if item.crop_path:
-                try:
-                    if os.path.exists(item.crop_path):
-                        os.remove(item.crop_path)
-                except OSError as exc:
-                    logger.warning("删除人员抠图失败 %s: %s", item.crop_path, exc)
+                if not safe_unlink(item.crop_path):
+                    logger.warning("删除人员抠图失败 %s", item.crop_path)
             db.delete(item)
             deleted += 1
-        tracks_removed = cleanup_orphan_tracks(db, affected_tracks) if deleted else 0
+        tracks_removed = 0
+        if deleted:
+            # 必须先 flush，空轨迹判定才能看到已删图库
+            db.flush()
+            tracks_removed = cleanup_orphan_tracks(db, affected_tracks)
         if deleted and own_session:
             db.commit()
             logger.info(
                 "已删除 %s 条人员图库、%s 条空轨迹 event_ids=%s",
                 deleted,
                 tracks_removed,
-                event_ids,
+                len(event_ids),
             )
     except Exception:
         if own_session:

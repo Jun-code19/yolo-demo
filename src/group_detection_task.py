@@ -32,9 +32,11 @@ from src.device_roi import (
     draw_device_roi,
 )
 from src.inference_pipeline.detection_vlm_runner import DetectionVlmRunner
+from src.storage_fs import write_bgr_image
 from src.yolo_task_utils import (
     is_segmentation_type,
     process_yolo_results,
+    filter_detections_by_confidence,
     draw_segmentation_detections,
     build_detection_meta,
     load_detection_model,
@@ -62,6 +64,9 @@ class GroupDetectionTask:
         runtime_config: Optional[dict] = None,
         stream_type: str = "main",
         inference_pipeline: Optional[dict] = None,
+        model_backend: str = "yolo",
+        model_class_names=None,
+        model_parameters=None,
     ):
         self.config_id = config_id
         self.config_mode = "group"
@@ -80,6 +85,11 @@ class GroupDetectionTask:
         self.runtime_config = runtime_config or {}
         self.stream_type = stream_type or "main"
         self.frequency = "realtime"
+        self.model_backend = (model_backend or "yolo").strip().lower()
+        if self.model_backend in ("rf-detr", "rf_detr"):
+            self.model_backend = "rfdetr"
+        self.model_class_names = model_class_names
+        self.model_parameters = model_parameters if isinstance(model_parameters, dict) else {}
 
         self.stop_event = threading.Event()
         self.thread = None
@@ -151,6 +161,9 @@ class GroupDetectionTask:
                 abs_model_path,
                 self.models_type,
                 self.is_gpu,
+                class_names=self.model_class_names,
+                backend=self.model_backend,
+                parameters=self.model_parameters,
             )
             self.class_names = getattr(self.model, "names", {})
             return True
@@ -252,6 +265,7 @@ class GroupDetectionTask:
             )
             speed = results[0].speed
             detections = self._process_detection_results(results)
+            detections = filter_detections_by_confidence(detections, self.confidence)
 
             area_coordinates = self._get_device_area_coordinates(device.device_id)
             roi_pixels = get_device_roi_pixels(area_coordinates, frame.shape)
@@ -307,9 +321,11 @@ class GroupDetectionTask:
             results,
             self.target_class,
             include_segmentation=is_segmentation_type(self.models_type),
+            min_confidence=float(self.confidence or 0.0),
         )
 
     def _process_detection_events(self, frame, detections, device: Device, speed, roi_pixels=None):
+        detections = filter_detections_by_confidence(detections, self.confidence)
         if not detections:
             return
         now = time.time()
@@ -324,6 +340,9 @@ class GroupDetectionTask:
 
     def save_detection_event(self, frame, detections, device_id: str, roi_pixels=None):
         try:
+            detections = filter_detections_by_confidence(detections, self.confidence)
+            if not detections:
+                return
             db = SessionLocal()
             event_id = str(uuid.uuid4())
             current_time = datetime.now()
@@ -356,17 +375,16 @@ class GroupDetectionTask:
                 save_dir = Path(
                     f"storage/events/{current_time.strftime('%Y-%m-%d')}/{device_id}"
                 )
-                save_dir.mkdir(parents=True, exist_ok=True, mode=0o777)
                 thumbnail_path = save_dir / f"{event_id}.jpg"
                 quality = 70
                 # 事件展示用带框图；无框原图供人员图库回填
                 save_image = self._render_saved_event_image(frame, detections, roi_pixels)
-                cv2.imwrite(
-                    str(thumbnail_path), save_image, [int(cv2.IMWRITE_JPEG_QUALITY), quality]
+                write_bgr_image(
+                    thumbnail_path, save_image, [int(cv2.IMWRITE_JPEG_QUALITY), quality]
                 )
                 event.thumbnail_path = str(thumbnail_path)
                 raw_path = save_dir / f"{event_id}_raw.jpg"
-                cv2.imwrite(str(raw_path), frame, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
+                write_bgr_image(raw_path, frame, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
                 meta = dict(event.meta_data or {})
                 meta["raw_frame_path"] = str(raw_path)
                 event.meta_data = meta

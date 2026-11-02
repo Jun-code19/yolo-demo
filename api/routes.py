@@ -10,6 +10,7 @@ from api.auth import authenticate_user, create_access_token, ACCESS_TOKEN_EXPIRE
 from api.logger import log_action
 from src.env_loader import load_env_file, get_detect_server_url
 from src.person_search.gallery_cleanup import delete_gallery_for_events
+from src.storage_fs import safe_unlink
 
 load_env_file()
 from passlib.context import CryptContext
@@ -294,13 +295,10 @@ def _delete_detection_config_with_relations(db: Session, config: DetectionConfig
     if events:
         delete_gallery_for_events([event.event_id for event in events], db=db)
     for event in events:
-        try:
-            if event.thumbnail_path and os.path.exists(event.thumbnail_path):
-                os.remove(event.thumbnail_path)
-            if event.snippet_path and os.path.exists(event.snippet_path):
-                os.remove(event.snippet_path)
-        except OSError as e:
-            print(f"删除事件文件失败: {e}")
+        if event.thumbnail_path:
+            safe_unlink(event.thumbnail_path)
+        if event.snippet_path:
+            safe_unlink(event.snippet_path)
         db.delete(event)
 
     db.delete(config)
@@ -323,13 +321,10 @@ def _delete_device_with_relations(db: Session, device: Device) -> None:
     if device_events:
         delete_gallery_for_events([event.event_id for event in device_events], db=db)
     for event in device_events:
-        try:
-            if event.thumbnail_path and os.path.exists(event.thumbnail_path):
-                os.remove(event.thumbnail_path)
-            if event.snippet_path and os.path.exists(event.snippet_path):
-                os.remove(event.snippet_path)
-        except OSError as e:
-            print(f"删除事件文件失败: {e}")
+        if event.thumbnail_path:
+            safe_unlink(event.thumbnail_path)
+        if event.snippet_path:
+            safe_unlink(event.snippet_path)
         db.delete(event)
 
     device_performance_records = db.query(DetectionPerformance).filter(DetectionPerformance.device_id == device_id).all()
@@ -734,6 +729,7 @@ class ModelBase(BaseModel):
     models_type: str
     description: Optional[str] = None
     parameters: Optional[Dict[str, Any]] = None
+    backend: Optional[str] = "yolo"
 
 class ModelUpdate(BaseModel):
     """更新模型信息的模型"""
@@ -742,6 +738,7 @@ class ModelUpdate(BaseModel):
     description: Optional[str] = None
     parameters: Optional[Dict[str, Any]] = None
     is_gpu: Optional[bool] = None
+    backend: Optional[str] = None
 
 class ModelResponse(ModelBase):
     models_id: str
@@ -753,6 +750,7 @@ class ModelResponse(ModelBase):
     is_active: bool
     is_gpu: bool
     models_classes: Optional[Dict[int, str]] = None
+    backend: Optional[str] = "yolo"
 
     class Config:
         from_attributes = True
@@ -811,11 +809,18 @@ async def upload_model(
     models_type: str = Form(...),
     description: Optional[str] = Form(None),
     parameters: Optional[str] = Form(None),
+    backend: str = Form("yolo"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)):
     """上传新模型文件"""
     # 检查权限（只有管理员可以上传模型）
     check_admin_permission(current_user)
+
+    backend_norm = (backend or "yolo").strip().lower()
+    if backend_norm in ("rf-detr", "rf_detr"):
+        backend_norm = "rfdetr"
+    if backend_norm not in ("yolo", "rfdetr"):
+        raise HTTPException(status_code=400, detail="backend 仅支持 yolo 或 rfdetr")
     
     # 检查文件大小 (2GB限制)
     MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024  # 2GB
@@ -827,7 +832,18 @@ async def upload_model(
     
     # 检查文件格式
     file_ext = os.path.splitext(models_file.filename)[1].lower()
-    if file_ext not in ['.pt', '.onnx', '.pth', '.weights']:
+    if backend_norm == "rfdetr":
+        if models_type != "object_detection":
+            raise HTTPException(
+                status_code=400,
+                detail="RF-DETR 首期仅支持目标检测（models_type=object_detection）",
+            )
+        if file_ext not in [".pt", ".pth"]:
+            raise HTTPException(
+                status_code=400,
+                detail="RF-DETR 权重仅支持 .pt / .pth",
+            )
+    elif file_ext not in ['.pt', '.onnx', '.pth', '.weights']:
         raise HTTPException(status_code=400, detail="Unsupported model format. Supported formats: .pt, .onnx, .pth, .weights")
     
     # 创建模型ID
@@ -861,6 +877,9 @@ async def upload_model(
             models_params = json.loads(parameters)
         except json.JSONDecodeError:
             raise HTTPException(status_code=400, detail="Invalid parameters JSON")
+    if not isinstance(models_params, dict):
+        models_params = {}
+    models_params["backend"] = backend_norm
     
     # 通过检测服务加载模型并获取类别（Docker: detect-server:8000；本地 .env 可覆盖）
     detect_server_url = get_detect_server_url()
@@ -871,8 +890,9 @@ async def upload_model(
                 "model_path": str(file_path),
                 "models_type": models_type,
                 "parameters": models_params,
+                "backend": backend_norm,
             },
-            timeout=120,
+            timeout=180,
         )
         if response.status_code != 200:
             detail = (response.text or "").strip()
@@ -918,7 +938,8 @@ async def upload_model(
         parameters=models_params,
         upload_time=datetime.now(),
         is_active=True,
-        models_classes=classes  # 将类别信息存储到数据库
+        models_classes=classes,  # 将类别信息存储到数据库
+        backend=backend_norm,
     )
     
     db.add(db_model)
@@ -926,7 +947,7 @@ async def upload_model(
     db.refresh(db_model)
     
     # 记录操作日志
-    log_action(db, current_user.user_id, 'upload_model', models_id, f"Uploaded model {models_name}")
+    log_action(db, current_user.user_id, 'upload_model', models_id, f"Uploaded model {models_name} backend={backend_norm}")
     
     return db_model
 
@@ -2132,21 +2153,17 @@ async def batch_delete_detection_events(
                 
                 # 删除缩略图
                 if event.thumbnail_path:
-                    try:
-                        if os.path.exists(event.thumbnail_path):
-                            os.remove(event.thumbnail_path)
-                            event_files_deleted.append(event.thumbnail_path)
-                    except OSError as e:
-                        event_files_failed.append(f"缩略图: {str(e)}")
+                    if safe_unlink(event.thumbnail_path):
+                        event_files_deleted.append(event.thumbnail_path)
+                    elif os.path.exists(event.thumbnail_path):
+                        event_files_failed.append(f"缩略图: 权限不足 {event.thumbnail_path}")
                 
                 # 删除视频片段
                 if event.snippet_path:
-                    try:
-                        if os.path.exists(event.snippet_path):
-                            os.remove(event.snippet_path)
-                            event_files_deleted.append(event.snippet_path)
-                    except OSError as e:
-                        event_files_failed.append(f"视频片段: {str(e)}")
+                    if safe_unlink(event.snippet_path):
+                        event_files_deleted.append(event.snippet_path)
+                    elif os.path.exists(event.snippet_path):
+                        event_files_failed.append(f"视频片段: 权限不足 {event.snippet_path}")
                 
                 # 删除事件记录
                 db.delete(event)
@@ -2289,21 +2306,17 @@ async def delete_detection_event(
         
         # 删除缩略图
         if db_event.thumbnail_path:
-            try:
-                if os.path.exists(db_event.thumbnail_path):
-                    os.remove(db_event.thumbnail_path)
-                    files_deleted.append(db_event.thumbnail_path)
-            except OSError as e:
-                files_failed.append(f"缩略图: {str(e)}")
+            if safe_unlink(db_event.thumbnail_path):
+                files_deleted.append(db_event.thumbnail_path)
+            elif os.path.exists(db_event.thumbnail_path):
+                files_failed.append(f"缩略图: 权限不足 {db_event.thumbnail_path}")
         
         # 删除视频片段
         if db_event.snippet_path:
-            try:
-                if os.path.exists(db_event.snippet_path):
-                    os.remove(db_event.snippet_path)
-                    files_deleted.append(db_event.snippet_path)
-            except OSError as e:
-                files_failed.append(f"视频片段: {str(e)}")
+            if safe_unlink(db_event.snippet_path):
+                files_deleted.append(db_event.snippet_path)
+            elif os.path.exists(db_event.snippet_path):
+                files_failed.append(f"视频片段: 权限不足 {db_event.snippet_path}")
         
         # 删除人员图库关联记录
         delete_gallery_for_events([event_id])
@@ -2574,6 +2587,25 @@ def get_detection_logs(
         "total": total_count
     }
 
+def _get_or_create_device_group_by_name(db: Session, group_name: str) -> Optional[DeviceGroup]:
+    """按分组名称查找或创建设备分组（导入同步用）。空名称表示未分组。"""
+    name = (group_name or "").strip()
+    if not name:
+        return None
+    group = db.query(DeviceGroup).filter(DeviceGroup.group_name == name).first()
+    if group:
+        return group
+    group = DeviceGroup(
+        group_id=str(uuid.uuid4()),
+        group_name=name,
+        description="导入时自动创建",
+        sort_order=0,
+    )
+    db.add(group)
+    db.flush()
+    return group
+
+
 # 设备数据导出模板
 @router.get("/devices/export/template", tags=["设备管理"])
 def export_device_template(current_user: User = Depends(get_current_user)):
@@ -2583,7 +2615,7 @@ def export_device_template(current_user: User = Depends(get_current_user)):
         "device_id", "device_name", "device_type",
         "ip_address", "port", "username", "password",
         "channel", "stream_type", "rtsp_url_mode", "rtsp_url",
-        "location", "area"
+        "location", "area", "group_name"
     ])
 
     # 添加示例数据行
@@ -2600,7 +2632,8 @@ def export_device_template(current_user: User = Depends(get_current_user)):
         "rtsp_url_mode": "dahua",
         "rtsp_url": "",
         "location": "前门",
-        "area": "安全区"
+        "area": "安全区",
+        "group_name": "一楼",
     }
     hikvision_preset = next(p for p in RTSP_URL_PRESETS if p["value"] == "hikvision")
     hikvision_example_row = {
@@ -2616,7 +2649,8 @@ def export_device_template(current_user: User = Depends(get_current_user)):
         "rtsp_url_mode": hikvision_preset["mode"],
         "rtsp_url": hikvision_preset["url"],
         "location": "大厅",
-        "area": "安全区"
+        "area": "安全区",
+        "group_name": "大厅",
     }
     df = pd.concat([df, pd.DataFrame([example_row, hikvision_example_row])], ignore_index=True)
     
@@ -2675,7 +2709,8 @@ def export_device_template(current_user: User = Depends(get_current_user)):
             ['rtsp_url_mode', '拉流方式存储值，选填：dahua(大华)/custom(海康/宇视/通用)，默认 dahua'],
             ['rtsp_url', 'RTSP 模板或完整地址；custom 时必填。海康: .../Streaming/Channels/{hik_channel}；宇视: .../video{channel}/{subtype}'],
             ['location', '位置，选填'],
-            ['area', '区域，选填']
+            ['area', '区域，选填'],
+            ['group_name', '设备分组名称，选填；导入时按名称匹配，不存在则自动创建；留空表示未分组'],
         ]
         
         # 写入说明内容
@@ -2703,7 +2738,7 @@ def export_device_template(current_user: User = Depends(get_current_user)):
 # 设备数据导出
 @router.get("/devices/export/data", tags=["设备管理"])
 def export_devices(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    """导出所有设备数据"""
+    """导出所有设备数据（含分组名称，便于跨环境同步分组）"""
     # 从数据库获取所有设备
     devices = db.query(Device).all()
     
@@ -2724,6 +2759,7 @@ def export_devices(db: Session = Depends(get_db), current_user: User = Depends(g
             "rtsp_url": device.rtsp_url or "",
             "location": device.location,
             "area": device.area,
+            "group_name": device.device_group.group_name if device.device_group else "",
             "status": "在线" if device.status else "离线",
             "last_heartbeat": device.last_heartbeat.strftime("%Y-%m-%d %H:%M:%S") if device.last_heartbeat else ""
         }
@@ -2822,6 +2858,17 @@ async def import_devices(
                 if rtsp_url_mode == 'dahua':
                     rtsp_url = None
 
+                # 分组：有 group_name 列则按名称同步（空=未分组，不存在则自动创建）；
+                # 旧模板无该列时：更新保留原分组，新增为未分组
+                has_group_name_col = "group_name" in df.columns
+                resolved_group_id = None
+                if has_group_name_col:
+                    group_name_raw = ""
+                    if not pd.isna(row["group_name"]):
+                        group_name_raw = str(row["group_name"]).strip()
+                    group = _get_or_create_device_group_by_name(db, group_name_raw)
+                    resolved_group_id = group.group_id if group else None
+
                 # 准备设备数据
                 device_data = {
                     "device_id": str(row['device_id']),
@@ -2836,8 +2883,10 @@ async def import_devices(
                     "rtsp_url_mode": rtsp_url_mode,
                     "rtsp_url": rtsp_url,
                     "location": str(row['location']) if 'location' in row and not pd.isna(row['location']) else None,
-                    "area": str(row['area']) if 'area' in row and not pd.isna(row['area']) else None
+                    "area": str(row['area']) if 'area' in row and not pd.isna(row['area']) else None,
                 }
+                if has_group_name_col:
+                    device_data["group_id"] = resolved_group_id
                 
                 # 检查设备ID是否已存在
                 existing_device = db.query(Device).filter(Device.device_id == device_data['device_id']).first()
@@ -3145,97 +3194,11 @@ async def list_push_logs_v1(
 # 系统状态监控API
 @router.get("/system/status", tags=["系统管理"])
 def get_system_status(db: Session = Depends(get_db)):
-    """获取系统状态信息（CPU、内存、磁盘、GPU等）"""
+    """获取系统状态信息（主机信息、CPU、内存、磁盘、GPU等）"""
     try:
-        import psutil
-        import os
-        import json
-        import GPUtil # 导入GPUtil
-        
-        # CPU信息
-        cpu_percent = psutil.cpu_percent(interval=1)
-        cpu_max = psutil.cpu_count(logical=True) # 逻辑核心数
-        cpu_used = round(cpu_max * (cpu_percent / 100), 2) # 假设一个核心代表100%的使用率，这里只是一个概念性的已使用值
-        
-        # 内存信息
-        memory = psutil.virtual_memory()
-        memory_percent = memory.percent
-        memory_total = round(memory.total / (1024 ** 3), 2)  # GB
-        memory_used = round(memory.used / (1024 ** 3), 2)    # GB
-        
-        # 磁盘信息
-        disk = psutil.disk_usage('/')
-        disk_percent = disk.percent
-        disk_total = round(disk.total / (1024 ** 3), 2) # GB
-        disk_used = round(disk.used / (1024 ** 3), 2)  # GB
-           
-        # 尝试获取GPU信息
-        gpu_percent = 0
-        gpu_total_memory = 0
-        gpu_used_memory = 0
-        
-        try:
-            # 获取所有GPU的信息
-            gpus = GPUtil.getGPUs()
-            if gpus:
-                # 假设只监控第一个GPU，你可以根据需求遍历所有GPU
-                gpu = gpus[0]
-                
-                gpu_percent = gpu.load * 100  # GPUtil的load是0-1之间的浮点数，转换为百分比
-                gpu_total_memory = round(gpu.memoryTotal / 1024, 2)  # 转换为GB
-                gpu_used_memory = round(gpu.memoryUsed / 1024, 2)    # 转换为GB
-            else:
-                # logger.info("No NVIDIA GPUs found on the system using GPUtil.")
-                pass
-        except Exception as e:
-            # logger.info(f"An error occurred while getting GPU info using GPUtil: {e}")
-            pass
-            # 如果发生错误，保持gpu信息为0
-        
-        # 确定系统整体状态
-        status = "normal"
-        if cpu_percent > 90 or memory_percent > 90 or disk_percent > 90 or gpu_percent > 90:
-            status = "danger"
-        elif cpu_percent > 70 or memory_percent > 80 or disk_percent > 80 or gpu_percent > 70:
-            status = "warning"
-            
-        # 获取最近的系统日志
-        logs = db.query(SysLog).order_by(SysLog.log_time.desc()).limit(20).all()
-        log_entries = []
-        for log in logs:
-            log_entries.append({
-                "time": log.log_time.strftime("%Y-%m-%d %H:%M:%S"),
-                "level": "INFO" if "error" not in log.detail.lower() else "ERROR",
-                "message": log.detail
-            })
-            
-        # 构建响应
-        response = {
-            "status": status,
-            "cpu": {
-                "percent": cpu_percent,
-                "total": cpu_max,
-                "used": cpu_used
-            },
-            "memory": {
-                "percent": memory_percent,
-                "total": memory_total,
-                "used": memory_used
-            },
-            "disk": {
-                "percent": disk_percent,
-                "total": disk_total,
-                "used": disk_used
-            },
-            "gpu": {
-                "percent": gpu_percent,
-                "total": gpu_total_memory,
-                "used": gpu_used_memory
-            },
-            "logs": log_entries
-        }
-        
-        return response
+        from src.system_status import collect_system_status
+
+        return collect_system_status(db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取系统状态失败: {str(e)}")
 

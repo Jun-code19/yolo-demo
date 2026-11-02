@@ -18,6 +18,7 @@ from src.db_migrations import (
     ensure_heatmap_dashboard_screen_name,
     ensure_heatmap_area_shape_type,
     ensure_person_search_schema,
+    ensure_detection_model_backend,
 )
 from src.env_loader import configure_openmp_compat, load_env_file
 
@@ -47,6 +48,7 @@ ensure_alert_rule_tables(engine)
 ensure_heatmap_dashboard_screen_name(engine)
 ensure_heatmap_area_shape_type(engine)
 ensure_person_search_schema(engine)
+ensure_detection_model_backend(engine)
 
 # 创建FastAPI应用
 app = FastAPI(

@@ -56,14 +56,33 @@ def simplify_polygon(points: Sequence[Sequence[float]], max_points: int = 48) ->
     return simplified
 
 
+def filter_detections_by_confidence(
+    detections: Sequence[Dict[str, Any]],
+    min_confidence: Optional[float],
+) -> List[Dict[str, Any]]:
+    """按置信度阈值硬过滤检测框（引擎 conf 偶发不可靠时的兜底）。"""
+    if not detections:
+        return []
+    if min_confidence is None:
+        return list(detections)
+    floor = float(min_confidence)
+    return [d for d in detections if float(d.get("confidence") or 0.0) >= floor]
+
+
 def process_yolo_results(
     results,
     target_class: Sequence[str],
     include_segmentation: bool = False,
+    min_confidence: Optional[float] = None,
 ) -> List[Dict[str, Any]]:
-    """从 Ultralytics 推理结果提取检测列表（可选含 mask 多边形）。"""
+    """从 Ultralytics 推理结果提取检测列表（可选含 mask 多边形）。
+
+    min_confidence：二次硬过滤。个别模型/半精度路径下，引擎 conf 阈值偶发漏检，
+    入库前再按配置阈值挡掉低于阈值的框。
+    """
     detections: List[Dict[str, Any]] = []
     target_set = {str(cls_id) for cls_id in (target_class or [])}
+    conf_floor = float(min_confidence) if min_confidence is not None else None
 
     for result in results:
         boxes = result.boxes
@@ -76,11 +95,17 @@ def process_yolo_results(
         for idx, box in enumerate(boxes):
             x1, y1, x2, y2 = box.xyxy[0].tolist()
             confidence = float(box.conf.item())
+            if conf_floor is not None and confidence < conf_floor:
+                continue
             class_id = int(box.cls.item())
             if target_set and str(class_id) not in target_set:
                 continue
 
-            class_name = result.names[class_id]
+            names = getattr(result, "names", None) or {}
+            if isinstance(names, dict):
+                class_name = names.get(class_id, names.get(str(class_id), str(class_id)))
+            else:
+                class_name = str(class_id)
             detection: Dict[str, Any] = {
                 "bbox": [x1, y1, x2, y2],
                 "confidence": confidence,
@@ -229,16 +254,15 @@ def load_detection_model(
     models_type: Optional[str],
     is_gpu: bool,
     class_names: Optional[Dict[int, str]] = None,
+    backend: str = "yolo",
+    parameters: Optional[Dict[str, Any]] = None,
 ):
-    """加载检测模型；ONNX 使用专用适配器，避免 Ultralytics io_binding 输入类型错误。"""
-    from ultralytics import YOLO
-
+    """加载检测模型；按 backend 分流 YOLO / ONNX / RF-DETR。"""
     from src.env_loader import configure_ultralytics_env
     from src.onnx_yolo_adapter import OnnxYoloAdapter, is_onnx_model_path as _is_onnx
+    from src.rfdetr_adapter import RfDetrAdapter, normalize_backend
 
-    configure_ultralytics_env()
-    os.environ.setdefault("YOLO_VERBOSE", "0")
-
+    backend = normalize_backend(backend)
     abs_path = os.path.abspath(model_path)
     if not os.path.exists(abs_path):
         base_name = os.path.basename(abs_path)
@@ -249,6 +273,23 @@ def load_detection_model(
             raise FileNotFoundError(f"模型文件不存在: {model_path}")
 
     use_cuda = torch.cuda.is_available() and is_gpu
+    params = parameters or {}
+
+    if backend == "rfdetr":
+        size = str(params.get("rfdetr_size") or params.get("model_size") or "nano")
+        model = RfDetrAdapter(
+            abs_path,
+            class_names=class_names,
+            use_cuda=use_cuda,
+            model_size=size,
+        )
+        infer_device = "cuda" if use_cuda else "cpu"
+        return model, infer_device, False
+
+    from ultralytics import YOLO
+
+    configure_ultralytics_env()
+    os.environ.setdefault("YOLO_VERBOSE", "0")
 
     if _is_onnx(abs_path):
         names = class_names or class_names_from_onnx_metadata(abs_path)
@@ -261,12 +302,8 @@ def load_detection_model(
     task_type = resolve_yolo_task(models_type)
     model = YOLO(abs_path, task=task_type)
     infer_device = torch.device("cuda" if use_cuda else "cpu")
+    # 保持 FP32 权重；GPU 推理用 predict(half=True)，避免权重 Half、输入 float 报错
     model.to(infer_device)
-    if use_cuda and hasattr(model, "model") and hasattr(model.model, "half"):
-        try:
-            model.model.half()
-        except Exception:
-            pass
     return model, infer_device, False
 
 
@@ -283,12 +320,18 @@ def predict_detection_frame(
     if frame is None or not isinstance(frame, np.ndarray) or frame.size == 0:
         raise ValueError("无效的检测帧")
     frame = np.ascontiguousarray(frame)
+    from src.rfdetr_adapter import RfDetrAdapter
+
+    if isinstance(model, RfDetrAdapter):
+        return model(frame, conf=confidence, confidence=confidence)
+    device_str = str(infer_device).lower()
+    use_half = device_str not in ("cpu",) and "cpu" not in device_str
     kwargs = {
         "conf": confidence,
         "iou": iou,
         "max_det": max_det,
         "verbose": False,
-        "half": False,
+        "half": use_half,
         "device": infer_device,
     }
     return model(frame, **kwargs)
@@ -298,15 +341,21 @@ def load_yolo_model_classes(
     file_path: str,
     models_type: Optional[str] = None,
     parameters: Optional[Dict[str, Any]] = None,
+    backend: str = "yolo",
 ) -> Dict[int, str]:
-    """本地加载 YOLO/ONNX 模型并解析类别（上传校验与入库用）。"""
+    """本地加载模型并解析类别（上传校验与入库用）。"""
     from src.env_loader import configure_ultralytics_env
+    from src.rfdetr_adapter import load_rfdetr_class_names, normalize_backend
 
-    configure_ultralytics_env()
-
+    backend = normalize_backend(backend)
     abs_path = os.path.abspath(file_path)
     if not os.path.exists(abs_path):
         raise FileNotFoundError(f"模型文件不存在: {abs_path}")
+
+    if backend == "rfdetr":
+        return load_rfdetr_class_names(abs_path, parameters)
+
+    configure_ultralytics_env()
 
     ext = os.path.splitext(abs_path)[1].lower()
     if ext == ".onnx":

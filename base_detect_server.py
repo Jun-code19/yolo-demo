@@ -1,11 +1,18 @@
 import asyncio # 导入异步I/O模块
 import logging # 导入日志模块
 import os # 导入操作系统模块
+import warnings
 
 from src.env_loader import configure_ultralytics_env, load_env_file
 
 configure_ultralytics_env()
 load_env_file()
+
+warnings.filterwarnings(
+    "ignore",
+    message=r".*pkg_resources is deprecated as an API.*",
+    category=UserWarning,
+)
 
 import numpy as np # 导入NumPy模块
 from datetime import datetime, timedelta # 导入日期时间模块
@@ -36,7 +43,7 @@ from src.inference_pipeline.pipeline_config import extract_inference_pipeline
 from src.run_detection_task import DetectionTask
 from src.group_detection_task import GroupDetectionTask
 from src.yolo_task_utils import resolve_yolo_task, load_yolo_model_classes
-from src.db_migrations import ensure_device_rtsp_columns, ensure_detection_config_stream_type, ensure_device_group_support, ensure_detection_config_group_mode, ensure_detection_log_device_id_nullable, ensure_crowd_analysis_job_extensions, ensure_vlm_inspection_tables, ensure_data_push_log_table, ensure_edge_server_platform_columns, ensure_device_monitor_method, ensure_alert_rule_tables
+from src.db_migrations import ensure_device_rtsp_columns, ensure_detection_config_stream_type, ensure_device_group_support, ensure_detection_config_group_mode, ensure_detection_log_device_id_nullable, ensure_crowd_analysis_job_extensions, ensure_vlm_inspection_tables, ensure_data_push_log_table, ensure_edge_server_platform_columns, ensure_device_monitor_method, ensure_alert_rule_tables, ensure_person_search_schema, ensure_detection_model_backend
 
 # 导入认证模块
 from api.auth import get_current_user, User
@@ -320,25 +327,23 @@ class DetectionServer:
             else:
                 raise FileNotFoundError(f"模型文件不存在: {os.path.basename(model_path)}")
         
-        # 预加载模型到缓存中
-        if model_path not in self.models_cache:
+        model_backend = (getattr(model, "backend", None) or "yolo").strip().lower()
+        if model_backend in ("rf-detr", "rf_detr"):
+            model_backend = "rfdetr"
+        # YOLO 预加载缓存；RF-DETR / ONNX 由任务自行加载
+        can_yolo_cache = model_backend == "yolo" and not str(model_path).lower().endswith(".onnx")
+        if can_yolo_cache and model_path not in self.models_cache:
             try:
-                # 设置离线模式
                 os.environ["ULTRALYTICS_OFFLINE"] = "1"
                 os.environ["YOLO_NO_ANALYTICS"] = "1"
                 os.environ["NO_VERSION_CHECK"] = "1"
-                
                 task_type = resolve_yolo_task(model.models_type)
-                
                 logger.info(f"预加载模型到缓存: {model_path}, 任务类型: {task_type}")
-                # 尝试加载模型到缓存
                 cached_model = YOLO(model_path, task=task_type)
                 self.models_cache[model_path] = cached_model
-
             except Exception as e:
                 logger.error(f"预加载模型到缓存失败: {e}")
-                # 失败但不中断流程，让任务自己尝试加载
-        else:
+        elif can_yolo_cache:
             logger.info(f"使用缓存的模型: {model_path}")
         
         # 创建检测任务
@@ -362,21 +367,29 @@ class DetectionServer:
             frequency=frequency_value,
             runtime_config=runtime_config,
             inference_pipeline=inference_pipeline,
+            model_backend=model_backend,
+            model_class_names=model.models_classes,
+            model_parameters=model.parameters if isinstance(model.parameters, dict) else {},
         )
         
-        # 如果模型已缓存，直接设置
-        if model_path in self.models_cache:
-
+        # 如果模型已缓存，直接设置（必须同步 infer_device，推理用的是它而不是 task.device）
+        if can_yolo_cache and model_path in self.models_cache:
             task.model = self.models_cache[model_path]
-            # 设置其他必要属性
             task.class_names = task.model.names
-            device = 'cuda' if torch.cuda.is_available() and model.is_gpu else 'cpu'
+            task.is_onnx_model = False
+            device = "cuda" if torch.cuda.is_available() and model.is_gpu else "cpu"
             task.device = torch.device(device)
-            if device == 'cuda' and hasattr(task.model, 'model'):
-                if hasattr(task.model.model, 'dtype'):
-                    task.model.model.half()
-
-            logger.info(f"使用缓存模型设置任务: {config_id},硬件设备: {device}, 加载模型: {hasattr(task.model, 'model')}")
+            task.infer_device = task.device
+            try:
+                # 保持 FP32 权重；推理时由 predict(..., half=True) 走 FP16，避免 Half!=float
+                task.model.to(device)
+            except Exception as e:
+                logger.warning(f"缓存模型迁移到 {device} 失败，将按 CPU 推理: {e}")
+                task.device = torch.device("cpu")
+                task.infer_device = task.device
+            logger.info(
+                f"使用缓存模型设置任务: {config_id},硬件设备: {task.infer_device}, 加载模型: {hasattr(task.model, 'model')}"
+            )
         
         # 设置事件循环
         task.loop = asyncio.get_event_loop()
@@ -417,7 +430,11 @@ class DetectionServer:
             else:
                 raise FileNotFoundError(f"模型文件不存在: {os.path.basename(model_path)}")
 
-        if model_path not in self.models_cache:
+        model_backend = (getattr(model, "backend", None) or "yolo").strip().lower()
+        if model_backend in ("rf-detr", "rf_detr"):
+            model_backend = "rfdetr"
+        can_yolo_cache = model_backend == "yolo" and not str(model_path).lower().endswith(".onnx")
+        if can_yolo_cache and model_path not in self.models_cache:
             try:
                 os.environ["ULTRALYTICS_OFFLINE"] = "1"
                 os.environ["YOLO_NO_ANALYTICS"] = "1"
@@ -443,15 +460,27 @@ class DetectionServer:
             runtime_config=runtime_config,
             stream_type=getattr(config, "stream_type", None) or "main",
             inference_pipeline=inference_pipeline,
+            model_backend=model_backend,
+            model_class_names=model.models_classes,
+            model_parameters=model.parameters if isinstance(model.parameters, dict) else {},
         )
 
-        if model_path in self.models_cache:
+        if can_yolo_cache and model_path in self.models_cache:
             task.model = self.models_cache[model_path]
             task.class_names = task.model.names
+            task.is_onnx_model = False
             device = "cuda" if torch.cuda.is_available() and model.is_gpu else "cpu"
             task.device = torch.device(device)
-            if device == "cuda" and hasattr(task.model, "model") and hasattr(task.model.model, "dtype"):
-                task.model.model.half()
+            task.infer_device = task.device
+            try:
+                task.model.to(device)
+            except Exception as e:
+                logger.warning(f"分组缓存模型迁移到 {device} 失败，将按 CPU 推理: {e}")
+                task.device = torch.device("cpu")
+                task.infer_device = task.device
+            logger.info(
+                f"使用缓存模型设置分组任务: {config_id},硬件设备: {task.infer_device}"
+            )
 
         task.loop = asyncio.get_event_loop()
         task.start()
@@ -580,7 +609,10 @@ class DetectionServer:
             logger.error(f"全局清理任务失败: {e}")
     
     async def _cleanup_detection_events(self):
-        """清理检测事件"""
+        """清理检测事件（含人员图库帧与空轨迹，与手动删除对齐）"""
+        from src.person_search.gallery_cleanup import delete_gallery_for_events, cleanup_orphan_tracks
+        from src.person_search.service import invalidate_search_index_cache
+
         db = SessionLocal()
         try:
             current_time = datetime.now()
@@ -590,6 +622,7 @@ class DetectionServer:
             
             total_deleted_events = 0
             total_deleted_files = 0
+            total_gallery_deleted = 0
             processed_configs = 0
             failed_configs = 0
             
@@ -611,25 +644,32 @@ class DetectionServer:
                     
                     if not events_to_delete:
                         continue  # 没有过期事件，跳过
+
+                    event_ids = [e.event_id for e in events_to_delete]
+                    # 先清人员图库+空轨迹（与手动删除同一路径）
+                    try:
+                        total_gallery_deleted += delete_gallery_for_events(event_ids, db=db)
+                    except Exception as ge:
+                        logger.warning(f"清理人员图库失败 config={config.config_id}: {ge}")
                     
                     # 删除关联的文件
+                    from src.storage_fs import safe_unlink
+
                     deleted_files_count = 0
                     for event in events_to_delete:
                         # 删除缩略图文件
                         if event.thumbnail_path and Path(event.thumbnail_path).exists():
-                            try:
-                                Path(event.thumbnail_path).unlink()
+                            if safe_unlink(event.thumbnail_path):
                                 deleted_files_count += 1
-                            except Exception as e:
-                                logger.warning(f"删除缩略图文件失败: {event.thumbnail_path}, 错误: {e}")
+                            else:
+                                logger.warning(f"删除缩略图文件失败: {event.thumbnail_path}")
                         
                         # 删除视频片段文件
                         if hasattr(event, 'snippet_path') and event.snippet_path and Path(event.snippet_path).exists():
-                            try:
-                                Path(event.snippet_path).unlink()
+                            if safe_unlink(event.snippet_path):
                                 deleted_files_count += 1
-                            except Exception as e:
-                                logger.warning(f"删除视频文件失败: {event.snippet_path}, 错误: {e}")
+                            else:
+                                logger.warning(f"删除视频文件失败: {event.snippet_path}")
                     
                     # 删除数据库记录
                     deleted_events_count = db.query(DetectionEvent).filter(
@@ -648,14 +688,20 @@ class DetectionServer:
                     logger.error(f"清理配置 {config.config_id} 的过期事件失败: {e}")
                     continue
             
-            # 提交所有删除操作
-            if total_deleted_events > 0:
+            # 提交所有删除操作，并扫一遍历史空轨迹
+            if total_deleted_events > 0 or total_gallery_deleted > 0:
+                db.flush()
+                orphan_tracks = cleanup_orphan_tracks(db)
                 db.commit()
+                if total_gallery_deleted or orphan_tracks:
+                    invalidate_search_index_cache()
+                if orphan_tracks:
+                    logger.info(f"自动清理额外删除空轨迹 {orphan_tracks} 条")
             
             # 输出清理统计
-            log_action(db, 'admin', 'cleanup_detection_events', 'system', f"检测事件清理完成 - 处理配置 {processed_configs}/{len(configs)} 个, 失败 {failed_configs} 个")
+            log_action(db, 'admin', 'cleanup_detection_events', 'system', f"检测事件清理完成 - 处理配置 {processed_configs}/{len(configs)} 个, 失败 {failed_configs} 个, 图库 {total_gallery_deleted} 条")
             logger.info(f"检测事件清理完成 - 处理配置 {processed_configs}/{len(configs)} 个, 失败 {failed_configs} 个")
-            logger.info(f"检测事件删除统计: {total_deleted_events} 条记录, {total_deleted_files} 个文件")
+            logger.info(f"检测事件删除统计: {total_deleted_events} 条记录, {total_deleted_files} 个文件, 人员图库 {total_gallery_deleted} 条")
             
         except Exception as e:
             logger.error(f"清理检测事件失败: {e}")
@@ -854,6 +900,8 @@ async def lifespan(app: FastAPI):
     ensure_edge_server_platform_columns(engine)
     ensure_device_monitor_method(engine)
     ensure_alert_rule_tables(engine)
+    ensure_person_search_schema(engine)
+    ensure_detection_model_backend(engine)
     try:
         register_listener_types()
     except Exception as e:
@@ -1230,23 +1278,26 @@ async def get_system_status_api(current_user: User = Depends(get_current_user)):
 # 加载模型API端点
 @app.post("/api/v2/model/load", tags=["检测任务"])
 async def load_model_api(model_data: dict):
-    """加载模型 API：校验 .pt / .onnx 并返回类别"""
+    """加载模型 API：校验 YOLO / ONNX / RF-DETR 并返回类别"""
     model_path = model_data.get("model_path")
     if not model_path:
         raise HTTPException(status_code=400, detail="缺少 model_path")
 
     models_type = model_data.get("models_type")
     parameters = model_data.get("parameters") or {}
+    backend = model_data.get("backend") or (parameters.get("backend") if isinstance(parameters, dict) else None) or "yolo"
     try:
         classes = load_yolo_model_classes(
             model_path,
             models_type=models_type,
             parameters=parameters,
+            backend=backend,
         )
         return {
             "status": "success",
             "message": "模型加载成功",
             "classes": classes,
+            "backend": backend,
         }
     except Exception as e:
         logger.error(f"加载模型失败: {e}")

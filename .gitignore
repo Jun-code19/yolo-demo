@@ -3,6 +3,7 @@ node_modules
 *.dll
 *.lib
 new_venv
+new_venv311
 wheels
 node_modules_backup
 storage
@@ -14,6 +15,9 @@ storage
 *.log.*.*.*.*.*
 *.log.*.*.*.*.*.*
 docker-image
-models/
-docs/
+# 仅忽略仓库根目录的权重/文档杂项目录（勿写成 models/，否则会误伤 yolo-client/src/views/models/）
+/models/
+# 忽略 docs 下杂项，但保留 Markdown 说明文档
+/docs/*
+!/docs/*.md
 uploads/

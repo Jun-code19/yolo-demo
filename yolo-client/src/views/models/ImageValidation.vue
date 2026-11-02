@@ -12,12 +12,13 @@
           <el-option
             v-for="model in models"
             :key="model.models_id"
-            :label="`${model.models_name} (${getModelTypeName(model.models_type)})`"
+            :label="`${model.models_name} (${getModelTypeName(model.models_type)}${isRfdetrBackend(model.backend) ? ' · RF-DETR' : ''})`"
             :value="model.models_id"
           >
             <div class="model-option">
               <span>{{ model.models_name }}</span>
               <el-tag size="small" effect="plain">{{ getModelTypeName(model.models_type) }}</el-tag>
+              <el-tag v-if="isRfdetrBackend(model.backend)" size="small" type="warning" effect="plain">RF-DETR</el-tag>
             </div>
           </el-option>
           <template #empty>
@@ -239,6 +240,11 @@ const getModelTypeName = (type) => {
     'other': '其他模型'
   }
   return typeMap[type] || type
+}
+
+const isRfdetrBackend = (backend) => {
+  const raw = String(backend || 'yolo').toLowerCase()
+  return raw === 'rfdetr' || raw === 'rf-detr' || raw === 'rf_detr'
 }
 
 // 获取默认描述
@@ -504,25 +510,40 @@ const startBatchDetection = async () => {
           timestamp: Date.now()
         }))
         
-        // 等待服务器响应，设置超时
+        // 等待服务器响应（RF-DETR CPU 推理可能很慢）
+        const waitMs = isRfdetrBackend(modelDetails.value?.backend) ? 180000 : 60000
         await new Promise((resolve, reject) => {
+          let settled = false
           const timeout = setTimeout(() => {
-            reject(new Error('服务器响应超时'))
-          }, 30000)
-          
+            if (settled) return
+            settled = true
+            ws.removeEventListener('message', responseHandler)
+            reject(new Error(`服务器响应超时（${Math.round(waitMs / 1000)}s）`))
+          }, waitMs)
+
           const responseHandler = (event) => {
             try {
               const data = JSON.parse(event.data)
-              if (data.type === 'detection_result' && data.image_id === i+1) {
+              if (data.type === 'error') {
+                if (settled) return
+                settled = true
+                clearTimeout(timeout)
+                ws.removeEventListener('message', responseHandler)
+                reject(new Error(data.message || '检测失败'))
+                return
+              }
+              if (data.type === 'detection_result' && data.image_id === i + 1) {
+                if (settled) return
+                settled = true
                 clearTimeout(timeout)
                 ws.removeEventListener('message', responseHandler)
                 resolve()
               }
             } catch (error) {
-              // console.error('处理响应失败:', error)
+              // ignore
             }
           }
-          
+
           ws.addEventListener('message', responseHandler)
         })
         
@@ -1036,42 +1057,59 @@ const sendModelConfig = () => {
         models_type: modelDetails.value.models_type,
         models_path: modelDetails.value.file_path,
         format: modelDetails.value.format,
-        parameters: modelDetails.value.parameters || {}
+        parameters: modelDetails.value.parameters || {},
+        backend: modelDetails.value.backend || (modelDetails.value.parameters || {}).backend || 'yolo',
+        is_gpu: !!modelDetails.value.is_gpu,
+        models_classes: modelDetails.value.models_classes || null,
       }
 
-      // 注册一次性消息处理器，等待配置确认
+      const isRfdetr = isRfdetrBackend(modelConfig.backend)
+      // RF-DETR 首次加载在 CPU 上可能超过 1 分钟
+      const configTimeoutMs = isRfdetr ? 180000 : 30000
+      let settled = false
+      let timeoutId = null
+
+      const finish = (fn, arg) => {
+        if (settled) return
+        settled = true
+        if (timeoutId) clearTimeout(timeoutId)
+        ws.removeEventListener('message', configConfirmHandler)
+        fn(arg)
+      }
+
       const configConfirmHandler = (event) => {
         try {
           const data = JSON.parse(event.data)
+          if (data.type === 'config_loading') {
+            addDetectionRecord('info', data.message || '模型加载中，请稍候…')
+            return
+          }
+          if (data.type === 'error') {
+            finish(reject, new Error(data.message || '模型配置失败'))
+            return
+          }
           if (data.type === 'config_confirm') {
-            // 移除此处理器
-            ws.removeEventListener('message', configConfirmHandler)
-            
             if (data.model === modelDetails.value.models_name) {
               addDetectionRecord('success', `模型 ${modelDetails.value.models_name} 配置成功`)
-              resolve()
+              finish(resolve)
             } else {
-              reject(new Error(data.message || '模型配置失败'))
+              finish(reject, new Error(data.message || '模型配置失败'))
             }
           }
         } catch (error) {
-          // console.error('处理模型配置响应失败:', error)
+          // ignore parse errors
         }
       }
 
-      // 添加一次性消息监听器
       ws.addEventListener('message', configConfirmHandler)
-
-      // 发送模型配置
-      // console.log('Sending model config:', modelConfig)
+      if (isRfdetr) {
+        addDetectionRecord('info', 'RF-DETR 模型加载中（CPU 可能需数十秒）…')
+      }
       ws.send(JSON.stringify(modelConfig))
 
-      // 设置超时，防止无限等待
-      setTimeout(() => {
-        // 如果仍然是侦听器，则移除并拒绝
-        ws.removeEventListener('message', configConfirmHandler)
-        reject(new Error('模型配置响应超时'))
-      }, 10000)
+      timeoutId = setTimeout(() => {
+        finish(reject, new Error(`模型配置响应超时（${Math.round(configTimeoutMs / 1000)}s）`))
+      }, configTimeoutMs)
       
     } catch (error) {
       reject(new Error('发送模型配置失败: ' + error.message))

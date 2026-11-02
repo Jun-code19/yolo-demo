@@ -32,27 +32,29 @@
             <el-switch v-model="displayConfig.parkStats.enabled" />
           </el-form-item>
           <template v-if="displayConfig.parkStats.enabled">
-            <el-form-item label="标题">
-              <el-input v-model="displayConfig.parkStats.title" maxlength="20" placeholder="园内人数" />
-            </el-form-item>
-            <el-form-item label="订阅监控">
-              <el-select
-                v-model="displayConfig.parkStats.schemeIds"
-                multiple
-                filterable
-                collapse-tags
-                collapse-tags-tooltip
-                placeholder="选择人数统计订阅（可多选）"
-                style="width: 100%"
-              >
-                <el-option
-                  v-for="scheme in numberStatSchemes"
-                  :key="scheme.id"
-                  :label="scheme.label"
-                  :value="scheme.id"
-                />
-              </el-select>
-            </el-form-item>
+            <div class="park-stats-inline-row">
+              <el-form-item label="标题" class="park-stats-title-item">
+                <el-input v-model="displayConfig.parkStats.title" maxlength="20" placeholder="园内人数" />
+              </el-form-item>
+              <el-form-item label="订阅监控" class="park-stats-scheme-item">
+                <el-select
+                  v-model="displayConfig.parkStats.schemeIds"
+                  multiple
+                  filterable
+                  collapse-tags
+                  collapse-tags-tooltip
+                  placeholder="选择人数统计订阅（可多选）"
+                  style="width: 100%"
+                >
+                  <el-option
+                    v-for="scheme in numberStatSchemes"
+                    :key="scheme.id"
+                    :label="scheme.label"
+                    :value="scheme.id"
+                  />
+                </el-select>
+              </el-form-item>
+            </div>
           </template>
         </el-form>
       </div>
@@ -193,21 +195,23 @@
         <el-form-item label="启用显示">
           <el-switch v-model="displayConfig.parkStats.enabled" />
         </el-form-item>
-        <el-form-item v-if="displayConfig.parkStats.enabled" label="标题">
-          <el-input v-model="displayConfig.parkStats.title" maxlength="20" />
-        </el-form-item>
-        <el-form-item v-if="displayConfig.parkStats.enabled" label="订阅监控">
-          <el-select
-            v-model="displayConfig.parkStats.schemeIds"
-            multiple
-            filterable
-            collapse-tags
-            placeholder="选择人数统计订阅"
-            style="width: 100%"
-          >
-            <el-option v-for="scheme in numberStatSchemes" :key="scheme.id" :label="scheme.label" :value="scheme.id" />
-          </el-select>
-        </el-form-item>
+        <div v-if="displayConfig.parkStats.enabled" class="park-stats-inline-row">
+          <el-form-item label="标题" class="park-stats-title-item">
+            <el-input v-model="displayConfig.parkStats.title" maxlength="20" />
+          </el-form-item>
+          <el-form-item label="订阅监控" class="park-stats-scheme-item">
+            <el-select
+              v-model="displayConfig.parkStats.schemeIds"
+              multiple
+              filterable
+              collapse-tags
+              placeholder="选择人数统计订阅"
+              style="width: 100%"
+            >
+              <el-option v-for="scheme in numberStatSchemes" :key="scheme.id" :label="scheme.label" :value="scheme.id" />
+            </el-select>
+          </el-form-item>
+        </div>
       </el-form>
       <template #footer>
         <span class="dialog-footer">
@@ -544,7 +548,25 @@ const getBoundAreasCount = () => {
 }
 
 .park-stats-form {
-  max-width: 720px;
+  max-width: 960px;
+}
+
+.park-stats-inline-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.park-stats-title-item {
+  flex: 0 0 220px;
+  margin-bottom: 0;
+}
+
+.park-stats-scheme-item {
+  flex: 1 1 320px;
+  min-width: 280px;
+  margin-bottom: 0;
 }
 
 .screen-name-row {

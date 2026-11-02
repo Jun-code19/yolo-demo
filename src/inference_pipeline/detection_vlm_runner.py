@@ -18,6 +18,7 @@ from src.inference_pipeline.yolo_vlm_stage import (
     run_yolo_analyze,
     run_yolo_scene_verify,
 )
+from src.storage_fs import write_bgr_image
 
 logger = logging.getLogger(__name__)
 
@@ -357,10 +358,9 @@ class DetectionVlmRunner:
 
             if self.save_mode in [SaveMode.screenshot, SaveMode.both]:
                 save_dir = Path(f"storage/events/{current_time.strftime('%Y-%m-%d')}/{device_id}")
-                save_dir.mkdir(parents=True, exist_ok=True, mode=0o777)
                 thumbnail_path = save_dir / f"{event_id}.jpg"
                 quality = 100 if self.stream_type == "sub" else 70
-                cv2.imwrite(str(thumbnail_path), frame, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
+                write_bgr_image(thumbnail_path, frame, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
                 event.thumbnail_path = str(thumbnail_path)
 
             db.add(event)

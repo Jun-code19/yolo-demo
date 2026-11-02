@@ -113,6 +113,8 @@ class DetectionModel(Base):
     models_id = Column(String(64), primary_key=True)
     models_name = Column(String(255), nullable=False)
     models_type = Column(String(50), nullable=False)
+    # 推理后端：yolo（Ultralytics/ONNX）| rfdetr
+    backend = Column(String(20), default="yolo", nullable=False)
     file_path = Column(Text, nullable=False)
     file_size = Column(Integer)
     format = Column(String(20), nullable=False)

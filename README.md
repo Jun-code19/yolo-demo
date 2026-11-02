@@ -77,7 +77,7 @@ npm run dev
 添加摄像设备，配置IP、端口、用户名和密码
 测试连接以确保设备可访问
 模型管理
-上传YOLO模型文件
+上传 YOLO 或 RF-DETR 模型文件（RF-DETR 见 `docs/rfdetr_integration.md`）
 配置模型参数和类别信息
 检测配置
 创建检测配置，关联设备和模型

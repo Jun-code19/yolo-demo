@@ -476,7 +476,10 @@ export default defineComponent({
       redrawCanvas();
     };
 
-    const goBack = () => router.go(-1);
+    const goBack = () => {
+      // 显式回到列表页，由 DetectionConfig 从 sessionStorage 恢复分页
+      router.push({ name: 'DetectionConfig' });
+    };
 
     const resetConfig = () => {
       multiConfig.scenarios = [];

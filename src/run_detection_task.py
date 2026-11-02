@@ -38,10 +38,12 @@ from src.device_roi import (
     filter_detections_by_roi,
     draw_device_roi,
 )
+from src.storage_fs import write_bgr_image
 from src.inference_pipeline.detection_vlm_runner import DetectionVlmRunner
 from src.yolo_task_utils import (
     is_segmentation_type,
     process_yolo_results,
+    filter_detections_by_confidence,
     draw_segmentation_detections,
     build_detection_meta,
     load_detection_model,
@@ -66,7 +68,10 @@ class DetectionTask:
                  confidence: float, models_type: str, is_gpu: bool, target_class: List[str],                  save_mode: SaveMode, area_coordinates:Optional[dict]=None,
                  device_roi: Optional[dict] = None,
                  stream_type: str = 'main', frequency: str = 'realtime', runtime_config: Optional[dict] = None,
-                 inference_pipeline: Optional[dict] = None):
+                 inference_pipeline: Optional[dict] = None,
+                 model_backend: str = 'yolo',
+                 model_class_names=None,
+                 model_parameters=None):
         self.device_id = device_id
         self.device_name = device_name
         self.device_ip = device_ip
@@ -87,6 +92,11 @@ class DetectionTask:
         self.frame_interval = get_frame_interval(self.runtime_config)
         self.last_detection_time = 0.0
         self.inference_pipeline = inference_pipeline or {}
+        self.model_backend = (model_backend or 'yolo').strip().lower()
+        if self.model_backend in ('rf-detr', 'rf_detr'):
+            self.model_backend = 'rfdetr'
+        self.model_class_names = model_class_names
+        self.model_parameters = model_parameters if isinstance(model_parameters, dict) else {}
         self.vlm_runner = DetectionVlmRunner(
             config_id=config_id,
             inference_pipeline=self.inference_pipeline,
@@ -137,7 +147,7 @@ class DetectionTask:
             
         # 性能优化参数
         self.use_gpu_decoder = GPU_DECODER_AVAILABLE and torch.cuda.is_available()
-        self.skip_frame_count = 1  # 跳帧数，可根据CPU负载动态调整
+        self.skip_frame_count = 5  # 跳帧数，可根据CPU负载动态调整
         self.last_performance_check = time.time()
         self.performance_check_interval = 3600  # 每3600秒检查一次性能
     
@@ -174,9 +184,14 @@ class DetectionTask:
                 abs_model_path,
                 self.models_type,
                 self.is_gpu,
+                class_names=self.model_class_names,
+                backend=self.model_backend,
+                parameters=self.model_parameters,
             )
             self.class_names = getattr(self.model, "names", {})
-            if self.is_onnx_model:
+            if self.model_backend == "rfdetr":
+                logger.info("已加载 RF-DETR 模型，device=%s", self.infer_device)
+            elif self.is_onnx_model:
                 logger.info("已使用 ONNX 专用推理适配器加载模型")
             else:
                 logger.info("已加载 PyTorch/YOLO 模型，device=%s", self.infer_device)
@@ -490,8 +505,11 @@ class DetectionTask:
                                 break
                             # 获取速度
                             speed = results[0].speed
-                            # 处理检测结果
+                            # 处理检测结果（含置信度硬过滤，避免引擎 conf 漏检）
                             detections = self.process_detection_results(results)
+                            detections = filter_detections_by_confidence(
+                                detections, self.confidence
+                            )
                             device_roi = self._get_fresh_device_roi()
                             roi_pixels = get_device_roi_pixels(device_roi, detect_frame.shape)
                             output_detections = detections
@@ -637,6 +655,7 @@ class DetectionTask:
             results,
             self.target_class,
             include_segmentation=is_segmentation_type(self.models_type),
+            min_confidence=float(self.confidence or 0.0),
         )
     # 显示检测结果
     def display_detection_results(self, img, results,show_boxes=True): # 显示检测结果
@@ -835,6 +854,7 @@ class DetectionTask:
         self, img_result, detections, speed, cooldown_period, clean_frame=None
     ):
         """生成普通检测事件（不参与规则）"""
+        detections = filter_detections_by_confidence(detections, self.confidence)
         if not detections:
             return
         now = time.time()
@@ -851,6 +871,9 @@ class DetectionTask:
     def save_detection_event(self, frame, detections, clean_frame=None): # 保存检测事件到数据库并存储图像/视频
         """保存检测事件到数据库并存储图像/视频"""
         try:
+            detections = filter_detections_by_confidence(detections, self.confidence)
+            if not detections:
+                return
             # 保存事件到数据库
             db = SessionLocal()
             event_id = str(uuid.uuid4())
@@ -882,15 +905,14 @@ class DetectionTask:
             if self.save_mode in [SaveMode.screenshot, SaveMode.both]:
                 # 根据保存模式保存图像/视频
                 save_dir = Path(f"storage/events/{current_time.strftime('%Y-%m-%d')}/{self.device_id}")
-                save_dir.mkdir(parents=True, exist_ok=True, mode=0o777)   
                 # 事件列表展示：带检测框；人员回填另存无框原图
                 thumbnail_path = save_dir / f"{event_id}.jpg"
                 quality = 100 if self.stream_type == 'sub' else 70
-                cv2.imwrite(str(thumbnail_path), frame, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
+                write_bgr_image(thumbnail_path, frame, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
                 event.thumbnail_path = str(thumbnail_path)
                 if clean_frame is not None:
                     raw_path = save_dir / f"{event_id}_raw.jpg"
-                    cv2.imwrite(str(raw_path), clean_frame, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
+                    write_bgr_image(raw_path, clean_frame, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
                     meta = dict(event.meta_data or {})
                     meta["raw_frame_path"] = str(raw_path)
                     event.meta_data = meta
@@ -1056,12 +1078,11 @@ class DetectionTask:
             }
 
             save_dir = Path(f"storage/events/{current_time.strftime('%Y-%m-%d')}/{self.device_id}")
-            save_dir.mkdir(parents=True, exist_ok=True, mode=0o777)
 
             if self.save_mode in [SaveMode.screenshot, SaveMode.both]:
                 thumbnail_path = save_dir / f"{event_id}.jpg"
                 quality = 100 if self.stream_type == 'sub' else 70
-                cv2.imwrite(str(thumbnail_path), frame, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
+                write_bgr_image(thumbnail_path, frame, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
                 event.thumbnail_path = str(thumbnail_path)
 
             db.add(event)
@@ -1147,15 +1168,12 @@ class DetectionTask:
             
             # 根据保存模式保存图像/视频
             save_dir = Path(f"storage/events/{current_time.strftime('%Y-%m-%d')}/{self.device_id}")
-            save_dir.mkdir(parents=True, exist_ok=True, mode=0o777)
             
             if self.save_mode in [SaveMode.screenshot, SaveMode.both]:   
                 # 保存带检测框的截图（原图）
                 thumbnail_path = save_dir / f"{event_id}.jpg"
-                if self.stream_type == 'sub':
-                    cv2.imwrite(str(thumbnail_path), frame, [int(cv2.IMWRITE_JPEG_QUALITY), 100])
-                else:
-                    cv2.imwrite(str(thumbnail_path), frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
+                quality = 100 if self.stream_type == 'sub' else 70
+                write_bgr_image(thumbnail_path, frame, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
                 event.thumbnail_path = str(thumbnail_path)
           
             # 提交事件
@@ -1221,15 +1239,12 @@ class DetectionTask:
             
             # 根据保存模式保存图像/视频
             save_dir = Path(f"storage/events/{current_time.strftime('%Y-%m-%d')}/{self.device_id}")
-            save_dir.mkdir(parents=True, exist_ok=True, mode=0o777)
             
             if self.save_mode in [SaveMode.screenshot, SaveMode.both]:   
                 # 保存带检测框的截图（原图）
                 thumbnail_path = save_dir / f"{event_id}.jpg"
-                if self.stream_type == 'sub':
-                    cv2.imwrite(str(thumbnail_path), frame, [int(cv2.IMWRITE_JPEG_QUALITY), 100])
-                else:
-                    cv2.imwrite(str(thumbnail_path), frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
+                quality = 100 if self.stream_type == 'sub' else 70
+                write_bgr_image(thumbnail_path, frame, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
                 event.thumbnail_path = str(thumbnail_path)
           
             # 提交事件

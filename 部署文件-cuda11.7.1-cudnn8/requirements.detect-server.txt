@@ -1,7 +1,7 @@
 # 目标检测服务特有依赖
 ultralytics==8.3.91
-torch==2.0.1
-torchvision==0.15.2
+torch==2.4.1
+torchvision==0.19.1
 opencv-python==4.8.1.78
 numpy==1.26.4
 requests==2.31.0
@@ -10,10 +10,22 @@ APScheduler==3.10.1
 uvicorn==0.22.0
 websockets==12.0
 aiohttp==3.8.5
-Pillow==10.0.0 
+Pillow==10.0.1 
 ffmpeg-python==0.2.0
 onnx==1.17.0
 onnxruntime==1.19.2
+# 人员搜索索引（detect-server 启动时会预热）
+faiss-cpu==1.8.0.post1
+
+# --- Optional: RF-DETR ---
+# CUDA11.7 + torch==2.4.1：rfdetr<1.6（transformers 4.x）；>=1.6 需 torch>=2.6
+# 勿与 opencv-python-headless>=5 并存；安装后必须保持 numpy==1.26.4
+rfdetr==1.5.1
+transformers>=4.40.0,<5.0.0
+dill>=0.3.8
+numpy==1.26.4
+# 构建后若被 rfdetr 拉高依赖，Dockerfile 可再执行一次：
+# pip install --force-reinstall "numpy==1.26.4" "opencv-python==4.8.1.78"
 
 # 第三方 NetSDK（本地 wheel，构建时由 Dockerfile 从 vendor/ 安装）
 # 见 vendor/README.md 

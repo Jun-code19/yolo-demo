@@ -68,6 +68,10 @@ export function getPersonRebuildEmbeddingsStatus() {
   return apiClient.get('/rebuild-embeddings/status', { timeout: 15000 })
 }
 
+export function cleanupPersonOrphans() {
+  return apiClient.post('/cleanup-orphans', null, { timeout: 120000 })
+}
+
 export default {
   getPersonSearchStats,
   getPersonReidModelInfo,
@@ -78,5 +82,6 @@ export default {
   indexPersonEvent,
   batchIndexPersonEvents,
   rebuildPersonGalleryEmbeddings,
-  getPersonRebuildEmbeddingsStatus
+  getPersonRebuildEmbeddingsStatus,
+  cleanupPersonOrphans
 }

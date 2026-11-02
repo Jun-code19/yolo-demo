@@ -12,12 +12,13 @@
         <el-option
             v-for="model in models"
             :key="model.models_id"
-            :label="`${model.models_name} (${getModelTypeName(model.models_type)})`"
+            :label="`${model.models_name} (${getModelTypeName(model.models_type)}${isRfdetrBackend(model.backend) ? ' · RF-DETR' : ''})`"
             :value="model.models_id"
           >
             <div class="model-option">
               <span>{{ model.models_name }}</span>
               <el-tag size="small" effect="plain">{{ getModelTypeName(model.models_type) }}</el-tag>
+              <el-tag v-if="isRfdetrBackend(model.backend)" size="small" type="warning" effect="plain">RF-DETR</el-tag>
             </div>
           </el-option>
           <template #empty>
@@ -259,6 +260,11 @@ const getModelTypeName = (type) => {
     'other': '其他模型'
   }
   return typeMap[type] || type
+}
+
+const isRfdetrBackend = (backend) => {
+  const raw = String(backend || 'yolo').toLowerCase()
+  return raw === 'rfdetr' || raw === 'rf-detr' || raw === 'rf_detr'
 }
 
 // 监听选择模型变化时，获取模型详情
@@ -1236,42 +1242,58 @@ const sendModelConfig = () => {
         models_type: modelDetails.value.models_type,
         models_path: modelDetails.value.file_path,
         format: modelDetails.value.format,
-        parameters: modelDetails.value.parameters || {}
+        parameters: modelDetails.value.parameters || {},
+        backend: modelDetails.value.backend || (modelDetails.value.parameters || {}).backend || 'yolo',
+        is_gpu: !!modelDetails.value.is_gpu,
+        models_classes: modelDetails.value.models_classes || null,
       }
 
-      // 注册一次性消息处理器，等待配置确认
+      const isRfdetr = isRfdetrBackend(modelConfig.backend)
+      const configTimeoutMs = isRfdetr ? 180000 : 30000
+      let settled = false
+      let timeoutId = null
+
+      const finish = (fn, arg) => {
+        if (settled) return
+        settled = true
+        if (timeoutId) clearTimeout(timeoutId)
+        ws.removeEventListener('message', configConfirmHandler)
+        fn(arg)
+      }
+
       const configConfirmHandler = (event) => {
         try {
           const data = JSON.parse(event.data)
+          if (data.type === 'config_loading') {
+            addDetectionRecord('info', data.message || '模型加载中，请稍候…')
+            return
+          }
+          if (data.type === 'error') {
+            finish(reject, new Error(data.message || '模型配置失败'))
+            return
+          }
           if (data.type === 'config_confirm') {
-            // 移除此处理器
-            ws.removeEventListener('message', configConfirmHandler)
-            
             if (data.model === modelDetails.value.models_name) {
               addDetectionRecord('success', `模型 ${modelDetails.value.models_name} 配置成功`)
-              resolve()
+              finish(resolve)
             } else {
-              reject(new Error(data.message || '模型配置失败'))
+              finish(reject, new Error(data.message || '模型配置失败'))
             }
           }
         } catch (error) {
-          // console.error('处理模型配置响应失败:', error)
+          // ignore
         }
       }
 
-      // 添加一次性消息监听器
       ws.addEventListener('message', configConfirmHandler)
-
-      // 发送模型配置
-      // console.log('Sending model config:', modelConfig)
+      if (isRfdetr) {
+        addDetectionRecord('info', 'RF-DETR 模型加载中（CPU 可能需数十秒）…')
+      }
       ws.send(JSON.stringify(modelConfig))
 
-      // 设置超时，防止无限等待
-      setTimeout(() => {
-        // 如果仍然是侦听器，则移除并拒绝
-        ws.removeEventListener('message', configConfirmHandler)
-        reject(new Error('模型配置响应超时'))
-      }, 10000)
+      timeoutId = setTimeout(() => {
+        finish(reject, new Error(`模型配置响应超时（${Math.round(configTimeoutMs / 1000)}s）`))
+      }, configTimeoutMs)
       
     } catch (error) {
       reject(new Error('发送模型配置失败: ' + error.message))

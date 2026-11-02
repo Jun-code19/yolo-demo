@@ -481,57 +481,75 @@ class ConnectionManager:
                 await self.disconnect(connection_id)
 # 创建连接管理器实例
 manager = ConnectionManager()
-# 获取或加载YOLO模型
-def get_model(models_name):
-    """获取或加载YOLO模型"""
-    if models_name not in models_cache:
-        models_path = f"models/{models_name}.pt"
-        try:
-            if not Path(models_path).exists():
-                logger.error(f"Model file not found: {models_path}")
-                return None
-            
-            model = YOLO(models_path)
-            
-            # 使用GPU并进行优化
-            device = 'cuda' if torch.cuda.is_available() else 'cpu'
-            if device == 'cuda':
-                model.to(device)
-                # 使用半精度浮点数以提高性能
-                if hasattr(model, 'model'):
-                    model.model.half()
-                logger.info("Using half precision on GPU")
-            
-                # 导出ONNX模型以提高性能
-                try:
-                    onnx_path = f"models/{models_name}.onnx"
-                    if not Path(onnx_path).exists():
-                        model.export(format='onnx', dynamic=True, half=True)
-                        logger.info(f"Model exported to ONNX: {onnx_path}")
-                        
-                        # 尝试使用ONNX Runtime
-                        import onnxruntime as ort
-                        providers = ['CUDAExecutionProvider', 'CPUExecutionProvider'] if device == 'cuda' else ['CPUExecutionProvider']
-                        session = ort.InferenceSession(onnx_path, providers=providers)
-                        models_cache[models_name] = {
-                            'type': 'onnx',
-                            'session': session,
-                            'model': model
-                        }
-                        logger.info("Using ONNX Runtime for inference")
-                        return models_cache[models_name]
-                except Exception as e:
-                    logger.warning(f"ONNX optimization failed: {e}")
-            
-            models_cache[models_name] = {
-                'type': 'pytorch',
-                'model': model
-            }
-            logger.info(f"Model {models_name} loaded successfully on {device}")
-        except Exception as e:
-            logger.error(f"Error loading model {models_name}: {e}")
-            return None
-    return models_cache.get(models_name)
+def _resolve_model_file_path(models_id: str = None, models_path: str = None) -> str:
+    """根据上传路径或 models_id + 扩展名定位权重文件。"""
+    if models_path:
+        p = Path(models_path)
+        if p.exists():
+            return str(p)
+        alt = Path("models") / p.name
+        if alt.exists():
+            return str(alt)
+    if models_id:
+        for ext in (".pt", ".pth", ".onnx", ".weights"):
+            candidate = Path("models") / f"{models_id}{ext}"
+            if candidate.exists():
+                return str(candidate)
+    return ""
+
+
+def get_model(
+    models_id=None,
+    *,
+    models_path=None,
+    models_type=None,
+    backend="yolo",
+    parameters=None,
+    is_gpu=False,
+    class_names=None,
+):
+    """获取或加载检测模型（YOLO / ONNX / RF-DETR）。"""
+    from src.yolo_task_utils import load_detection_model
+    from src.rfdetr_adapter import normalize_backend
+
+    backend = normalize_backend(backend)
+    cache_key = f"{models_id or models_path}|{backend}"
+    if cache_key in models_cache:
+        return models_cache[cache_key]
+
+    abs_path = _resolve_model_file_path(models_id, models_path)
+    if not abs_path:
+        logger.error("Model file not found: id=%s path=%s", models_id, models_path)
+        return None
+
+    try:
+        params = parameters if isinstance(parameters, dict) else {}
+        model, infer_device, is_onnx = load_detection_model(
+            abs_path,
+            models_type,
+            bool(is_gpu),
+            class_names=class_names,
+            backend=backend,
+            parameters=params,
+        )
+        info = {
+            "type": "onnx" if is_onnx else ("rfdetr" if backend == "rfdetr" else "pytorch"),
+            "model": model,
+            "infer_device": infer_device,
+            "backend": backend,
+        }
+        models_cache[cache_key] = info
+        logger.info(
+            "Model loaded id=%s backend=%s path=%s device=%s",
+            models_id,
+            backend,
+            abs_path,
+            infer_device,
+        )
+        return info
+    except Exception as e:
+        logger.error("Error loading model %s: %s", models_id or models_path, e)
+        return None
 # 处理单帧图像
 def process_frame(frame, models_info, frame_id, timestamp, total_frames=None, start_time=None):
     """处理单帧图像。成功返回 (result_dict, None)，失败返回 (None, error_message)。"""
@@ -550,91 +568,62 @@ def process_frame(frame, models_info, frame_id, timestamp, total_frames=None, st
             new_h, new_w = int(orig_h * scale), int(orig_w * scale)
             frame = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)  # 使用INTER_AREA以提高性能
         
-        # 运行检测
-        if models_info['type'] == 'onnx':
-            # 使用ONNX Runtime进行推理
-            session = models_info['session']
-            # 预处理图像
-            input_name = session.get_inputs()[0].name
-            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            frame = frame.transpose(2, 0, 1)
-            frame = np.expand_dims(frame, axis=0)
-            frame = frame.astype(np.float32) / 255.0
-            
-            # 运行推理
-            outputs = session.run(None, {input_name: frame})
-            # 处理输出
-            boxes = outputs[0]
-            scores = outputs[1]
-            classes = outputs[2]
-            
-            detections = []
-            for i in range(len(boxes)):
-                if scores[i] > 0.5:
-                    box = boxes[i]
-                    x1, y1, x2, y2 = box
-                    w = x2 - x1
-                    h = y2 - y1
-                    
-                    if scale < 1:
-                        x1, x2 = x1 / scale, x2 / scale
-                        y1, y2 = y1 / scale, y2 / scale
-                        w = w / scale
-                        h = h / scale
-                    
-                    class_id = int(classes[i])
-                    class_name = models_info['model'].names[class_id]
-                    
-                    detections.append({
-                        "class": class_name,
-                        "confidence": float(scores[i]),
-                        "bbox": [float(x1), float(y1), float(w), float(h)],
-                        "x1": float(x1),
-                        "y1": float(y1),
-                        "x2": float(x2),
-                        "y2": float(y2)
-                    })
-        else:
-            # 使用PyTorch模型（部署 CPU 环境无 GPU 时走此分支；无检测框时 boxes 可能为空，需防御）
-            with torch.cuda.amp.autocast() if torch.cuda.is_available() else nullcontext():
-                results = models_info['model'](frame, conf=0.25)[0]
-            
-            detections = []
-            boxes = getattr(results, "boxes", None)
-            rows = []
-            if boxes is not None:
+        # YOLO 只认 conf；RF-DETR 适配器认 conf / confidence
+        conf_th = 0.25
+        use_cuda = torch.cuda.is_available() and str(models_info.get("infer_device", "")).lower() not in ("cpu",)
+        backend = str(models_info.get("backend") or models_info.get("type") or "yolo").lower()
+        amp_ctx = torch.amp.autocast("cuda") if use_cuda else nullcontext()
+        with amp_ctx:
+            if backend == "rfdetr":
+                raw = models_info["model"](frame, conf=conf_th, confidence=conf_th)
+            else:
+                raw = models_info["model"](frame, conf=conf_th)
+            results = raw[0] if isinstance(raw, (list, tuple)) else raw
+
+        detections = []
+        boxes = getattr(results, "boxes", None)
+        rows = []
+        if boxes is not None:
+            try:
+                data = boxes.data
+                if data is not None and getattr(data, "numel", lambda: len(data))() > 0:
+                    rows = data.tolist()
+            except Exception:
+                # 无 .data 时按 Ultralytics 单框迭代
                 try:
-                    data = boxes.data
-                    if data is not None and data.numel() > 0:
-                        rows = data.tolist()
+                    for box in boxes:
+                        x1, y1, x2, y2 = box.xyxy[0].tolist()
+                        conf = float(box.conf.item() if hasattr(box.conf, "item") else box.conf[0])
+                        cls = float(box.cls.item() if hasattr(box.cls, "item") else box.cls[0])
+                        rows.append([x1, y1, x2, y2, conf, cls])
                 except Exception:
                     rows = []
-            names = getattr(results, "names", None) or getattr(models_info.get("model"), "names", None) or {}
-            for r in rows:
-                x1, y1, x2, y2, conf, cls = r
-                
-                if scale < 1:
-                    x1, x2 = x1 / scale, x2 / scale
-                    y1, y2 = y1 / scale, y2 / scale
-                
-                w = x2 - x1
-                h = y2 - y1
-                
-                cls_i = int(cls)
-                if isinstance(names, dict):
-                    class_name = names.get(cls_i, str(cls_i))
-                else:
-                    class_name = names[cls_i] if cls_i < len(names) else str(cls_i)
-                
-                detections.append({
-                    "class": class_name,
-                    "confidence": round(conf, 3),
-                    "bbox": [float(x1), float(y1), float(w), float(h)],
-                    "x1": float(x1),
-                    "y1": float(y1),
-                    "x2": float(x2),
-                    "y2": float(y2)
-                })
+        names = getattr(results, "names", None) or getattr(models_info.get("model"), "names", None) or {}
+        for r in rows:
+            x1, y1, x2, y2, conf, cls = r
+
+            if scale < 1:
+                x1, x2 = x1 / scale, x2 / scale
+                y1, y2 = y1 / scale, y2 / scale
+
+            w = x2 - x1
+            h = y2 - y1
+
+            cls_i = int(cls)
+            if isinstance(names, dict):
+                class_name = names.get(cls_i, names.get(str(cls_i), str(cls_i)))
+            else:
+                class_name = names[cls_i] if cls_i < len(names) else str(cls_i)
+
+            detections.append({
+                "class": class_name,
+                "confidence": round(float(conf), 3),
+                "bbox": [float(x1), float(y1), float(w), float(h)],
+                "x1": float(x1),
+                "y1": float(y1),
+                "x2": float(x2),
+                "y2": float(y2),
+            })
         
         # 应用框平滑
         smoothed_detections = frame_processor.smooth_boxes(detections, frame_id)
@@ -853,7 +842,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 continue
             # 增加处理模型配置请求的逻辑
             elif message["type"] == "config":
-                # 处理模型配置
+                # 处理模型配置（支持 YOLO / RF-DETR）
                 models_name = message.get("models_name")
                 if not models_name:
                     await websocket.send_json({
@@ -863,23 +852,46 @@ async def websocket_endpoint(websocket: WebSocket):
                     continue
 
                 try:
-                    models_info = get_model(message.get("models_id"))
-                    
+                    params = message.get("parameters") or {}
+                    backend = message.get("backend") or (
+                        params.get("backend") if isinstance(params, dict) else None
+                    ) or "yolo"
+                    await websocket.send_json({
+                        "type": "config_loading",
+                        "message": f"正在加载模型 {models_name}（{backend}），请稍候…",
+                        "backend": backend,
+                    })
+                    # 模型加载是阻塞 CPU/IO，放到线程池避免卡住 WebSocket
+                    loop = asyncio.get_running_loop()
+                    models_info = await loop.run_in_executor(
+                        executor,
+                        lambda: get_model(
+                            message.get("models_id"),
+                            models_path=message.get("models_path") or message.get("file_path"),
+                            models_type=message.get("models_type"),
+                            backend=backend,
+                            parameters=params,
+                            is_gpu=bool(message.get("is_gpu", False)),
+                            class_names=message.get("models_classes"),
+                        ),
+                    )
+
                     if not models_info:
                         await websocket.send_json({
                             "type": "error",
                             "message": f"Failed to load model: {models_name}"
                         })
                         continue
-                                        
-                    # 发送配置确认
+
                     await websocket.send_json({
                         "type": "config_confirm",
-                        "model": models_name
+                        "model": models_name,
+                        "backend": models_info.get("backend", backend),
                     })
-                
+
                 except Exception as e:
                     error_msg = f"Error configuring model {models_name}: {str(e)}"
+                    logger.exception(error_msg)
                     await websocket.send_json({
                         "type": "error",
                         "message": error_msg
@@ -943,13 +955,17 @@ async def websocket_endpoint(websocket: WebSocket):
                         
                         # 检测开始时间
                         detect_start_time = time.time()
-                        
-                        # 使用process_frame函数处理图片
-                        result, proc_err = process_frame(
-                            frame=target_frame,
-                            models_info=models_info,
-                            frame_id=image_id,
-                            timestamp=timestamp
+
+                        # RF-DETR / 大模型推理可能阻塞数秒～数十秒，放到线程池
+                        loop = asyncio.get_running_loop()
+                        result, proc_err = await loop.run_in_executor(
+                            executor,
+                            lambda: process_frame(
+                                frame=target_frame,
+                                models_info=models_info,
+                                frame_id=image_id,
+                                timestamp=timestamp,
+                            ),
                         )
                         
                         # 检测时间

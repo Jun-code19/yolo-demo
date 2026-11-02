@@ -1,4 +1,5 @@
 """人员检测过滤与抠图工具"""
+import os
 from typing import Any, Dict, List, Optional, Tuple
 
 import cv2
@@ -9,13 +10,21 @@ PERSON_CLASS_NAMES = {"person", "people", "human", "行人", "人"}
 # ReID 标准输入尺寸（高 x 宽）
 REID_HEIGHT = 256
 REID_WIDTH = 128
-MIN_CROP_HEIGHT = 64
-MIN_CROP_WIDTH = 24
-MIN_CROP_ASPECT = 1.15
-MAX_CROP_ASPECT = 5.0
-# 入库质量门：Laplacian 方差过低视为模糊
-MIN_SHARPNESS = float(__import__("os").getenv("PERSON_SEARCH_MIN_SHARPNESS", "35"))
-MIN_QUALITY_SCORE = float(__import__("os").getenv("PERSON_SEARCH_MIN_QUALITY", "0.35"))
+MIN_CROP_HEIGHT = int(os.getenv("PERSON_SEARCH_MIN_CROP_H", "96"))
+MIN_CROP_WIDTH = int(os.getenv("PERSON_SEARCH_MIN_CROP_W", "32"))
+MIN_CROP_ASPECT = float(os.getenv("PERSON_SEARCH_MIN_ASPECT", "1.35"))
+MAX_CROP_ASPECT = float(os.getenv("PERSON_SEARCH_MAX_ASPECT", "4.5"))
+# 入库质量门：Laplacian 方差过低视为模糊（监控场景建议 50~80）
+MIN_SHARPNESS = float(os.getenv("PERSON_SEARCH_MIN_SHARPNESS", "55"))
+MIN_QUALITY_SCORE = float(os.getenv("PERSON_SEARCH_MIN_QUALITY", "0.48"))
+# bbox 贴画面边缘像素内视为截断（不完整人体）
+EDGE_MARGIN_PX = int(os.getenv("PERSON_SEARCH_EDGE_MARGIN", "4"))
+# 允许贴边的最大边数：0=禁止任何贴边；1=允许顶或底一侧（远处半身可放宽）
+MAX_EDGE_TOUCHES = int(os.getenv("PERSON_SEARCH_MAX_EDGE_TOUCHES", "0"))
+# 人体轮廓填充比与上下半身占比下限
+MIN_SILHOUETTE_FILL = float(os.getenv("PERSON_SEARCH_MIN_FILL", "0.12"))
+MIN_UPPER_FILL = float(os.getenv("PERSON_SEARCH_MIN_UPPER_FILL", "0.08"))
+MIN_LOWER_FILL = float(os.getenv("PERSON_SEARCH_MIN_LOWER_FILL", "0.05"))
 
 
 def is_person_detection(det: Dict[str, Any]) -> bool:
@@ -84,12 +93,52 @@ def crop_sharpness(bgr: np.ndarray) -> float:
         return 0.0
 
 
+def _bbox_edge_touches(
+    bbox: Tuple[int, int, int, int],
+    frame_shape: Tuple[int, ...],
+    *,
+    margin: int = EDGE_MARGIN_PX,
+) -> Dict[str, bool]:
+    """判断检测框是否贴画面边缘（常见截断：头顶/脚/半身出画）。"""
+    fh = int(frame_shape[0]) if len(frame_shape) >= 1 else 0
+    fw = int(frame_shape[1]) if len(frame_shape) >= 2 else 0
+    x1, y1, x2, y2 = bbox
+    return {
+        "left": x1 <= margin,
+        "top": y1 <= margin,
+        "right": x2 >= max(0, fw - 1 - margin),
+        "bottom": y2 >= max(0, fh - 1 - margin),
+    }
+
+
+def _body_completeness(bgr: np.ndarray) -> Dict[str, float]:
+    """用轮廓填充估计是否像较完整人体（非碎块/严重遮挡）。"""
+    h, w = bgr.shape[:2]
+    mask = _silhouette_mask(bgr)
+    fill = float(np.count_nonzero(mask)) / float(max(h * w, 1))
+    mid = max(1, h // 2)
+    upper = mask[:mid, :]
+    lower = mask[mid:, :]
+    upper_fill = float(np.count_nonzero(upper)) / float(max(upper.size, 1))
+    lower_fill = float(np.count_nonzero(lower)) / float(max(lower.size, 1))
+    return {
+        "fill": fill,
+        "upper_fill": upper_fill,
+        "lower_fill": lower_fill,
+    }
+
+
 def compute_crop_quality(
     bgr: np.ndarray,
     *,
     detection_confidence: float = 0.0,
+    bbox: Optional[Tuple[int, int, int, int]] = None,
+    frame_shape: Optional[Tuple[int, ...]] = None,
 ) -> Dict[str, Any]:
-    """综合清晰度/尺寸/宽高比/检测置信，返回 quality_score ∈ [0,1]。"""
+    """综合清晰度/尺寸/宽高比/贴边截断/躯干完整度。
+
+    注意：YOLO 置信度高 ≠ 清晰或全身；置信度仅作弱加权，硬门槛看清晰度与完整度。
+    """
     if bgr is None or bgr.size == 0:
         return {"ok": False, "quality_score": 0.0, "sharpness": 0.0, "reason": "empty"}
     h, w = bgr.shape[:2]
@@ -98,6 +147,28 @@ def compute_crop_quality(
     ratio = h / max(w, 1)
     if ratio < MIN_CROP_ASPECT or ratio > MAX_CROP_ASPECT:
         return {"ok": False, "quality_score": 0.0, "sharpness": 0.0, "reason": "bad_aspect"}
+
+    # 贴边截断：脚/头出画的高置信框仍会入库，需硬过滤
+    if bbox is not None and frame_shape is not None and len(frame_shape) >= 2:
+        touches = _bbox_edge_touches(bbox, frame_shape)
+        touch_count = sum(1 for v in touches.values() if v)
+        # 左右同时贴边或上下同时贴边 → 几乎必截断
+        if (touches["left"] and touches["right"]) or (touches["top"] and touches["bottom"]):
+            return {
+                "ok": False,
+                "quality_score": 0.0,
+                "sharpness": 0.0,
+                "reason": "truncated_box",
+                "edge_touches": touches,
+            }
+        if touch_count > MAX_EDGE_TOUCHES:
+            return {
+                "ok": False,
+                "quality_score": 0.0,
+                "sharpness": 0.0,
+                "reason": "truncated_edge",
+                "edge_touches": touches,
+            }
 
     sharpness = crop_sharpness(bgr)
     if sharpness < MIN_SHARPNESS:
@@ -108,18 +179,60 @@ def compute_crop_quality(
             "reason": "blurry",
         }
 
-    # 归一化分量
-    sharp_n = float(np.clip(sharpness / 200.0, 0.0, 1.0))
-    size_n = float(np.clip(min(h / 256.0, w / 96.0), 0.0, 1.0))
+    body = _body_completeness(bgr)
+    if body["fill"] < MIN_SILHOUETTE_FILL:
+        return {
+            "ok": False,
+            "quality_score": 0.0,
+            "sharpness": sharpness,
+            "reason": "sparse_body",
+            "body": body,
+        }
+    if body["upper_fill"] < MIN_UPPER_FILL:
+        return {
+            "ok": False,
+            "quality_score": 0.0,
+            "sharpness": sharpness,
+            "reason": "incomplete_upper",
+            "body": body,
+        }
+    if body["lower_fill"] < MIN_LOWER_FILL:
+        return {
+            "ok": False,
+            "quality_score": 0.0,
+            "sharpness": sharpness,
+            "reason": "incomplete_lower",
+            "body": body,
+        }
+
+    # 归一化分量：清晰度/尺寸权重大，检测置信只弱参与
+    sharp_n = float(np.clip(sharpness / 220.0, 0.0, 1.0))
+    size_n = float(np.clip(min(h / 280.0, w / 100.0), 0.0, 1.0))
     # 理想行人比例约 2.0–3.0
-    aspect_n = float(np.clip(1.0 - abs(ratio - 2.4) / 2.0, 0.0, 1.0))
+    aspect_n = float(np.clip(1.0 - abs(ratio - 2.4) / 1.8, 0.0, 1.0))
+    body_n = float(
+        np.clip(
+            0.45 * body["fill"] / 0.35
+            + 0.30 * body["upper_fill"] / 0.25
+            + 0.25 * body["lower_fill"] / 0.20,
+            0.0,
+            1.0,
+        )
+    )
     conf_n = float(np.clip(detection_confidence, 0.0, 1.0))
-    score = 0.40 * sharp_n + 0.25 * size_n + 0.20 * aspect_n + 0.15 * conf_n
+    score = (
+        0.38 * sharp_n
+        + 0.22 * size_n
+        + 0.15 * aspect_n
+        + 0.18 * body_n
+        + 0.07 * conf_n
+    )
     ok = score >= MIN_QUALITY_SCORE
     return {
         "ok": ok,
         "quality_score": round(float(score), 4),
         "sharpness": round(sharpness, 2),
+        "body": {k: round(v, 4) for k, v in body.items()},
         "reason": None if ok else "low_quality",
     }
 

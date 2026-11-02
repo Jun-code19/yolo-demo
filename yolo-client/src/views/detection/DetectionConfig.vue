@@ -435,10 +435,16 @@
                         popper-class="config-model-select-popper"
                       >
                         <el-option v-for="model in modelList" :key="model.models_id"
-                          :label="`${model.models_name} (${getModelTypeName(model.models_type)})`" :value="model.models_id">
+                          :label="`${model.models_name} (${getModelTypeName(model.models_type)}${getBackendSuffix(model.backend)})`" :value="model.models_id">
                           <div class="model-option">
                             <span>{{ model.models_name }}</span>
                             <el-tag size="small" effect="plain">{{ getModelTypeName(model.models_type) }}</el-tag>
+                            <el-tag
+                              v-if="isRfdetrBackend(model.backend)"
+                              size="small"
+                              type="warning"
+                              effect="plain"
+                            >RF-DETR</el-tag>
                           </div>
                         </el-option>
                       </el-select>
@@ -895,6 +901,7 @@ export default defineComponent({
     const currentPage = ref(1);
     const pageSize = ref(20);
     const totalCount = ref(0);
+    const LIST_STATE_KEY = 'detection-config-list-state';
 
     // 筛选相关
     const filterForm = reactive({
@@ -904,6 +911,44 @@ export default defineComponent({
       frequency: ''
     });
     const isFiltering = ref(false);
+
+    const saveListState = () => {
+      try {
+        sessionStorage.setItem(LIST_STATE_KEY, JSON.stringify({
+          currentPage: currentPage.value,
+          pageSize: pageSize.value,
+          filterForm: { ...filterForm },
+          isFiltering: isFiltering.value
+        }));
+      } catch (_) { /* ignore */ }
+    };
+
+    const restoreListState = () => {
+      try {
+        const raw = sessionStorage.getItem(LIST_STATE_KEY);
+        if (!raw) return false;
+        sessionStorage.removeItem(LIST_STATE_KEY);
+        const state = JSON.parse(raw);
+        if (state.pageSize) pageSize.value = Number(state.pageSize) || pageSize.value;
+        if (state.currentPage) currentPage.value = Number(state.currentPage) || 1;
+        if (state.filterForm && typeof state.filterForm === 'object') {
+          Object.assign(filterForm, {
+            device_name: state.filterForm.device_name || '',
+            models_id: state.filterForm.models_id || '',
+            enabled: state.filterForm.enabled ?? '',
+            frequency: state.filterForm.frequency || ''
+          });
+        }
+        if (typeof state.isFiltering === 'boolean') {
+          isFiltering.value = state.isFiltering;
+        } else {
+          isFiltering.value = hasActiveFilter();
+        }
+        return true;
+      } catch (_) {
+        return false;
+      }
+    };
 
     const configStats = ref({
       total_configs: 0,
@@ -946,6 +991,8 @@ export default defineComponent({
 
     // 设置感兴趣区域方法（跳转到新页面）
     const setInterestArea = (config) => {
+      // 离开前保存分页/筛选，返回后恢复，避免从第 N 页跳回第 1 页
+      saveListState();
       router.push({
         name: 'SmartConfigSetting',
         params: {
@@ -1286,6 +1333,13 @@ export default defineComponent({
       return typeMap[type] || type
     }
 
+    const isRfdetrBackend = (backend) => {
+      const raw = String(backend || 'yolo').toLowerCase()
+      return raw === 'rfdetr' || raw === 'rf-detr' || raw === 'rf_detr'
+    }
+
+    const getBackendSuffix = (backend) => (isRfdetrBackend(backend) ? ' · RF-DETR' : '')
+
     const getAreaTypeLabel = (areaCoordinates) => {
       if (!areaCoordinates || Object.keys(areaCoordinates).length === 0) {
         return '未设置';
@@ -1555,6 +1609,7 @@ export default defineComponent({
 
     // 初始化
     onMounted(() => {
+      restoreListState();
       loadDeviceList();
       loadDeviceGroups();
       loadModelList();
@@ -1902,6 +1957,8 @@ export default defineComponent({
       getFrequencyLabel,
       getFrequencyType,
       getPipelineModeLabel,
+      isRfdetrBackend,
+      getBackendSuffix,
       getPipelineModeType,
       getSaveModeLabel,
       getSaveModeType,
