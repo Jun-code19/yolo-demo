@@ -5,9 +5,9 @@ import re
 import threading
 import time
 import uuid
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -28,6 +28,16 @@ from src.person_search.faiss_index import (
     has_index as has_faiss_index,
     invalidate_faiss_index,
     search_faiss,
+)
+from src.person_search.faiss_shards import (
+    DEFAULT_DIM as FAISS_DEFAULT_DIM,
+    drop_shards_before,
+    get_shard_status,
+    invalidate_shard_cache,
+    rebuild_shard_from_rows,
+    search_shards,
+    shards_ready,
+    upsert_track as upsert_track_shard,
 )
 from src.person_search.par_attrs import extract_person_attributes
 from src.person_search.query_preprocess import prepare_query_image
@@ -52,9 +62,9 @@ from src.person_search.utils import (
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_SEARCH_LIMIT = 5000
+DEFAULT_SEARCH_LIMIT = int(os.getenv("PERSON_SEARCH_LIMIT", "50000"))
 MIN_PERSON_CONFIDENCE = float(os.getenv("PERSON_SEARCH_MIN_CONF", "0.45"))
-COARSE_TOP_N = int(os.getenv("PERSON_SEARCH_COARSE_TOP", "150"))
+COARSE_TOP_N = int(os.getenv("PERSON_SEARCH_COARSE_TOP", "300"))
 RERANK_K1 = int(os.getenv("PERSON_SEARCH_RERANK_K1", "20"))
 RERANK_K2 = int(os.getenv("PERSON_SEARCH_RERANK_K2", "6"))
 APPEARANCE_BLEND = float(os.getenv("PERSON_SEARCH_APPEARANCE_BLEND", "0.1"))
@@ -66,6 +76,8 @@ _quality_reject_count = 0
 
 _rebuild_job_lock = threading.Lock()
 _rebuild_job: Dict[str, Any] = {"running": False}
+_index_rebuild_job_lock = threading.Lock()
+_index_rebuild_job: Dict[str, Any] = {"running": False}
 
 _search_index_cache: Dict[str, Any] = {
     "key": None,
@@ -80,6 +92,7 @@ _gallery_stats_cache: Dict[str, Any] = {"built_at": 0.0, "data": None}
 
 
 def invalidate_search_index_cache() -> None:
+    """清空内存检索缓存与分片 LRU；不删除磁盘 FAISS 分片。"""
     _search_index_cache["key"] = None
     _search_index_cache["items"] = []
     _search_index_cache["embeddings"] = []
@@ -89,6 +102,27 @@ def invalidate_search_index_cache() -> None:
     _gallery_stats_cache["built_at"] = 0.0
     _gallery_stats_cache["data"] = None
     invalidate_faiss_index()
+    try:
+        invalidate_shard_cache()
+    except Exception as exc:
+        logger.debug("invalidate_shard_cache: %s", exc)
+
+
+def _upsert_track_to_shard(track_id: str, agg: Dict[str, Any], device_id: str, last_seen: datetime) -> None:
+    deep = _as_deep(agg)
+    if not deep or not last_seen:
+        return
+    try:
+        upsert_track_shard(
+            track_id,
+            deep,
+            device_id=device_id or "",
+            last_seen=last_seen,
+            embedding_version=EMBEDDING_VERSION,
+            dim=len(deep),
+        )
+    except Exception as exc:
+        logger.warning("轨迹分片 upsert 失败 track=%s: %s", track_id, exc)
 
 
 def _as_deep(embedding: Any) -> List[float]:
@@ -103,9 +137,11 @@ def _load_search_index(
     since: datetime,
     device_id: Optional[str],
     search_limit: int,
+    until: Optional[datetime] = None,
 ) -> Dict[str, Any]:
     """检索索引默认加载 person_track；无轨迹时回退帧级图库。"""
-    cache_key = ("track", since.isoformat(), device_id or "", search_limit)
+    until = until or datetime.now()
+    cache_key = ("track", since.isoformat(), until.isoformat(), device_id or "", search_limit)
     now = time.time()
     if (
         _search_index_cache.get("key") == cache_key
@@ -118,6 +154,7 @@ def _load_search_index(
         db.query(PersonTrack, Device.device_name)
         .outerjoin(Device, PersonTrack.device_id == Device.device_id)
         .filter(PersonTrack.last_seen >= since)
+        .filter(PersonTrack.last_seen <= until)
         .filter(PersonTrack.agg_embedding.isnot(None))
     )
     if device_id:
@@ -157,6 +194,7 @@ def _load_search_index(
     if not items:
         gq = _active_gallery_query(db)
         gq = gq.filter(PersonGalleryItem.created_at >= since)
+        gq = gq.filter(PersonGalleryItem.created_at <= until)
         if device_id:
             gq = gq.filter(PersonGalleryItem.device_id == device_id)
         grows = gq.order_by(PersonGalleryItem.created_at.desc()).limit(search_limit).all()
@@ -256,6 +294,9 @@ def _persist_track(db, track) -> None:
         item.track_id = track.track_id
         item.is_keyframe = fr.crop_path in key_paths
 
+    # 增量写入日分片（失败不影响入库）
+    _upsert_track_to_shard(track.track_id, agg, track.device_id, track.last_seen)
+
 
 def flush_expired_tracks(*, force_all: bool = False) -> int:
     """落盘超时/全部轨迹。"""
@@ -273,7 +314,11 @@ def flush_expired_tracks(*, force_all: bool = False) -> int:
             saved += 1
         if saved:
             db.commit()
-            invalidate_search_index_cache()
+            # 分片已在 _persist_track 增量写入；仅清内存检索缓存
+            _search_index_cache["key"] = None
+            _search_index_cache["items"] = []
+            _search_index_cache["embeddings"] = []
+            _search_index_cache["deep_matrix"] = None
             logger.info("轨迹落盘 %s 条", saved)
     except Exception as exc:
         db.rollback()
@@ -746,6 +791,8 @@ def rebuild_track_aggregates(db: Optional[Session] = None) -> int:
             row.updated_at = datetime.now()
             for f in frames[:8]:
                 f.is_keyframe = True
+            if row.last_seen and agg:
+                _upsert_track_to_shard(tid, agg, row.device_id, row.last_seen)
             updated += 1
         if own:
             db.commit()
@@ -763,6 +810,145 @@ def rebuild_track_aggregates(db: Optional[Session] = None) -> int:
 def get_rebuild_gallery_job() -> Dict[str, Any]:
     with _rebuild_job_lock:
         return dict(_rebuild_job)
+
+
+def get_faiss_index_status() -> Dict[str, Any]:
+    status = get_shard_status(EMBEDDING_VERSION, FAISS_DEFAULT_DIM)
+    # 若实际特征维度与默认不同，再查一遍（兼容）
+    if not status.get("shard_count"):
+        for dim in (512, 2048, 768):
+            alt = get_shard_status(EMBEDDING_VERSION, dim)
+            if alt.get("shard_count"):
+                status = alt
+                break
+    status["search_limit"] = DEFAULT_SEARCH_LIMIT
+    status["coarse_top"] = COARSE_TOP_N
+    return status
+
+
+def get_index_rebuild_job() -> Dict[str, Any]:
+    with _index_rebuild_job_lock:
+        return dict(_index_rebuild_job)
+
+
+def rebuild_faiss_shards(*, days: int = 30, dim: int = FAISS_DEFAULT_DIM) -> Dict[str, Any]:
+    """按日从 person_track 全量重建 FAISS 分片。"""
+    days = max(1, min(int(days), 90))
+    until = datetime.now()
+    since = until - timedelta(days=days)
+    db = SessionLocal()
+    rebuilt = 0
+    vectors = 0
+    try:
+        # 按 last_seen 落在各自然日
+        cur = since.date()
+        end = until.date()
+        while cur <= end:
+            day = cur.isoformat()
+            day_start = datetime(cur.year, cur.month, cur.day)
+            day_end = day_start + timedelta(days=1)
+            rows = (
+                db.query(PersonTrack)
+                .filter(PersonTrack.last_seen >= day_start)
+                .filter(PersonTrack.last_seen < day_end)
+                .filter(PersonTrack.agg_embedding.isnot(None))
+                .all()
+            )
+            payload = []
+            use_dim = dim
+            for row in rows:
+                deep = _as_deep(row.agg_embedding)
+                if not deep:
+                    continue
+                if use_dim and len(deep) != use_dim:
+                    # 以首条有效维度为准
+                    if not payload:
+                        use_dim = len(deep)
+                    else:
+                        continue
+                payload.append(
+                    {
+                        "track_id": row.track_id,
+                        "deep": deep,
+                        "device_id": row.device_id,
+                        "last_seen": row.last_seen or day_start,
+                    }
+                )
+            result = rebuild_shard_from_rows(
+                day,
+                payload,
+                embedding_version=EMBEDDING_VERSION,
+                dim=use_dim or dim,
+            )
+            rebuilt += 1
+            vectors += int(result.get("count") or 0)
+            cur += timedelta(days=1)
+        invalidate_search_index_cache()
+        return {
+            "ok": True,
+            "days": days,
+            "shards_rebuilt": rebuilt,
+            "vectors": vectors,
+            "status": get_faiss_index_status(),
+        }
+    finally:
+        db.close()
+
+
+def start_rebuild_faiss_index_async(*, days: int = 30) -> Dict[str, Any]:
+    days = max(1, min(int(days), 90))
+    with _index_rebuild_job_lock:
+        if _index_rebuild_job.get("running"):
+            return {
+                "started": False,
+                "message": "已有索引重建任务进行中",
+                "job": dict(_index_rebuild_job),
+            }
+        _index_rebuild_job.clear()
+        _index_rebuild_job.update(
+            running=True,
+            days=days,
+            phase="starting",
+            shards_rebuilt=0,
+            vectors=0,
+            error=None,
+            started_at=datetime.now().isoformat(),
+            finished_at=None,
+        )
+        job_ref = _index_rebuild_job
+
+    def _worker() -> None:
+        try:
+            with _index_rebuild_job_lock:
+                job_ref["phase"] = "rebuilding"
+            result = rebuild_faiss_shards(days=days)
+            with _index_rebuild_job_lock:
+                job_ref.update(
+                    running=False,
+                    phase="done",
+                    shards_rebuilt=result.get("shards_rebuilt") or 0,
+                    vectors=result.get("vectors") or 0,
+                    finished_at=datetime.now().isoformat(),
+                    status=result.get("status"),
+                )
+        except Exception as exc:
+            logger.exception("FAISS 分片重建失败")
+            with _index_rebuild_job_lock:
+                job_ref.update(
+                    running=False,
+                    phase="error",
+                    error=str(exc),
+                    finished_at=datetime.now().isoformat(),
+                )
+
+    threading.Thread(target=_worker, name="faiss-shard-rebuild", daemon=True).start()
+    return {"started": True, "message": f"已开始重建近 {days} 天检索索引", "job": get_index_rebuild_job()}
+
+
+def drop_faiss_shards_before(day: str) -> Dict[str, Any]:
+    removed = drop_shards_before(day, embedding_version=EMBEDDING_VERSION, dim=FAISS_DEFAULT_DIM)
+    invalidate_shard_cache()
+    return {"removed": removed, "before": day, "status": get_faiss_index_status()}
 
 
 def start_rebuild_gallery_embeddings_async(limit: int = 5000, force: bool = False) -> Dict[str, Any]:
@@ -955,24 +1141,161 @@ def _confidence_from_score(score: float) -> str:
     return "weak"
 
 
-def search_by_image(
-    query_bgr: np.ndarray,
+def _parse_time_bound(value: Optional[str], *, is_end: bool = False) -> Optional[datetime]:
+    """解析 YYYY-MM-DD 或 YYYY-MM-DD HH:mm:ss / ISO。仅日期时：起=00:00:00，止=23:59:59。"""
+    if not value:
+        return None
+    # 查询串里空格常被编成 +，需还原
+    raw = str(value).strip().replace("T", " ").replace("+", " ")
+    while "  " in raw:
+        raw = raw.replace("  ", " ")
+    for fmt, n in (
+        ("%Y-%m-%d %H:%M:%S", 19),
+        ("%Y-%m-%d %H:%M", 16),
+        ("%Y-%m-%d", 10),
+    ):
+        try:
+            dt = datetime.strptime(raw[:n], fmt)
+            if fmt == "%Y-%m-%d" and is_end:
+                return dt.replace(hour=23, minute=59, second=59, microsecond=999999)
+            return dt
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def resolve_search_window(
     *,
-    top_k: int = 20,
-    min_similarity: float = DEFAULT_MIN_SIMILARITY,
-    device_id: Optional[str] = None,
-    days: int = 7,
-    search_limit: int = DEFAULT_SEARCH_LIMIT,
+    days: Optional[int] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+) -> Tuple[datetime, datetime]:
+    """解析检索/图库时间窗。优先 date_from/date_to（可含时分秒），否则按 days 回滚。"""
+    now = datetime.now()
+    today = now.date()
+    since = _parse_time_bound(date_from, is_end=False)
+    until = _parse_time_bound(date_to, is_end=True)
+    if since is not None or until is not None:
+        if since is None:
+            since = until.replace(hour=0, minute=0, second=0, microsecond=0) if until else datetime(
+                today.year, today.month, today.day
+            )
+        if until is None:
+            until = since.replace(hour=23, minute=59, second=59, microsecond=999999)
+        if until < since:
+            since, until = until, since
+        if (until.date() - since.date()).days > 89:
+            since = datetime(until.year, until.month, until.day) - timedelta(days=89)
+        if until > now:
+            until = now
+        return since, until
+
+    span = max(1, min(int(days or 1), 90))
+    # 按自然日：近 N 天 = 含今天共 N 个日历日
+    start_d = today - timedelta(days=span - 1)
+    since = datetime(start_d.year, start_d.month, start_d.day)
+    return since, now
+
+
+def _parse_iso_dt(value: Any) -> Optional[datetime]:
+    if isinstance(value, datetime):
+        return value
+    if not value:
+        return None
+    raw = str(value).strip().replace("T", " ").replace("+", " ")
+    if raw.endswith("Z"):
+        raw = raw[:-1]
+    for fmt, n in (("%Y-%m-%d %H:%M:%S", 19), ("%Y-%m-%d %H:%M:%S.%f", 26), ("%Y-%m-%d", 10)):
+        try:
+            return datetime.strptime(raw[:n], fmt)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _best_crop_in_window(db, track_id: str, since: datetime, until: datetime) -> Optional[str]:
+    """优先用时间窗内最高质量帧作展示图，避免代表图落在窗外导致误以为时间过滤失效。"""
+    row = (
+        db.query(PersonGalleryItem)
+        .filter(PersonGalleryItem.track_id == track_id)
+        .filter(PersonGalleryItem.created_at >= since)
+        .filter(PersonGalleryItem.created_at <= until)
+        .order_by(PersonGalleryItem.quality_score.desc())
+        .first()
+    )
+    return row.crop_path if row and row.crop_path else None
+
+
+def _load_tracks_by_ids(
+    db,
+    track_ids: List[str],
+    *,
+    since: Optional[datetime] = None,
+    until: Optional[datetime] = None,
 ) -> Dict[str, Any]:
-    """轨迹级检索：粗检(FAISS/矩阵) → k-reciprocal 重排 → 弱外观融合。"""
-    started = time.perf_counter()
-    flush_expired_tracks()
+    """按候选 track_id 批量加载轨迹元数据与特征；可选按 last_seen 再过滤时间窗。"""
+    if not track_ids:
+        return {"items": [], "embeddings": [], "deep_matrix": np.empty((0, 0), dtype=np.float32)}
+    rows = (
+        db.query(PersonTrack, Device.device_name)
+        .outerjoin(Device, PersonTrack.device_id == Device.device_id)
+        .filter(PersonTrack.track_id.in_(track_ids))
+        .all()
+    )
+    by_id = {row.track_id: (row, name) for row, name in rows}
+    items: List[Dict[str, Any]] = []
+    embeddings: List[Any] = []
+    deep_rows: List[List[float]] = []
+    for tid in track_ids:
+        packed = by_id.get(tid)
+        if not packed:
+            continue
+        track, device_name = packed
+        if since is not None and track.last_seen and track.last_seen < since:
+            continue
+        if until is not None and track.last_seen and track.last_seen > until:
+            continue
+        embedding = track.agg_embedding
+        deep = _as_deep(embedding)
+        if not deep:
+            continue
+        crop_path = track.repr_crop_path
+        if since is not None and until is not None:
+            in_win = _best_crop_in_window(db, track.track_id, since, until)
+            if in_win:
+                crop_path = in_win
+            elif not crop_path:
+                continue
+            else:
+                # 窗内无帧：该轨迹不应作为「该时段」结果
+                continue
+        items.append(
+            {
+                "result_type": "track",
+                "track_id": track.track_id,
+                "gallery_id": None,
+                "event_id": None,
+                "device_id": track.device_id,
+                "device_name": device_name,
+                "crop_path": crop_path,
+                "frame_count": track.frame_count or 0,
+                "quality_score": track.quality_score,
+                "first_seen": track.first_seen.isoformat() if track.first_seen else None,
+                "last_seen": track.last_seen.isoformat() if track.last_seen else None,
+                "created_at": track.last_seen.isoformat() if track.last_seen else None,
+            }
+        )
+        embeddings.append(embedding)
+        deep_rows.append(deep)
+    deep_matrix = np.asarray(deep_rows, dtype=np.float32) if deep_rows else np.empty((0, 0), dtype=np.float32)
+    return {"items": items, "embeddings": embeddings, "deep_matrix": deep_matrix}
+
+
+def _build_query_vec(query_bgr: np.ndarray, embedder) -> Optional[Dict[str, Any]]:
     query_bgr = prepare_query_image(query_bgr)
-    embedder = get_person_embedder()
     query_vec = embedder.embed_bgr(query_bgr, tta_flip=True)
     if not query_vec:
-        return {"results": [], "legacy_skipped": 0, "needs_rebuild": False, "search_ms": 0}
-
+        return None
     clean_query = strip_segmentation_border(query_bgr)
     if not query_vec.get("garment"):
         query_vec = {**query_vec, "garment": extract_garment_signature(clean_query) or []}
@@ -982,102 +1305,303 @@ def search_by_image(
         query_vec = {**query_vec, "body": extract_body_signature(clean_query) or []}
     if not query_vec.get("attrs"):
         query_vec = {**query_vec, "attrs": extract_person_attributes(clean_query) or {}}
+    return query_vec
 
-    since = datetime.now() - timedelta(days=max(1, min(days, 90)))
+
+def _max_fuse_sims(sim_rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """多查询相似度按字段取 max，再拼一条融合结果。"""
+    if not sim_rows:
+        return {}
+    if len(sim_rows) == 1:
+        return sim_rows[0]
+    keys = (
+        "color_similarity",
+        "hue_similarity",
+        "garment_similarity",
+        "body_similarity",
+        "attr_similarity",
+    )
+    out: Dict[str, Any] = {}
+    for key in keys:
+        vals = [float(r.get(key) or 0) for r in sim_rows if r.get(key) is not None]
+        out[key] = max(vals) if vals else None
+    # 性别提示：取首个非空
+    for row in sim_rows:
+        if row.get("gender_hint"):
+            out["gender_hint"] = row.get("gender_hint")
+            break
+    else:
+        out["gender_hint"] = None
+    return out
+
+
+def search_by_image(
+    query_bgr: np.ndarray,
+    *,
+    top_k: int = 20,
+    min_similarity: float = DEFAULT_MIN_SIMILARITY,
+    device_id: Optional[str] = None,
+    days: int = 1,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    search_limit: int = DEFAULT_SEARCH_LIMIT,
+) -> Dict[str, Any]:
+    """单图检索（兼容旧调用）。"""
+    return search_by_images(
+        [query_bgr],
+        top_k=top_k,
+        min_similarity=min_similarity,
+        device_id=device_id,
+        days=days,
+        date_from=date_from,
+        date_to=date_to,
+        search_limit=search_limit,
+    )
+
+
+def search_by_images(
+    query_bgrs: List[np.ndarray],
+    *,
+    top_k: int = 20,
+    min_similarity: float = DEFAULT_MIN_SIMILARITY,
+    device_id: Optional[str] = None,
+    days: int = 1,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    search_limit: int = DEFAULT_SEARCH_LIMIT,
+) -> Dict[str, Any]:
+    """多图检索：各图独立提特征 → 粗检并集 → 分数按 max 融合。"""
+    started = time.perf_counter()
+    flush_expired_tracks()
+    images = [img for img in (query_bgrs or []) if img is not None and getattr(img, "size", 0)]
+    if not images:
+        return {
+            "results": [],
+            "legacy_skipped": 0,
+            "needs_rebuild": False,
+            "search_ms": 0,
+            "query_count": 0,
+        }
+
+    embedder = get_person_embedder()
+    query_vecs: List[Dict[str, Any]] = []
+    for img in images:
+        vec = _build_query_vec(img, embedder)
+        if vec:
+            query_vecs.append(vec)
+    if not query_vecs:
+        return {
+            "results": [],
+            "legacy_skipped": 0,
+            "needs_rebuild": False,
+            "search_ms": int((time.perf_counter() - started) * 1000),
+            "query_count": 0,
+        }
+
+    query_deeps = [np.asarray(v.get("deep") or [], dtype=np.float32) for v in query_vecs]
+    if any(d.size == 0 for d in query_deeps):
+        return {
+            "results": [],
+            "legacy_skipped": 0,
+            "needs_rebuild": True,
+            "search_ms": int((time.perf_counter() - started) * 1000),
+            "query_count": len(query_vecs),
+        }
+    dim = int(query_deeps[0].size)
+    if any(int(d.size) != dim for d in query_deeps):
+        return {
+            "results": [],
+            "legacy_skipped": 0,
+            "needs_rebuild": True,
+            "search_ms": int((time.perf_counter() - started) * 1000),
+            "query_count": len(query_vecs),
+        }
+
+    since, until = resolve_search_window(days=days, date_from=date_from, date_to=date_to)
     db = SessionLocal()
     try:
-        index = _load_search_index(db, since=since, device_id=device_id, search_limit=search_limit)
-        items = index["items"]
-        embeddings = index["embeddings"]
-        deep_matrix = index["deep_matrix"]
-        legacy_skipped = int(index.get("legacy_skipped") or 0)
+        items: List[Dict[str, Any]] = []
+        embeddings: List[Any] = []
+        deep_matrix = np.empty((0, 0), dtype=np.float32)
+        legacy_skipped = 0
+        backend = "matrix"
+        scanned = 0
+        candidate_idx: np.ndarray = np.arange(0, dtype=np.int32)
+        multi_tag = f"x{len(query_vecs)}" if len(query_vecs) > 1 else ""
+
+        use_shards = shards_ready(EMBEDDING_VERSION, dim or FAISS_DEFAULT_DIM)
+        if use_shards:
+            score_map: Dict[str, float] = {}
+            day_lists: List[Any] = []
+            for q_deep in query_deeps:
+                shard_ids, shard_scores, shard_meta = search_shards(
+                    q_deep,
+                    since=since,
+                    until=until,
+                    device_id=device_id,
+                    top_k=COARSE_TOP_N,
+                    embedding_version=EMBEDDING_VERSION,
+                    dim=dim,
+                )
+                scanned = max(scanned, int(shard_meta.get("scanned") or 0))
+                backend = str(shard_meta.get("backend") or "faiss_shards")
+                if shard_meta.get("day_list"):
+                    day_lists.append(shard_meta.get("day_list"))
+                scores_iter = shard_scores if shard_scores is not None else []
+                for tid, sc in zip(shard_ids, scores_iter):
+                    if not tid:
+                        continue
+                    prev = score_map.get(tid)
+                    score = float(sc)
+                    if prev is None or score > prev:
+                        score_map[tid] = score
+            ranked_ids = sorted(score_map.keys(), key=lambda t: score_map[t], reverse=True)[
+                :COARSE_TOP_N
+            ]
+            loaded = _load_tracks_by_ids(db, ranked_ids, since=since, until=until)
+            items = loaded["items"]
+            embeddings = loaded["embeddings"]
+            deep_matrix = loaded["deep_matrix"]
+            order_map = {it["track_id"]: i for i, it in enumerate(items)}
+            ordered = [order_map[tid] for tid in ranked_ids if tid in order_map]
+            candidate_idx = np.asarray(ordered, dtype=np.int32)
+            if multi_tag:
+                backend = f"{backend}{multi_tag}"
+            logger.info(
+                "分片检索 queries=%s window=%s~%s scanned=%s candidates=%s",
+                len(query_vecs),
+                since.isoformat(sep=" ", timespec="seconds"),
+                until.isoformat(sep=" ", timespec="seconds"),
+                scanned,
+                len(items),
+            )
 
         if deep_matrix.size == 0:
-            search_ms = int((time.perf_counter() - started) * 1000)
-            return {
-                "results": [],
-                "legacy_skipped": legacy_skipped,
-                "needs_rebuild": legacy_skipped > 0,
-                "search_ms": search_ms,
-                "scanned": 0,
-                "reranked": 0,
-                "backend": "empty",
-            }
-
-        q_deep = np.asarray(query_vec.get("deep") or [], dtype=np.float32)
-        if q_deep.size != deep_matrix.shape[1]:
-            search_ms = int((time.perf_counter() - started) * 1000)
-            return {
-                "results": [],
-                "legacy_skipped": legacy_skipped + len(items),
-                "needs_rebuild": True,
-                "search_ms": search_ms,
-                "scanned": len(items),
-                "reranked": 0,
-            }
-
-        # 粗检：优先 FAISS，否则矩阵
-        backend = "matrix"
-        coarse_n = min(COARSE_TOP_N, len(items))
-        id_to_idx = {
-            (it.get("track_id") or it.get("gallery_id")): i for i, it in enumerate(items)
-        }
-        candidate_idx: np.ndarray
-        if has_faiss_index() and (device_id is None):
-            faiss_ids, faiss_scores = search_faiss(q_deep, top_k=coarse_n)
-            idxs = []
-            for tid in faiss_ids:
-                if tid in id_to_idx:
-                    idxs.append(id_to_idx[tid])
-            if idxs:
-                candidate_idx = np.asarray(idxs, dtype=np.int32)
-                backend = "faiss" if faiss_available() else "memory_index"
+            index = _load_search_index(
+                db, since=since, until=until, device_id=device_id, search_limit=search_limit
+            )
+            fallback_ids = [it.get("track_id") for it in (index["items"] or []) if it.get("track_id")]
+            if fallback_ids:
+                loaded = _load_tracks_by_ids(db, fallback_ids, since=since, until=until)
+                items = loaded["items"]
+                embeddings = loaded["embeddings"]
+                deep_matrix = loaded["deep_matrix"]
             else:
-                deep_scores = deep_matrix @ q_deep
+                items = index["items"]
+                embeddings = index["embeddings"]
+                deep_matrix = index["deep_matrix"]
+            legacy_skipped = int(index.get("legacy_skipped") or 0)
+            scanned = len(items)
+            if deep_matrix.size == 0:
+                search_ms = int((time.perf_counter() - started) * 1000)
+                return {
+                    "results": [],
+                    "legacy_skipped": legacy_skipped,
+                    "needs_rebuild": legacy_skipped > 0,
+                    "search_ms": search_ms,
+                    "scanned": 0,
+                    "reranked": 0,
+                    "backend": "empty",
+                    "query_count": len(query_vecs),
+                }
+            if dim != deep_matrix.shape[1]:
+                search_ms = int((time.perf_counter() - started) * 1000)
+                return {
+                    "results": [],
+                    "legacy_skipped": legacy_skipped + len(items),
+                    "needs_rebuild": True,
+                    "search_ms": search_ms,
+                    "scanned": len(items),
+                    "reranked": 0,
+                    "query_count": len(query_vecs),
+                }
+            backend = f"matrix{multi_tag}" if multi_tag else "matrix"
+            coarse_n = min(COARSE_TOP_N, len(items))
+            # 多查询 deep 分取 max 再选 top
+            fused_scores = np.full(len(items), -1.0, dtype=np.float32)
+            for q_deep in query_deeps:
+                fused_scores = np.maximum(fused_scores, deep_matrix @ q_deep)
+            if has_faiss_index() and len(query_deeps) == 1:
+                id_to_idx = {
+                    (it.get("track_id") or it.get("gallery_id")): i for i, it in enumerate(items)
+                }
+                faiss_ids, _faiss_scores = search_faiss(query_deeps[0], top_k=coarse_n)
+                idxs = [id_to_idx[tid] for tid in faiss_ids if tid in id_to_idx]
+                if idxs:
+                    candidate_idx = np.asarray(idxs, dtype=np.int32)
+                    backend = ("faiss" if faiss_available() else "memory_index") + multi_tag
+                else:
+                    if coarse_n < len(items):
+                        candidate_idx = np.argpartition(fused_scores, -coarse_n)[-coarse_n:]
+                    else:
+                        candidate_idx = np.arange(len(items), dtype=np.int32)
+                    candidate_idx = candidate_idx[np.argsort(fused_scores[candidate_idx])[::-1]]
+            else:
                 if coarse_n < len(items):
-                    candidate_idx = np.argpartition(deep_scores, -coarse_n)[-coarse_n:]
+                    candidate_idx = np.argpartition(fused_scores, -coarse_n)[-coarse_n:]
                 else:
                     candidate_idx = np.arange(len(items), dtype=np.int32)
-                candidate_idx = candidate_idx[np.argsort(deep_scores[candidate_idx])[::-1]]
-        else:
-            deep_scores = deep_matrix @ q_deep
-            if coarse_n < len(items):
-                candidate_idx = np.argpartition(deep_scores, -coarse_n)[-coarse_n:]
-            else:
-                candidate_idx = np.arange(len(items), dtype=np.int32)
-            candidate_idx = candidate_idx[np.argsort(deep_scores[candidate_idx])[::-1]]
+                candidate_idx = candidate_idx[np.argsort(fused_scores[candidate_idx])[::-1]]
+        elif dim != deep_matrix.shape[1]:
+            search_ms = int((time.perf_counter() - started) * 1000)
+            return {
+                "results": [],
+                "legacy_skipped": len(items),
+                "needs_rebuild": True,
+                "search_ms": search_ms,
+                "scanned": scanned or len(items),
+                "reranked": 0,
+                "backend": backend,
+                "query_count": len(query_vecs),
+            }
 
-        # 帧级回退时近重复极多，k-reciprocal 会把分数抹平；仅轨迹粗检后重排
         frame_fallback = bool(items) and items[0].get("result_type") == "frame"
         cand_deeps = [list(deep_matrix[int(i)]) for i in candidate_idx]
+        # 各查询重排后按候选位取 max
+        rr_stack: List[List[float]] = []
         if frame_fallback:
-            rr_scores = [float(np.dot(deep_matrix[int(i)], q_deep)) for i in candidate_idx]
+            for q_deep in query_deeps:
+                rr_stack.append(
+                    [float(np.dot(deep_matrix[int(i)], q_deep)) for i in candidate_idx]
+                )
             backend = f"{backend}+no_rerank"
         else:
-            rr_scores = rerank_scores(
-                list(q_deep),
-                cand_deeps,
-                k1=RERANK_K1,
-                k2=RERANK_K2,
-                lambda_value=0.3,
-            )
+            for q_deep in query_deeps:
+                rr_stack.append(
+                    list(
+                        rerank_scores(
+                            list(q_deep),
+                            cand_deeps,
+                            k1=RERANK_K1,
+                            k2=RERANK_K2,
+                            lambda_value=0.3,
+                        )
+                    )
+                )
 
         scored: List[Dict[str, Any]] = []
         for pos, idx in enumerate(candidate_idx):
             meta = items[int(idx)]
             embedding = embeddings[int(idx)]
-            deep_sim = float(np.dot(deep_matrix[int(idx)], q_deep))
-            sims = embedding_similarity(
-                query_vec,
-                embedding,
-                precomputed_deep_sim=deep_sim,
-                allow_image_io=False,
-            )
+            gal_deep = deep_matrix[int(idx)]
+            deep_sims = [float(np.dot(gal_deep, q_deep)) for q_deep in query_deeps]
+            deep_sim = max(deep_sims) if deep_sims else 0.0
+            sim_rows = []
+            for qi, query_vec in enumerate(query_vecs):
+                sim_rows.append(
+                    embedding_similarity(
+                        query_vec,
+                        embedding,
+                        precomputed_deep_sim=deep_sims[qi],
+                        allow_image_io=False,
+                    )
+                )
+            sims = _max_fuse_sims(sim_rows)
             appearance = float(sims.get("hue_similarity") or 0)
             if appearance <= 0:
                 appearance = float(sims.get("color_similarity") or 0)
-            rr = float(rr_scores[pos]) if pos < len(rr_scores) else deep_sim
-            # 最终分：重排为主，外观弱融合；不做 hard veto
+            rr_vals = [float(row[pos]) for row in rr_stack if pos < len(row)]
+            rr = max(rr_vals) if rr_vals else deep_sim
             final = (1.0 - APPEARANCE_BLEND) * rr + APPEARANCE_BLEND * max(appearance, deep_sim)
             if final < min_similarity and deep_sim < min_similarity:
                 continue
@@ -1093,13 +1617,13 @@ def search_by_image(
                 "gender_hint": sims.get("gender_hint"),
                 "similarity": round(float(final), 4),
                 "match_confidence": _confidence_from_score(final),
+                "query_count": len(query_vecs),
             }
             scored.append(row)
 
         scored.sort(key=lambda x: x.get("similarity") or 0, reverse=True)
         results = scored[: max(1, min(top_k, 100))]
 
-        # 轨迹结果附加关键帧路径（最多 6）
         for row in results:
             tid = row.get("track_id")
             if not tid or row.get("result_type") != "track":
@@ -1123,9 +1647,11 @@ def search_by_image(
             ]
 
         search_ms = int((time.perf_counter() - started) * 1000)
+        scanned_out = scanned if scanned else len(items)
         logger.info(
-            "人员搜索完成 scanned=%s coarse=%s results=%s backend=%s ms=%s",
-            len(items),
+            "人员搜索完成 queries=%s scanned=%s coarse=%s results=%s backend=%s ms=%s",
+            len(query_vecs),
+            scanned_out,
             len(candidate_idx),
             len(results),
             backend,
@@ -1136,9 +1662,10 @@ def search_by_image(
             "legacy_skipped": legacy_skipped,
             "needs_rebuild": legacy_skipped > 0 and len(results) == 0,
             "search_ms": search_ms,
-            "scanned": len(items),
+            "scanned": scanned_out,
             "reranked": len(candidate_idx),
             "backend": backend,
+            "query_count": len(query_vecs),
         }
     finally:
         db.close()
@@ -1272,9 +1799,11 @@ def list_gallery(
     page: int = 1,
     page_size: int = 24,
     device_id: Optional[str] = None,
-    days: int = 7,
+    days: int = 1,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
 ) -> Dict[str, Any]:
-    since = datetime.now() - timedelta(days=max(1, min(days, 90)))
+    since, until = resolve_search_window(days=days, date_from=date_from, date_to=date_to)
     db = SessionLocal()
     try:
         # count 不 join device，避免无谓开销；列表查询 defer 掉巨型 embedding
@@ -1283,6 +1812,7 @@ def list_gallery(
             .select_from(PersonGalleryItem)
             .join(DetectionEvent, PersonGalleryItem.event_id == DetectionEvent.event_id)
             .filter(PersonGalleryItem.created_at >= since)
+            .filter(PersonGalleryItem.created_at <= until)
         )
         if device_id:
             count_q = count_q.filter(PersonGalleryItem.device_id == device_id)
@@ -1294,6 +1824,7 @@ def list_gallery(
             .join(Device, PersonGalleryItem.device_id == Device.device_id)
             .join(DetectionEvent, PersonGalleryItem.event_id == DetectionEvent.event_id)
             .filter(PersonGalleryItem.created_at >= since)
+            .filter(PersonGalleryItem.created_at <= until)
         )
         if device_id:
             q = q.filter(PersonGalleryItem.device_id == device_id)
@@ -1391,15 +1922,19 @@ def get_reid_model_info() -> Dict[str, Any]:
     else:
         parsing_mode = "fast_zone"
 
+    shard_status = get_faiss_index_status()
     return {
         "model": DEFAULT_MODEL_NAME,
         "embedding_version": EMBEDDING_VERSION,
         "feature_dim": 512,
         "color_gated": False,
         "attribute_enabled": True,
-        "search_mode": "track+rerank",
+        "search_mode": "track+faiss_shards+rerank",
         "faiss_available": faiss_available(),
-        "faiss_ready": has_faiss_index(),
+        "faiss_ready": bool(shard_status.get("shard_count")) or has_faiss_index(),
+        "faiss_shards": shard_status,
+        "search_limit": DEFAULT_SEARCH_LIMIT,
+        "coarse_top": COARSE_TOP_N,
         "parsing_mode": parsing_mode,
         "parsing_onnx_ready": parsing_onnx is not None,
         "parsing_onnx_path": parsing_onnx,

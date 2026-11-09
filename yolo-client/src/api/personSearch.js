@@ -34,7 +34,16 @@ export function getPersonReidModelInfo() {
 }
 
 export function getPersonGallery(params = {}) {
-  return apiClient.get('/gallery', { params })
+  return apiClient.get('/gallery', {
+    params,
+    paramsSerializer: {
+      serialize: (p) =>
+        Object.entries(p || {})
+          .filter(([, v]) => v !== undefined && v !== null && v !== '')
+          .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+          .join('&')
+    }
+  })
 }
 
 export function getPersonGalleryDetail(galleryId) {
@@ -48,6 +57,14 @@ export function getPersonTrackDetail(trackId) {
 export function searchPersonByImage(formData, params = {}) {
   return apiClient.post('/search', formData, {
     params,
+    // 避免空格编成 +，后端按日期时间解析更稳
+    paramsSerializer: {
+      serialize: (p) =>
+        Object.entries(p || {})
+          .filter(([, v]) => v !== undefined && v !== null && v !== '')
+          .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+          .join('&')
+    },
     headers: { 'Content-Type': 'multipart/form-data' }
   })
 }
@@ -72,6 +89,18 @@ export function cleanupPersonOrphans() {
   return apiClient.post('/cleanup-orphans', null, { timeout: 120000 })
 }
 
+export function getPersonSearchIndexStatus() {
+  return apiClient.get('/index/status', { timeout: 15000 })
+}
+
+export function rebuildPersonSearchIndex(days = 30) {
+  return apiClient.post('/index/rebuild', { days }, { timeout: 60000 })
+}
+
+export function getPersonSearchIndexRebuildStatus() {
+  return apiClient.get('/index/rebuild/status', { timeout: 15000 })
+}
+
 export default {
   getPersonSearchStats,
   getPersonReidModelInfo,
@@ -83,5 +112,8 @@ export default {
   batchIndexPersonEvents,
   rebuildPersonGalleryEmbeddings,
   getPersonRebuildEmbeddingsStatus,
-  cleanupPersonOrphans
+  cleanupPersonOrphans,
+  getPersonSearchIndexStatus,
+  rebuildPersonSearchIndex,
+  getPersonSearchIndexRebuildStatus
 }

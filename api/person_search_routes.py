@@ -1,6 +1,6 @@
 """人员搜索 API（以图搜人 POC）"""
 import logging
-from typing import Optional
+from typing import List, Optional
 
 import cv2
 import numpy as np
@@ -11,15 +11,19 @@ from api.auth import get_current_user
 from src.database import User
 from src.person_search.service import (
     batch_index_recent_events,
+    drop_faiss_shards_before,
+    get_faiss_index_status,
     get_gallery_detail,
     get_gallery_stats,
+    get_index_rebuild_job,
     get_rebuild_gallery_job,
     get_reid_model_info,
     get_track_detail,
     index_detection_event,
     list_gallery,
     purge_orphan_person_data,
-    search_by_image,
+    search_by_images,
+    start_rebuild_faiss_index_async,
     start_rebuild_gallery_embeddings_async,
 )
 
@@ -34,6 +38,10 @@ class BatchIndexBody(BaseModel):
 class RebuildEmbeddingsBody(BaseModel):
     limit: int = Field(5000, ge=1, le=20000)
     force: bool = False
+
+
+class RebuildFaissIndexBody(BaseModel):
+    days: int = Field(30, ge=1, le=90)
 
 
 @router.get("/stats")
@@ -58,10 +66,19 @@ async def person_search_gallery(
     page: int = Query(1, ge=1),
     page_size: int = Query(24, ge=1, le=100),
     device_id: Optional[str] = None,
-    days: int = Query(7, ge=1, le=90),
+    days: int = Query(1, ge=1, le=90),
+    date_from: Optional[str] = Query(None, description="起始日期 YYYY-MM-DD"),
+    date_to: Optional[str] = Query(None, description="结束日期 YYYY-MM-DD"),
     _: User = Depends(get_current_user),
 ):
-    data = list_gallery(page=page, page_size=page_size, device_id=device_id, days=days)
+    data = list_gallery(
+        page=page,
+        page_size=page_size,
+        device_id=device_id,
+        days=days,
+        date_from=date_from,
+        date_to=date_to,
+    )
     return {"status": "success", "data": data}
 
 
@@ -83,28 +100,56 @@ async def person_search_track_detail(track_id: str, _: User = Depends(get_curren
 
 @router.post("/search")
 async def person_search_by_image(
-    file: UploadFile = File(...),
+    files: List[UploadFile] = File(default=[]),
+    file: Optional[UploadFile] = File(default=None),
     top_k: int = Query(20, ge=1, le=100),
     min_similarity: float = Query(0.55, ge=0.0, le=1.0),
     device_id: Optional[str] = None,
-    days: int = Query(7, ge=1, le=90),
+    days: int = Query(1, ge=1, le=90),
+    date_from: Optional[str] = Query(None, description="起始日期 YYYY-MM-DD"),
+    date_to: Optional[str] = Query(None, description="结束日期 YYYY-MM-DD"),
     _: User = Depends(get_current_user),
 ):
-    content = await file.read()
-    if not content:
-        raise HTTPException(status_code=400, detail="请上传查询图片")
-    arr = np.frombuffer(content, dtype=np.uint8)
-    img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-    if img is None:
+    uploads: List[UploadFile] = []
+    if files:
+        uploads.extend([f for f in files if f is not None])
+    if file is not None:
+        uploads.append(file)
+    # 去重同一 UploadFile 对象（部分客户端会同时带 files/file）
+    seen = set()
+    unique_uploads: List[UploadFile] = []
+    for up in uploads:
+        key = id(up)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique_uploads.append(up)
+    uploads = unique_uploads[:5]
+    if not uploads:
+        raise HTTPException(status_code=400, detail="请上传查询图片（最多 5 张，同一人）")
+
+    images = []
+    for up in uploads:
+        content = await up.read()
+        if not content:
+            continue
+        arr = np.frombuffer(content, dtype=np.uint8)
+        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        if img is None:
+            continue
+        images.append(img)
+    if not images:
         raise HTTPException(status_code=400, detail="无法解析图片")
 
     try:
-        payload = search_by_image(
-            img,
+        payload = search_by_images(
+            images,
             top_k=top_k,
             min_similarity=min_similarity,
             device_id=device_id,
             days=days,
+            date_from=date_from,
+            date_to=date_to,
         )
     except Exception as exc:
         logger.exception("人员搜索失败")
@@ -122,6 +167,7 @@ async def person_search_by_image(
             "scanned": payload.get("scanned", 0),
             "reranked": payload.get("reranked", 0),
             "backend": payload.get("backend"),
+            "query_count": payload.get("query_count", len(images)),
         },
     }
 
@@ -155,3 +201,31 @@ async def person_search_rebuild_embeddings(
 @router.get("/rebuild-embeddings/status")
 async def person_search_rebuild_status(_: User = Depends(get_current_user)):
     return {"status": "success", "data": get_rebuild_gallery_job()}
+
+
+@router.get("/index/status")
+async def person_search_index_status(_: User = Depends(get_current_user)):
+    return {"status": "success", "data": get_faiss_index_status()}
+
+
+@router.post("/index/rebuild")
+async def person_search_index_rebuild(
+    body: RebuildFaissIndexBody,
+    _: User = Depends(get_current_user),
+):
+    data = start_rebuild_faiss_index_async(days=body.days)
+    return {"status": "success", "data": data}
+
+
+@router.get("/index/rebuild/status")
+async def person_search_index_rebuild_status(_: User = Depends(get_current_user)):
+    return {"status": "success", "data": get_index_rebuild_job()}
+
+
+@router.post("/index/drop-before")
+async def person_search_index_drop_before(
+    day: str = Query(..., description="删除该日之前的分片，格式 YYYY-MM-DD"),
+    _: User = Depends(get_current_user),
+):
+    data = drop_faiss_shards_before(day)
+    return {"status": "success", "data": data}

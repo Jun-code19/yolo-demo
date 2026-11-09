@@ -9,6 +9,9 @@
         <el-button type="primary" :loading="rebuilding" @click="handleRebuildEmbeddings">
           重建图库特征
         </el-button>
+        <el-button type="success" plain :loading="indexRebuilding" @click="handleRebuildSearchIndex">
+          重建检索索引
+        </el-button>
         <el-button :loading="indexing" @click="handleBatchIndex">
           回填最近事件
         </el-button>
@@ -41,35 +44,58 @@
       <el-col :xs="24" :lg="8">
         <el-card shadow="never" class="query-card">
           <template #header>以图搜人</template>
-          <el-upload
-            class="query-upload"
-            drag
-            :auto-upload="false"
-            :show-file-list="false"
-            accept="image/*"
-            @change="handleQueryFileChange"
-          >
-            <img v-if="queryPreview" :src="queryPreview" class="query-preview" alt="查询图" />
-            <template v-else>
+          <div class="query-upload-wrap">
+            <el-upload
+              class="query-upload"
+              drag
+              multiple
+              :auto-upload="false"
+              :show-file-list="false"
+              accept="image/*"
+              :disabled="queryImages.length >= QUERY_IMAGE_MAX"
+              @change="handleQueryFileChange"
+            >
               <el-icon class="upload-icon"><UploadFilled /></el-icon>
-              <div>上传查询照片（全身/半身）</div>
-            </template>
-          </el-upload>
+              <div>上传查询照片（全身/半身，最多 {{ QUERY_IMAGE_MAX }} 张）</div>
+              <div class="upload-sub">同一人多角度/多清晰度，分取最高匹配</div>
+            </el-upload>
+            <div v-if="queryImages.length" class="query-thumbs">
+              <div v-for="(item, idx) in queryImages" :key="item.id" class="query-thumb">
+                <img :src="item.url" :alt="`查询图${idx + 1}`" />
+                <button type="button" class="query-thumb-remove" title="移除" @click="removeQueryImage(idx)">
+                  ×
+                </button>
+              </div>
+            </div>
+          </div>
 
           <el-form label-width="88px" class="query-form">
             <el-form-item label="匹配分≥">
               <el-slider v-model="searchForm.minSimilarity" :min="0.35" :max="0.95" :step="0.01" show-input />
-              <div class="field-tip">跨角度/光照建议 0.50–0.60；近原图才会到 0.85+。误报多再上调</div>
+              <div class="field-tip">
+                按 ReID 深度分筛选；搜索后拖动即可即时过滤当前结果，无需重新搜索。
+                建议 0.50–0.60，误报多再上调。
+              </div>
             </el-form-item>
             <el-form-item label="返回条数">
               <el-input-number v-model="searchForm.topK" :min="5" :max="100" />
             </el-form-item>
             <el-form-item label="时间范围">
-              <el-select v-model="searchForm.days" style="width: 100%">
-                <el-option label="近 1 天" :value="1" />
-                <el-option label="近 7 天" :value="7" />
-                <el-option label="近 30 天" :value="30" />
-              </el-select>
+              <el-date-picker
+                v-model="searchForm.dateRange"
+                type="datetimerange"
+                range-separator="至"
+                start-placeholder="开始日期时间"
+                end-placeholder="结束日期时间"
+                value-format="YYYY-MM-DD HH:mm:ss"
+                format="YYYY-MM-DD HH:mm:ss"
+                time-format="HH:mm:ss"
+                :shortcuts="dateTimeShortcuts"
+                :default-time="dateTimeDefaultTime"
+                :disabled-date="disableFutureDate"
+                style="width: 100%"
+                @change="onDateTimeRangeChange"
+              />
             </el-form-item>
             <el-form-item label="设备">
               <el-select v-model="searchForm.deviceId" clearable filterable placeholder="全部设备" style="width: 100%">
@@ -82,7 +108,7 @@
               </el-select>
             </el-form-item>
             <el-form-item>
-              <el-button type="primary" :loading="searching" :disabled="!queryFile" @click="handleSearch">
+              <el-button type="primary" :loading="searching" :disabled="!queryImages.length" @click="handleSearch">
                 开始搜索
               </el-button>
               <el-button @click="clearQuery">清空</el-button>
@@ -95,14 +121,7 @@
         <el-card shadow="never">
           <template #header>
             <div class="result-header">
-              <div class="result-header-left">
-                <span>{{ activeTab === 'search' ? '搜索结果' : '最近入库' }}</span>
-                <span v-if="activeTab === 'search' && searchMeta" class="search-meta">
-                  扫描 {{ searchMeta.scanned }} · 重排 {{ searchMeta.reranked }}
-                  <template v-if="searchMeta.backend"> · {{ searchMeta.backend }}</template>
-                  · {{ searchMeta.search_ms }} ms
-                </span>
-              </div>
+              <span>{{ activeTab === 'search' ? '搜索结果' : '最近入库' }}</span>
               <el-radio-group v-model="activeTab" size="small">
                 <el-radio-button value="search">搜索结果</el-radio-button>
                 <el-radio-button value="gallery">图库浏览</el-radio-button>
@@ -111,54 +130,131 @@
           </template>
 
           <div v-if="activeTab === 'search'" v-loading="searching">
-            <el-empty v-if="!searchResults.length" description="上传照片并搜索，或先回填历史检测事件" />
-            <el-row v-else :gutter="12">
-              <el-col
-                v-for="item in searchResults"
-                :key="item.track_id || item.gallery_id"
-                :xs="12"
-                :sm="8"
-                :md="6"
-              >
-                <div class="result-card">
-                  <div class="result-img-wrap">
-                    <el-image
-                      :src="cropUrl(item.crop_path)"
-                      :preview-src-list="[cropUrl(item.crop_path)]"
-                      :preview-z-index="IMAGE_PREVIEW_Z_INDEX"
-                      fit="contain"
-                      class="result-img"
-                      preview-teleported
-                      hide-on-click-modal
-                    />
-                  </div>
-                  <div class="result-meta">
-                    <div class="result-tags">
-                      <el-tag type="success" size="small">
-                        {{ formatPercentFromRatio(primarySimilarity(item), 1) }}
-                      </el-tag>
-                      <el-tag v-if="item.result_type === 'track'" size="small" effect="plain">
-                        轨迹 {{ item.frame_count || 1 }} 帧
-                      </el-tag>
-                      <el-tag v-if="item.match_confidence === 'high'" type="success" size="small" effect="plain">高置信</el-tag>
-                      <el-tag v-else-if="item.match_confidence === 'medium'" type="warning" size="small" effect="plain">中置信</el-tag>
-                      <el-tag v-else-if="item.match_confidence === 'low'" type="info" size="small" effect="plain">低置信</el-tag>
-                    </div>
-                    <span class="device-name">{{ item.device_name || item.device_id }}</span>
-                    <span class="time-text">{{ formatTime(item.last_seen || item.created_at) }}</span>
-                    <el-button
-                      link
-                      type="primary"
-                      size="small"
-                      class="detail-btn"
-                      @click.stop="openSearchResult(item)"
-                    >
-                      {{ item.track_id ? '轨迹详情' : '查看详情' }}
-                    </el-button>
+            <el-empty
+              v-if="!searchResultsRaw.length"
+              description="上传照片并搜索，或先回填历史检测事件"
+            />
+            <template v-else>
+              <div class="result-toolbar">
+                <div class="result-toolbar-left">
+                  <el-checkbox
+                    :model-value="isAllFilteredSelected"
+                    :indeterminate="isFilteredSelectIndeterminate"
+                    :disabled="!filteredSearchResults.length"
+                    @change="toggleSelectAllFiltered"
+                  >
+                    全选
+                  </el-checkbox>
+                  <span class="result-toolbar-hint">已选 {{ selectedInFilteredCount }}</span>
+                  <div class="sort-icon-btns">
+                    <el-tooltip content="按相似度排序" placement="top">
+                      <span class="toolbar-icon-wrap">
+                        <el-button
+                          size="small"
+                          :type="activeSortMode === 'similarity' ? 'primary' : 'default'"
+                          :disabled="!selectedResultKeys.size"
+                          @click="sortSelectedResults('similarity')"
+                        >
+                          <el-icon><TrendCharts /></el-icon>
+                        </el-button>
+                      </span>
+                    </el-tooltip>
+                    <el-tooltip content="按时间排序" placement="top">
+                      <span class="toolbar-icon-wrap">
+                        <el-button
+                          size="small"
+                          :type="activeSortMode === 'time' ? 'primary' : 'default'"
+                          :disabled="!selectedResultKeys.size"
+                          @click="sortSelectedResults('time')"
+                        >
+                          <el-icon><Clock /></el-icon>
+                        </el-button>
+                      </span>
+                    </el-tooltip>
                   </div>
                 </div>
-              </el-col>
-            </el-row>
+                <div v-if="searchMeta" class="result-toolbar-meta">
+                  <span class="meta-pill" title="当前匹配分下显示 / 本次返回候选">
+                    显示 {{ filteredSearchResults.length }}/{{ searchResultsRaw.length }}
+                  </span>
+                  <span
+                    v-if="searchMeta.query_count > 1"
+                    class="meta-pill"
+                    title="查询图数量（分数已按 max 融合）"
+                  >
+                    查询 {{ searchMeta.query_count }} 张
+                  </span>
+                  <span class="meta-pill" title="检索扫描量">扫描 {{ searchMeta.scanned }}</span>
+                  <span class="meta-pill" title="重排候选数">重排 {{ searchMeta.reranked }}</span>
+                  <span v-if="searchMeta.backend" class="meta-pill meta-pill--backend" :title="searchMeta.backend">
+                    {{ searchMeta.backend }}
+                  </span>
+                  <span class="meta-pill meta-pill--time" title="检索耗时">{{ searchMeta.search_ms }} ms</span>
+                </div>
+              </div>
+              <el-empty
+                v-if="!filteredSearchResults.length"
+                description="当前匹配分下无结果，可调低「匹配分≥」查看更多"
+              />
+              <el-row v-else :gutter="12">
+                <el-col
+                  v-for="item in filteredSearchResults"
+                  :key="resultKey(item)"
+                  :xs="12"
+                  :sm="8"
+                  :md="6"
+                >
+                  <div
+                    class="result-card"
+                    :class="{ 'is-selected': selectedResultKeys.has(resultKey(item)) }"
+                    @click="toggleResultSelected(item)"
+                  >
+                    <div class="result-img-wrap">
+                      <el-checkbox
+                        class="result-check"
+                        :model-value="selectedResultKeys.has(resultKey(item))"
+                        @click.stop
+                        @change="(val) => setResultSelected(item, val)"
+                      />
+                      <el-image
+                        :src="cropUrl(item.crop_path)"
+                        :preview-src-list="[cropUrl(item.crop_path)]"
+                        :preview-z-index="IMAGE_PREVIEW_Z_INDEX"
+                        fit="contain"
+                        class="result-img"
+                        preview-teleported
+                        hide-on-click-modal
+                        @click.stop
+                      />
+                    </div>
+                    <div class="result-meta">
+                      <div class="result-tags">
+                        <el-tag type="success" size="small">
+                          {{ formatPercentFromRatio(primarySimilarity(item), 1) }}
+                        </el-tag>
+                        <el-tag v-if="item.result_type === 'track'" size="small" effect="plain">
+                          轨迹 {{ item.frame_count || 1 }} 帧
+                        </el-tag>
+                        <el-tag v-if="item.match_confidence === 'high'" type="success" size="small" effect="plain">高置信</el-tag>
+                        <el-tag v-else-if="item.match_confidence === 'medium'" type="warning" size="small" effect="plain">中置信</el-tag>
+                        <el-tag v-else-if="item.match_confidence === 'low'" type="info" size="small" effect="plain">低置信</el-tag>
+                      </div>
+                      <span class="device-name">{{ item.device_name || item.device_id }}</span>
+                      <span class="time-text">{{ formatTime(item.last_seen || item.created_at) }}</span>
+                      <el-button
+                        link
+                        type="primary"
+                        size="small"
+                        class="detail-btn"
+                        @click.stop="openSearchResult(item)"
+                      >
+                        {{ item.track_id ? '轨迹详情' : '查看详情' }}
+                      </el-button>
+                    </div>
+                  </div>
+                </el-col>
+              </el-row>
+            </template>
           </div>
 
           <div v-else v-loading="galleryLoading">
@@ -210,6 +306,16 @@
       show-icon
       title="正在重建图库特征"
       :description="rebuildProgressText"
+    />
+
+    <el-alert
+      v-else-if="indexRebuildJob.running"
+      class="rebuild-warning"
+      type="info"
+      :closable="false"
+      show-icon
+      title="正在重建检索索引（FAISS 日分片）"
+      :description="indexRebuildProgressText"
     />
 
     <el-alert
@@ -350,7 +456,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Refresh, UploadFilled } from '@element-plus/icons-vue'
+import { Clock, Refresh, TrendCharts, UploadFilled } from '@element-plus/icons-vue'
 import deviceApi from '@/api/device'
 import {
   batchIndexPersonEvents,
@@ -362,6 +468,9 @@ import {
   getPersonTrackDetail,
   getPersonReidModelInfo,
   getPersonSearchStats,
+  getPersonSearchIndexStatus,
+  rebuildPersonSearchIndex,
+  getPersonSearchIndexRebuildStatus,
   searchPersonByImage
 } from '@/api/personSearch'
 
@@ -370,24 +479,204 @@ const router = useRouter()
 const stats = ref({ total: 0, today: 0, device_count: 0 })
 const modelInfo = ref(null)
 const devices = ref([])
-const queryFile = ref(null)
-const queryPreview = ref('')
+const QUERY_IMAGE_MAX = 5
+const queryImages = ref([]) // { id, file, url }
+let queryImageSeq = 0
 const searching = ref(false)
 const indexing = ref(false)
 const cleaningOrphans = ref(false)
 const rebuilding = ref(false)
 const rebuildJob = ref({ running: false })
 let rebuildPollTimer = null
-const searchResults = ref([])
+const indexRebuilding = ref(false)
+const indexRebuildJob = ref({ running: false })
+const indexStatus = ref(null)
+let indexRebuildPollTimer = null
+const searchResultsRaw = ref([])
 const searchMeta = ref(null)
 const activeTab = ref('search')
+/** 搜索结果勾选：key = track_id || gallery_id */
+const selectedResultKeys = ref(new Set())
+/** 当前生效的排序方式：similarity | time | '' */
+const activeSortMode = ref('')
+
+/** 按当前匹配分（ReID 深度分）即时筛选，不重新请求 */
+const filteredSearchResults = computed(() => {
+  const thr = Number(searchForm.minSimilarity)
+  const floor = Number.isFinite(thr) ? thr : 0.55
+  return (searchResultsRaw.value || []).filter((item) => primarySimilarity(item) >= floor)
+})
+
+const resultKey = (item) => String(item?.track_id || item?.gallery_id || '')
+
+const resultTimeMs = (item) => {
+  const raw = item?.last_seen || item?.created_at
+  if (!raw) return 0
+  const t = new Date(raw).getTime()
+  return Number.isFinite(t) ? t : 0
+}
+
+const selectedInFilteredCount = computed(() =>
+  filteredSearchResults.value.filter((item) => selectedResultKeys.value.has(resultKey(item))).length
+)
+
+const isAllFilteredSelected = computed(() => {
+  const list = filteredSearchResults.value
+  return list.length > 0 && list.every((item) => selectedResultKeys.value.has(resultKey(item)))
+})
+
+const isFilteredSelectIndeterminate = computed(() => {
+  const n = selectedInFilteredCount.value
+  return n > 0 && n < filteredSearchResults.value.length
+})
+
+const clearResultSelection = () => {
+  selectedResultKeys.value = new Set()
+  activeSortMode.value = ''
+}
+
+const setResultSelected = (item, selected) => {
+  const key = resultKey(item)
+  if (!key) return
+  const next = new Set(selectedResultKeys.value)
+  if (selected) next.add(key)
+  else next.delete(key)
+  selectedResultKeys.value = next
+}
+
+const toggleResultSelected = (item) => {
+  const key = resultKey(item)
+  if (!key) return
+  setResultSelected(item, !selectedResultKeys.value.has(key))
+}
+
+const toggleSelectAllFiltered = (checked) => {
+  const next = new Set(selectedResultKeys.value)
+  for (const item of filteredSearchResults.value) {
+    const key = resultKey(item)
+    if (!key) continue
+    if (checked) next.add(key)
+    else next.delete(key)
+  }
+  selectedResultKeys.value = next
+}
+
+/** 已勾选结果排到前面；未勾选保持相对顺序。mode: similarity | time */
+const sortSelectedResults = (mode) => {
+  const selected = selectedResultKeys.value
+  const label = mode === 'similarity' ? '相似度' : '时间'
+  if (!selected.size) {
+    ElMessage.warning(`请先勾选要按${label}排序的结果`)
+    return
+  }
+  const list = searchResultsRaw.value || []
+  const picked = []
+  const rest = []
+  for (const item of list) {
+    if (selected.has(resultKey(item))) picked.push(item)
+    else rest.push(item)
+  }
+  if (!picked.length) {
+    ElMessage.warning('当前勾选项不在结果中，请重新勾选')
+    return
+  }
+  if (mode === 'similarity') {
+    picked.sort((a, b) => primarySimilarity(b) - primarySimilarity(a))
+  } else {
+    picked.sort((a, b) => resultTimeMs(b) - resultTimeMs(a))
+  }
+  searchResultsRaw.value = [...picked, ...rest]
+  activeSortMode.value = mode
+  ElMessage.success(`已将 ${picked.length} 条勾选结果按${label}排序`)
+}
+
+const pad2 = (n) => String(n).padStart(2, '0')
+
+const formatYmdHms = (d) =>
+  `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`
+
+const startOfDay = (base) => {
+  const d = new Date(base)
+  d.setHours(0, 0, 0, 0)
+  return d
+}
+
+const endOfDay = (base) => {
+  const d = new Date(base)
+  d.setHours(23, 59, 59, 0)
+  return d
+}
+
+const addDays = (base, delta) => {
+  const d = new Date(base)
+  d.setDate(d.getDate() + delta)
+  return d
+}
+
+/** 返回 Date[]，供快捷项使用 */
+const rangeDatesFromPreset = (preset) => {
+  const today0 = startOfDay(new Date())
+  if (preset === 'yesterday') {
+    const y = addDays(today0, -1)
+    return [y, endOfDay(y)]
+  }
+  if (preset === '2d') return [addDays(today0, -1), endOfDay(today0)]
+  if (preset === '3d') return [addDays(today0, -2), endOfDay(today0)]
+  if (preset === '7d') return [addDays(today0, -6), endOfDay(today0)]
+  return [today0, endOfDay(today0)]
+}
+
+const rangeStringsFromPreset = (preset) => {
+  const [a, b] = rangeDatesFromPreset(preset)
+  return [formatYmdHms(a), formatYmdHms(b)]
+}
+
+const dateTimeDefaultTime = [
+  new Date(2000, 0, 1, 0, 0, 0),
+  new Date(2000, 0, 1, 23, 59, 59)
+]
+
+const dateTimeShortcuts = [
+  { text: '今天', value: () => rangeDatesFromPreset('today') },
+  { text: '昨天', value: () => rangeDatesFromPreset('yesterday') },
+  { text: '最近2天', value: () => rangeDatesFromPreset('2d') },
+  { text: '最近3天', value: () => rangeDatesFromPreset('3d') },
+  { text: '最近7天', value: () => rangeDatesFromPreset('7d') }
+]
 
 const searchForm = reactive({
   minSimilarity: 0.55,
   topK: 30,
-  days: 30,
+  dateRange: rangeStringsFromPreset('today'),
   deviceId: ''
 })
+
+const disableFutureDate = (date) => date.getTime() > Date.now()
+
+const onDateTimeRangeChange = (val) => {
+  if (val?.length === 2 && activeTab.value === 'gallery') {
+    loadGallery()
+  }
+}
+
+const timeRangeParams = () => {
+  const range = searchForm.dateRange?.length === 2
+    ? searchForm.dateRange
+    : rangeStringsFromPreset('today')
+  return {
+    date_from: range[0],
+    date_to: range[1]
+  }
+}
+
+/** 重建索引时按所选跨度估算天数 */
+const selectedRangeDays = () => {
+  const { date_from, date_to } = timeRangeParams()
+  const a = new Date(String(date_from).replace(/-/g, '/'))
+  const b = new Date(String(date_to).replace(/-/g, '/'))
+  const span = Math.floor((b - a) / 86400000) + 1
+  return Math.min(90, Math.max(1, span || 1))
+}
 
 const galleryItems = ref([])
 const galleryLoading = ref(false)
@@ -428,18 +717,30 @@ const rebuildProgressText = computed(() => {
   return `扫描 ${j.total || 0} 条记录，已升级 ${updated}，跳过 ${skipped}，失败 ${failed}`
 })
 
+const indexRebuildProgressText = computed(() => {
+  const j = indexRebuildJob.value || {}
+  if (j.phase === 'starting') return '正在准备按日重建 FAISS 分片…'
+  return `已重建 ${j.shards_rebuilt || 0} 天分片，向量 ${j.vectors || 0}（近 ${j.days || 30} 天）`
+})
+
 const modelTipText = computed(() => {
   const info = modelInfo.value
   const legacy = stats.value.legacy_embeddings || 0
   const stale = stats.value.stale_embeddings || 0
   const current = stats.value.current_embeddings || 0
   const tracks = stats.value.track_count || 0
+  const idx = indexStatus.value || {}
   let base =
-    '检索对象为轨迹聚合特征；粗检后做 k-reciprocal 重排。颜色仅弱融合，需人审确认。详见 docs/person_search_finetune.md。'
+    '检索对象为轨迹聚合特征；按日 FAISS 分片粗检 + k-reciprocal 重排。颜色仅弱融合，需人审确认。'
   if (legacy > 0 || stale > 0) {
     base += ` 图库：完整 ${current}，旧版 ${legacy}，待补全 ${stale}；轨迹 ${tracks}。`
   } else {
     base += ` 轨迹 ${tracks}，帧 ${stats.value.total || 0}。`
+  }
+  if (idx.shard_count) {
+    base += ` 检索索引：${idx.shard_count} 天分片，活跃向量 ${idx.active_vectors || 0}（${idx.first_day || '-'} ~ ${idx.last_day || '-'}）。`
+  } else {
+    base += ' 检索索引未重建时将回退内存候选（PERSON_SEARCH_LIMIT）。'
   }
   if (!info) return `${base} 首次搜索/入库会自动加载 ReID 权重。`
   const backend = info.faiss_available ? (info.faiss_ready ? 'FAISS 就绪' : 'FAISS 可用') : '内存矩阵'
@@ -499,15 +800,15 @@ const colorLabel = (name) => {
   return map[name] || name
 }
 
-/** 后端相似度均为 0~1；卡片与排序以 OSNet 深度分为准 */
+/** 卡片主分：深度相似度（ReID）；详情里另有综合分 */
 const primarySimilarity = (item) => {
   if (item == null) return 0
-  const finalScore = Number(item.similarity)
-  if (Number.isFinite(finalScore)) return finalScore
-  const rerank = Number(item.rerank_similarity)
-  if (Number.isFinite(rerank)) return rerank
   const deep = Number(item.deep_similarity)
   if (Number.isFinite(deep)) return deep
+  const rerank = Number(item.rerank_similarity)
+  if (Number.isFinite(rerank)) return rerank
+  const finalScore = Number(item.similarity)
+  if (Number.isFinite(finalScore)) return finalScore
   return 0
 }
 
@@ -659,7 +960,7 @@ const loadGallery = async () => {
       page: galleryPage.value,
       page_size: galleryPageSize.value,
       device_id: searchForm.deviceId || undefined,
-      days: searchForm.days
+      ...timeRangeParams()
     })
     const data = res.data?.data || {}
     galleryItems.value = data.items || []
@@ -671,22 +972,46 @@ const loadGallery = async () => {
   }
 }
 
+const revokeQueryUrls = (list) => {
+  for (const item of list || []) {
+    if (item?.url) URL.revokeObjectURL(item.url)
+  }
+}
+
 const handleQueryFileChange = (uploadFile) => {
   const raw = uploadFile?.raw
   if (!raw) return
-  queryFile.value = raw
-  queryPreview.value = URL.createObjectURL(raw)
+  if (queryImages.value.length >= QUERY_IMAGE_MAX) {
+    ElMessage.warning(`最多上传 ${QUERY_IMAGE_MAX} 张查询图`)
+    return
+  }
+  queryImages.value = [
+    ...queryImages.value,
+    {
+      id: `q-${Date.now()}-${queryImageSeq++}`,
+      file: raw,
+      url: URL.createObjectURL(raw)
+    }
+  ]
+}
+
+const removeQueryImage = (idx) => {
+  const list = [...queryImages.value]
+  const [removed] = list.splice(idx, 1)
+  if (removed?.url) URL.revokeObjectURL(removed.url)
+  queryImages.value = list
 }
 
 const clearQuery = () => {
-  queryFile.value = null
-  queryPreview.value = ''
-  searchResults.value = []
+  revokeQueryUrls(queryImages.value)
+  queryImages.value = []
+  searchResultsRaw.value = []
   searchMeta.value = null
+  clearResultSelection()
 }
 
 const handleSearch = async () => {
-  if (!queryFile.value) {
+  if (!queryImages.value.length) {
     ElMessage.warning('请先上传查询图片')
     return
   }
@@ -694,29 +1019,36 @@ const handleSearch = async () => {
   activeTab.value = 'search'
   try {
     const formData = new FormData()
-    formData.append('file', queryFile.value)
+    for (const item of queryImages.value) {
+      formData.append('files', item.file)
+    }
+    // 用较低门槛拉全量候选，返回后由匹配分滑块即时筛选
     const res = await searchPersonByImage(formData, {
       top_k: searchForm.topK,
-      min_similarity: searchForm.minSimilarity,
+      min_similarity: 0.35,
       device_id: searchForm.deviceId || undefined,
-      days: searchForm.days
+      ...timeRangeParams()
     })
-    searchResults.value = res.data?.data?.results || []
+    searchResultsRaw.value = res.data?.data?.results || []
+    clearResultSelection()
     searchMeta.value = {
       search_ms: res.data?.data?.search_ms ?? 0,
       scanned: res.data?.data?.scanned ?? 0,
       reranked: res.data?.data?.reranked ?? 0,
       backend: res.data?.data?.backend,
+      query_count: res.data?.data?.query_count ?? queryImages.value.length,
     }
     const needsRebuild = res.data?.data?.needs_rebuild
     const legacySkipped = res.data?.data?.legacy_skipped || 0
-    const suggested = suggestSearchThreshold(searchResults.value)
+    const suggested = suggestSearchThreshold(searchResultsRaw.value)
     if (needsRebuild) {
       ElMessage.warning(`图库中有 ${legacySkipped} 条旧版特征无法匹配，请先点击「重建图库特征」`)
-    } else if (!searchResults.value.length) {
+    } else if (!searchResultsRaw.value.length) {
       ElMessage.info('未找到足够相似的结果，可调低相似度或扩大时间范围')
+    } else if (!filteredSearchResults.value.length) {
+      ElMessage.info('已有候选但低于当前匹配分，可拖低「匹配分≥」查看')
     } else if (suggested && searchForm.minSimilarity < suggested) {
-      ElMessage.info(`首条结果明显领先，建议将匹配分提高到 ${(suggested * 100).toFixed(0)} 以减少误报`)
+      ElMessage.info(`首条结果明显领先，可上调匹配分至约 ${(suggested * 100).toFixed(0)} 减少误报`)
     }
   } catch (error) {
     ElMessage.error(error.response?.data?.detail || '搜索失败')
@@ -798,6 +1130,80 @@ const handleRebuildEmbeddings = async () => {
   }
 }
 
+const stopIndexRebuildPolling = () => {
+  if (indexRebuildPollTimer) {
+    clearInterval(indexRebuildPollTimer)
+    indexRebuildPollTimer = null
+  }
+}
+
+const loadIndexStatus = async () => {
+  try {
+    const res = await getPersonSearchIndexStatus()
+    indexStatus.value = res.data?.data || null
+  } catch {
+    indexStatus.value = null
+  }
+}
+
+const pollIndexRebuildStatus = async () => {
+  try {
+    const res = await getPersonSearchIndexRebuildStatus()
+    const job = res.data?.data || {}
+    indexRebuildJob.value = job
+    if (!job.running) {
+      stopIndexRebuildPolling()
+      indexRebuilding.value = false
+      if (job.error) {
+        ElMessage.error(`检索索引重建失败：${job.error}`)
+      } else if (job.phase === 'done') {
+        ElMessage.success(
+          `检索索引重建完成：${job.shards_rebuilt || 0} 天分片，向量 ${job.vectors || 0}`
+        )
+      }
+      await loadIndexStatus()
+    }
+  } catch (error) {
+    stopIndexRebuildPolling()
+    indexRebuilding.value = false
+    ElMessage.error(error.response?.data?.detail || '获取索引重建进度失败')
+  }
+}
+
+const handleRebuildSearchIndex = async () => {
+  if (indexRebuilding.value || indexRebuildJob.value?.running) {
+    ElMessage.info('检索索引重建进行中')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      '将按轨迹 last_seen 重建近 30 天的按日 FAISS 分片（不重新提特征）。部署后或大批量回填后建议执行一次，之后入库会增量写入。',
+      '重建检索索引',
+      { type: 'info', confirmButtonText: '开始重建', cancelButtonText: '取消' }
+    )
+  } catch {
+    return
+  }
+  indexRebuilding.value = true
+  try {
+    const res = await rebuildPersonSearchIndex(Math.max(selectedRangeDays(), 7))
+    const data = res.data?.data || {}
+    if (data.started === false) {
+      indexRebuildJob.value = data.job || { running: true }
+      ElMessage.warning(data.message || '已有任务进行中')
+    } else {
+      indexRebuildJob.value = data.job || { running: true, phase: 'starting' }
+      ElMessage.success(data.message || '检索索引重建已开始')
+    }
+    stopIndexRebuildPolling()
+    indexRebuildPollTimer = setInterval(pollIndexRebuildStatus, 2000)
+    await pollIndexRebuildStatus()
+  } catch (error) {
+    indexRebuilding.value = false
+    ElMessage.error(error.response?.data?.detail || error.message || '启动索引重建失败')
+  }
+}
+
 const handleBatchIndex = async () => {
   indexing.value = true
   try {
@@ -852,6 +1258,7 @@ onMounted(() => {
   loadDevices()
   Promise.resolve().then(() => {
     loadModelInfo()
+    loadIndexStatus()
     getPersonRebuildEmbeddingsStatus()
       .then((res) => {
         const job = res.data?.data || {}
@@ -863,11 +1270,24 @@ onMounted(() => {
         }
       })
       .catch(() => {})
+    getPersonSearchIndexRebuildStatus()
+      .then((res) => {
+        const job = res.data?.data || {}
+        indexRebuildJob.value = job
+        if (job.running) {
+          indexRebuilding.value = true
+          stopIndexRebuildPolling()
+          indexRebuildPollTimer = setInterval(pollIndexRebuildStatus, 2000)
+        }
+      })
+      .catch(() => {})
   })
 })
 
 onBeforeUnmount(() => {
   stopRebuildPolling()
+  stopIndexRebuildPolling()
+  revokeQueryUrls(queryImages.value)
 })
 </script>
 
@@ -914,14 +1334,22 @@ onBeforeUnmount(() => {
   padding-top: 8px;
 }
 
-.query-upload {
+.query-upload-wrap {
   width: 100%;
   margin-bottom: 16px;
 }
 
+.query-upload {
+  width: 100%;
+}
+
+.query-upload :deep(.el-upload),
 .query-upload :deep(.el-upload-dragger) {
   width: 100%;
-  min-height: 180px;
+}
+
+.query-upload :deep(.el-upload-dragger) {
+  min-height: 140px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -929,17 +1357,55 @@ onBeforeUnmount(() => {
   padding: 12px;
 }
 
-.query-preview {
-  max-width: 100%;
-  max-height: 200px;
-  object-fit: contain;
-  border-radius: 4px;
+.upload-icon {
+  font-size: 36px;
+  color: #409eff;
+  margin-bottom: 6px;
 }
 
-.upload-icon {
-  font-size: 40px;
-  color: #409eff;
-  margin-bottom: 8px;
+.upload-sub {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #909399;
+}
+
+.query-thumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.query-thumb {
+  position: relative;
+  width: 72px;
+  height: 96px;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid #e4e7ed;
+  background: #f5f7fa;
+}
+
+.query-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.query-thumb-remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
 }
 
 .query-form {
@@ -953,15 +1419,74 @@ onBeforeUnmount(() => {
   gap: 12px;
 }
 
-.result-header-left {
+.result-toolbar {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 16px;
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  background: #f7f8fa;
+  border-radius: 8px;
+  flex-wrap: wrap;
 }
 
-.search-meta {
+.result-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.sort-icon-btns {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.toolbar-icon-wrap {
+  display: inline-flex;
+  vertical-align: middle;
+}
+
+.result-toolbar-hint {
   font-size: 12px;
   color: #909399;
+  white-space: nowrap;
+}
+
+.result-toolbar-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.meta-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #fff;
+  border: 1px solid #e4e7ed;
+  font-size: 12px;
+  color: #606266;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+
+.meta-pill--backend {
+  color: #409eff;
+  border-color: #d9ecff;
+  background: #ecf5ff;
+}
+
+.meta-pill--time {
+  color: #67c23a;
+  border-color: #e1f3d8;
+  background: #f0f9eb;
 }
 
 .result-card {
@@ -970,15 +1495,34 @@ onBeforeUnmount(() => {
   overflow: hidden;
   margin-bottom: 12px;
   background: #fff;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.result-card.is-selected {
+  border-color: #409eff;
+  box-shadow: 0 0 0 1px rgba(64, 158, 255, 0.35);
 }
 
 .result-img-wrap {
+  position: relative;
   width: 100%;
   height: 220px;
   background: #f2f3f5;
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.result-check {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 2;
+  height: auto;
+  background: rgba(255, 255, 255, 0.88);
+  border-radius: 4px;
+  padding: 2px 4px;
 }
 
 .result-img-wrap :deep(.el-image) {
